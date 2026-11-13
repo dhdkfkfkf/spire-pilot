@@ -57,6 +57,11 @@ public final class SolverMod implements PostInitializeSubscriber, PostUpdateSubs
         return System.getProperty("user.home") + File.separator + "sts1-engine-solver";
     }
 
+    /** True when the author's debug marker exists; the bug-report bundle records it. */
+    public static boolean debugSurface() {
+        return debugSurface;
+    }
+
     /**
      * Logs the content surface once at startup: mod combat hooks and known mod profiles.
      *

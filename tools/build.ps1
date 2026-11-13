@@ -113,6 +113,12 @@ try {
         "build.pid=$PID"
     )
     Set-Content -Path (Join-Path $classesDir 'sts1solver-build.txt') -Value $stamp -Encoding ascii
+    # The version is read at runtime from ONE place: ModTheSpire.json. A separate generated copy sits
+    # in the jar because many mods ship a root ModTheSpire.json and getResourceAsStream("/ModTheSpire.json")
+    # returns whichever jar the classloader reaches first -- the 1.0.0 report bundle printed another
+    # mod's "5.56.0" for exactly that reason.
+    $mtsVersion = (Get-Content (Join-Path $resDir 'ModTheSpire.json') -Raw | ConvertFrom-Json).version
+    Set-Content -Path (Join-Path $classesDir 'sts1-engine-solver.version') -Value $mtsVersion -Encoding ascii -NoNewline
 
     # ZipArchive writes the entries ourselves: CreateFromDirectory on Windows PowerShell stores
     # backslashes, which the JVM does not treat as a package separator, and the mod then "does not

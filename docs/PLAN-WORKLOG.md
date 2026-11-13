@@ -2501,3 +2501,35 @@ core **476/0**（S1–S187，_tmp/run-core-b129.txt）。jar 1008516 B，sha256 
 - **坑 2（封面）**：预览图只在 `upload` 时通过 `SteamUGC.setItemPreview` 提交，且要求 image.jpg 在工作区根目录存在；上传成功后页面上的尺寸/封面需要刷新或等 Steam 处理，刚上传时显示「文件大小 0.000 B」属正常延迟。
 - **命令**：`cd D:\Steam\steamapps\common\SlayTheSpire; .\jre\bin\java.exe -jar mod-uploader.jar upload -w "D:\mods-workshop\sts1-engine-solver"`（`new` 只在首次建条目时用；Steam 必须登录运行）。
 - **本次结果**：上传成功（`Successfully updated workshop item!`），可见性保持 private，未改用户已编辑的标题「杀戮尖塔1战斗求解器」。
+
+## 2026-11-14 1.0.0 反馈入口：「导出报告」按钮（用户 m03634）
+
+玩家侧反馈原本只能靠「把 solver.log 发我」，路径描述这一关就会劝退。现在面板标题行右侧有一个小按钮，
+点一下把定位问题需要的东西打包成一个 zip，并直接在资源管理器里选中它。
+
+- 位置与几何：`ui/PanelLayout.reportRect` / `hitTestReport`，落在标题行（`headerHeight=64`）右侧，
+  84×22。**没有进 `IDS`**：网格是 2×5，加第 11 个按钮会把整个面板往下顶一行，而 S64 固定断言
+  `IDS` 数组，改网格等于同时改门禁的口径。collapsed 时不响应。
+- 点击：`ui/Panel.update` 先判 report 命中并消费这次点击（`InputHelper.justClickedLeft=false`）再 return，
+  所以标题行点击不可能被读成网格按钮；`ui/Panel.render` 用 `drawButton` 画，标签来自
+  `BugReport.label()`（导出报告 / 打包中… / 已导出 / 导出失败，结果标签 6 秒后复原）。
+- 产物：`sts1solver/diag/BugReport.java`。后台 daemon 线程写包（绝不在渲染线程做 IO），
+  输出到 `%USERPROFILE%\sts1-engine-solver\reports\report-yyyyMMdd-HHmmss.zip`，写完
+  `explorer.exe /select,<zip>` 定位。条目：README.txt / info.txt / state.txt / settings.txt /
+  panel.txt（`Gameplay.lines()`）/ solver.log 尾 2 MB（RandomAccessFile 定位，截断处丢半行）。
+  上限 8 MB，超限抛异常并在面板显示「导出失败」，日志里带原因——不静默。
+- 脱敏：`sanitize` 把 user.home（含正斜杠形式）替换成 `%USERPROFILE%`，再把裸用户名替换成
+  `%USER%`；不打包存档与卡组。
+- 门禁 S254：临时目录里真写一次包，断言六个条目齐全、体积在上限内、没有任何条目含绝对 home 路径、
+  home 已被替换、settings 真被拷贝、版本号属于本项目。
+- 版本号坑（S254 抓到的真 bug）：第一版读 `/ModTheSpire.json`，结果包里打印的是**别的 mod 的
+  5.56.0**——每个 mod 都在 jar 根放同名 manifest，classloader 取到哪个不由我们决定。改成
+  `/sts1-engine-solver.version`，由 `tools/build.ps1` 从本项目的 `resources/ModTheSpire.json`
+  生成（版本仍只有一个来源），S254 增加「版本号属于本项目」的断言。
+- 实测：`tools/build.ps1` → 1,270,132 B / 546 项；`tools/install.ps1` sha256
+  `B5A452E254C4F942582456DAA096821BCAF5D419FC221375C1C8086A1DADEB21`；`-Gates S254` 6/6 PASS。
+- 代价：一次点击是后台线程的一次顺序写（实测 < 1 秒量级，2 MB 日志），零帧开销；内存峰值等于日志
+  尾部大小（≤2 MB）。风险：日志被游戏占用时用只读共享读，失败会在面板显示并在日志记录；回滚只需
+  把标题行按钮与 `diag/BugReport` 去掉，不影响搜索与执行路径。
+- 文档：README 的面板按钮表增加一行；`docs/WORKSHOP-DESCRIPTION.md` 的「问题反馈」已指向这个按钮，
+  并把源码地址填成 https://github.com/zck070718/sts1-engine-solver 。

@@ -52,6 +52,30 @@ public final class PanelLayout {
         return screenHeight - 120.0f * scale;
     }
 
+    /**
+     * The "导出报告" button in the header band (player feedback request, 1.0.0).
+     *
+     * <p>Deliberately NOT a grid entry: the grid is 2 x 5 and a sixth row would push the whole panel
+     * down for a button nobody presses twice. The header band already reserves 64 px of empty space
+     * to the right of the title.
+     */
+    public static float[] reportRect(float screenWidth, float screenHeight, float scale) {
+        float w = 84.0f * scale;
+        float h = 22.0f * scale;
+        return new float[]{x0(screenWidth, scale) + width(scale) - w - 8.0f * scale,
+                y0(screenHeight, scale) - 26.0f * scale, w, h};
+    }
+
+    /** True when the point is on the header's report button; never while collapsed or hidden. */
+    public static boolean hitTestReport(float mx, float my, float screenWidth, float screenHeight,
+                                        float scale, boolean collapsed) {
+        if (collapsed) {
+            return false;
+        }
+        float[] r = reportRect(screenWidth, screenHeight, scale);
+        return inside(mx, my, r[0], r[1], r[2], r[3]);
+    }
+
     /** Title + status rows above the button grid; buttons start below this. */
     public static float headerHeight(float scale) {
         return 64.0f * scale;

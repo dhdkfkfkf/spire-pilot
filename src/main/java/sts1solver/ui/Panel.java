@@ -32,6 +32,9 @@ import sts1solver.util.Log;
 public final class Panel {
 
     private static volatile int hover = -1;
+
+    /** True while the pointer is over the header's 导出报告 button (1.0.0 feedback request). */
+    private static volatile boolean reportHover;
     private static volatile boolean collapsed;
     private static volatile String status = "";
     private static int failures;
@@ -122,9 +125,18 @@ public final class Panel {
             // P2-10: while the overlay is hidden only the "show me again" tab is clickable, so the
             // panel can never become a one-way door that only a hotkey can reopen.
             boolean shown = sts1solver.ui.Hud.visible();
+            // The report button lives in the header band, above the grid: hit-test it first so a
+            // click there can never also be read as a grid button.
+            reportHover = shown && PanelLayout.hitTestReport(mx, my, Settings.WIDTH, Settings.HEIGHT,
+                    scale, collapsed);
             hover = shown
                     ? PanelLayout.hitTest(mx, my, Settings.WIDTH, Settings.HEIGHT, scale, collapsed)
                     : PanelLayout.hitTestHidden(mx, my, Settings.WIDTH, Settings.HEIGHT, scale);
+            if (InputHelper.justClickedLeft && reportHover) {
+                InputHelper.justClickedLeft = false;
+                sts1solver.diag.BugReport.export();
+                return;
+            }
             if (InputHelper.justClickedLeft && hover >= 0) {
                 InputHelper.justClickedLeft = false;
                 activate(shown ? PanelLayout.IDS[hover] : "hide");
@@ -352,6 +364,9 @@ public final class Panel {
                     // Title and status live in the header band; the grid starts below it, so the
                     // two can never collide (reported: 求解器和面板上下太挤).
                     font.draw(sb, "STS1 求解器", x + 12.0f * scale, top - 18.0f * scale);
+                    float[] rr = PanelLayout.reportRect(Settings.WIDTH, Settings.HEIGHT, scale);
+                    drawButton(sb, font, rr[0], rr[1], rr[2], rr[3],
+                            sts1solver.diag.BugReport.label(), reportHover);
                     // B32: the status is already the first plan line (lines()[0]); drawing it in the
                     // header band too was the duplicate text the player asked to remove.
                     for (int i = 0; i < PanelLayout.IDS.length; i++) {

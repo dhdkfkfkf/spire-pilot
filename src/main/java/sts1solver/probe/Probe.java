@@ -12079,6 +12079,101 @@ Probe.core("S134 B84: a select screen opened by a power (Foresight scry) still g
         // rung used to be built from the same root, so the layers the narrow rung had already run were
         // expanded again -- the wasted work the user reported. Widening now keeps the frontier/layer
         // and brings the parked lines back instead of re-deriving them.
+        // 1.0.0 feedback: the panel's 导出报告 button has to produce a bundle that is small, complete
+        // and free of the player's Windows account name -- a bundle that leaks a home path cannot be
+        // attached to a public issue, which is the only reason the button exists.
+        Probe.core("S254 the report bundle packs what an issue needs and names no user", new Runnable() {
+            @Override
+            public void run() {
+                java.io.File tmp = new java.io.File(System.getProperty("java.io.tmpdir"),
+                        "sts1-report-gate-" + System.nanoTime());
+                java.io.File reports = new java.io.File(tmp, "reports");
+                java.io.File zip = null;
+                try {
+                    if (!tmp.mkdirs() && !tmp.isDirectory()) {
+                        Probe.check(false, "S254 temp dir", tmp.getPath());
+                        return;
+                    }
+                    java.io.File settings = new java.io.File(tmp, "settings.txt");
+                    java.io.FileOutputStream sfo = new java.io.FileOutputStream(settings);
+                    sfo.write("autoplayDelayMs=750\n".getBytes("UTF-8"));
+                    sfo.close();
+                    zip = sts1solver.diag.BugReport.writeBundle(reports);
+                    java.util.Map<String, String> entries = new java.util.LinkedHashMap<String, String>();
+                    java.util.zip.ZipFile zf = new java.util.zip.ZipFile(zip);
+                    try {
+                        java.util.Enumeration<? extends java.util.zip.ZipEntry> en = zf.entries();
+                        while (en.hasMoreElements()) {
+                            java.util.zip.ZipEntry e = en.nextElement();
+                            java.io.InputStream in = zf.getInputStream(e);
+                            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+                            byte[] buf = new byte[4096];
+                            int n;
+                            while ((n = in.read(buf)) > 0) {
+                                bo.write(buf, 0, n);
+                            }
+                            in.close();
+                            entries.put(e.getName(), new String(bo.toByteArray(), "UTF-8"));
+                        }
+                    } finally {
+                        zf.close();
+                    }
+                    Log.info("  S254 zip=" + zip.length() + " entries=" + entries.keySet());
+                    Probe.check(entries.containsKey("info.txt") && entries.containsKey("state.txt")
+                                    && entries.containsKey("README.txt")
+                                    && entries.containsKey("settings.txt")
+                                    && entries.containsKey("panel.txt")
+                                    && entries.containsKey("solver.log"),
+                            "S254 the bundle carries info, state, settings, panel and the log",
+                            String.valueOf(entries.keySet()));
+                    Probe.check(zip.length() < sts1solver.diag.BugReport.BUNDLE_LIMIT_BYTES,
+                            "S254 the bundle stays under the attach limit",
+                            zip.length() + " bytes");
+                    String home = System.getProperty("user.home", "");
+                    boolean leaked = false;
+                    for (String text : entries.values()) {
+                        if (home.length() > 2 && text.contains(home)) {
+                            leaked = true;
+                        }
+                    }
+                    Probe.check(!leaked, "S254 no entry carries the absolute home path", "leaked=" + leaked);
+                    Probe.check(entries.get("info.txt").contains("%USERPROFILE%"),
+                            "S254 the home path is replaced, not dropped silently",
+                            entries.get("info.txt"));
+                    Probe.check(entries.get("settings.txt").contains("autoplayDelayMs"),
+                            "S254 the settings file is copied, not stubbed",
+                            entries.get("settings.txt"));
+                    Probe.check(entries.get("info.txt").contains("mod version: 1."),
+                            "S254 the bundle names OUR version, not another mod's manifest",
+                            entries.get("info.txt"));
+                } catch (Throwable t) {
+                    Probe.check(false, "S254 ran without throwing", String.valueOf(t));
+                } finally {
+                    try {
+                        if (zip != null) {
+                            zip.delete();
+                        }
+                        java.io.File[] kids = tmp.listFiles();
+                        if (kids != null) {
+                            for (java.io.File k : kids) {
+                                if (k.isDirectory()) {
+                                    java.io.File[] inner = k.listFiles();
+                                    if (inner != null) {
+                                        for (java.io.File i : inner) {
+                                            i.delete();
+                                        }
+                                    }
+                                }
+                                k.delete();
+                            }
+                        }
+                        tmp.delete();
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+        });
+
         Probe.core("S244 a widening rung continues the same session instead of restarting (B177)",
                 new Runnable(){
             @Override
