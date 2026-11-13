@@ -2545,3 +2545,22 @@ core **476/0**（S1–S187，_tmp/run-core-b129.txt）。jar 1008516 B，sha256 
 - 上传：`java -jar mod-uploader.jar upload -w D:\mods-workshop\sts1-engine-solver` →
   `Successfully updated workshop item!`，exit 0，无 preview 缺失警告。
 - 简介里把「导出问题包」改成「导出报告」，与实际按钮标签一致。
+
+## 2026-11-14 分支选牌拒绝不再刷 WARN（用户 m03871 反馈「日志写错了」）
+
+用户自己打了一局觉得很正常，但导出包里有上百条 `WARN selection refused (not-offered: the screen
+offers [Defend_G, Malaise], the plan chose [催化剂]…)`，看着像 mod 出问题。
+
+- 查清是**正常的分支探索**：搜索把选牌屏一张一张走完（日志里能看到同一分支的
+  `sandbox selection: kind=HAND offered=[…] picked=[…]` 序列，候选集逐张减少），同一分支里下一张被请求的牌
+  已经在更早一步被这个分支拿走，于是拒绝；紧随其后的 `a branch left the screen chain unfinished (answer X);
+  it is not a step outcome, so it is not stored` 就是这个分支被丢弃的正常收尾。行为本身没错——S58 断言
+  「不在候选里的牌必须被拒绝、屏幕保持打开」，改动后仍然通过。
+- 错的是日志级别：`Driver.refused` 一律 WARN，一次搜索会刷出上百行，把真问题埋掉。新增
+  `Driver.refusedInBranch`（仍写 `selectionFailure`，日志改 INFO 且用 `Log.allow("branch-selection-refused", 5000)`
+  限速），只用在 `resolveSelectionByNames`（沙盒重放）的两处；`resolveSelectionLive`（实机）继续 WARN——
+  那里同一句话意味着「计划与游戏真的不一致」。
+- 实测：`-Gates "S58,S254,S102"` → passed=21 failed=0；日志出现
+  `INFO selection refused while walking a branch (not-offered: …)`，WARN 计数 0。
+- 代价：零运行时开销（只是日志级别与一行限速判断），行为完全不变；风险：沙盒侧拒绝不再逐条可见，
+  但 `selectionFailure` 仍保留最后一条，且 Solver 的「分支未走完」行本来就限速。

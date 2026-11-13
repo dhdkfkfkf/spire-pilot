@@ -2101,7 +2101,7 @@ public final class Driver {
         java.util.List<AbstractCard> chosen =
                 picksFor(candidates, cardIds, displayNames, choiceUuids, choicePrints);
         if (chosen.isEmpty() && !askedEmpty) {
-            refused("not-offered", "the screen offers [" + namesOf(candidates) + "], the plan chose ["
+            refusedInBranch("not-offered", "the screen offers [" + namesOf(candidates) + "], the plan chose ["
                     + (displayNames == null || displayNames.isEmpty() ? cardIds : displayNames) + "] ("
                     + selectionState() + ")");
             return false;
@@ -2110,7 +2110,7 @@ public final class Driver {
                 picksFor(candidates, movedIds, null, movedUuids, null);
         boolean askedMove = movedIds != null && !movedIds.trim().isEmpty();
         if (askedMove && moved.isEmpty()) {
-            refused("not-offered", "the plan asks to move [" + movedIds
+            refusedInBranch("not-offered", "the plan asks to move [" + movedIds
                     + "] to the end of the hand, but the screen offers [" + namesOf(candidates) + "]");
             return false;
         }
@@ -2428,6 +2428,25 @@ public final class Driver {
     private static void refused(String kind, String detail) {
         selectionFailure = kind + ": " + detail;
         Log.warn("selection refused (" + selectionFailure + ")");
+    }
+
+    /**
+     * B185 (user m03912): the same refusal, but on the SANDBOX path, where it is the normal end of a
+     * branch rather than a defect.
+     *
+     * <p>The search walks a picker one card at a time: a branch answers "take Catalyst", the next
+     * call in that same branch asks for a card the branch already spent, and the answer is a
+     * not-offered refusal that the caller turns into "branch left the screen chain unfinished" and
+     * discards. That is correct behaviour -- but it was logged as a WARNING per hit, up to hundreds
+     * of lines in one fight, and a reader (this user included) reasonably concluded the mod was
+     * failing on his own run. The live path keeps WARN, because there the same sentence means the
+     * plan and the game really disagree; here it is INFO, throttled to one line per 5 s.
+     */
+    private static void refusedInBranch(String kind, String detail) {
+        selectionFailure = kind + ": " + detail;
+        if (Log.allow("branch-selection-refused", 5000L)) {
+            Log.info("selection refused while walking a branch (" + selectionFailure + ")");
+        }
     }
 
     /**
