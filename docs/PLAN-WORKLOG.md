@@ -2533,3 +2533,15 @@ core **476/0**（S1–S187，_tmp/run-core-b129.txt）。jar 1008516 B，sha256 
   把标题行按钮与 `diag/BugReport` 去掉，不影响搜索与执行路径。
 - 文档：README 的面板按钮表增加一行；`docs/WORKSHOP-DESCRIPTION.md` 的「问题反馈」已指向这个按钮，
   并把源码地址填成 https://github.com/zck070718/sts1-engine-solver 。
+
+## 2026-11-14 创意工坊二次上传（仍是 private）
+
+- 简介换成 `docs/WORKSHOP-DESCRIPTION.md` 的全文，并转成工坊识别的 BBCode（`[h1]`、`[list]`/`[olist]`、
+  `[b]`、`[url=]`）；Markdown 的 `##`、`**` 在工坊页面会原样显示，所以不能直接贴。
+- `config.json` 仍必须 **GBK** 写（上传器用默认字符集读写），先由 Node 写 UTF-8 中间文件再转码；
+  `steamPublishedID=3839053516` 保留，visibility=private 未改。
+- content 换成含「导出报告」按钮的新 jar：1,270,132 B，sha256
+  `B5A452E254C4F942582456DAA096821BCAF5D419FC221375C1C8086A1DADEB21`。
+- 上传：`java -jar mod-uploader.jar upload -w D:\mods-workshop\sts1-engine-solver` →
+  `Successfully updated workshop item!`，exit 0，无 preview 缺失警告。
+- 简介里把「导出问题包」改成「导出报告」，与实际按钮标签一致。
