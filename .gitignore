@@ -1,0 +1,18 @@
+# 构建产物
+build/
+dist/
+mod/*.jar
+*.class
+
+# 本地运行数据与证据（体积大、含本机路径）
+_tmp/
+evidence/
+*.log
+hang-*.txt
+
+# 反编译的游戏类转储（属于游戏本体内容，不进公开仓库）
+research/javap/
+
+# 依赖与工具缓存
+.gradle/
+node_modules/

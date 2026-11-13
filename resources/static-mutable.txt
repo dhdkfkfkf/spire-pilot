@@ -1,0 +1,697 @@
+com.badlogic.gdx.Gdx
+    app                                            Lcom/badlogic/gdx/Application; object
+    audio                                          Lcom/badlogic/gdx/Audio; object
+    files                                          Lcom/badlogic/gdx/Files; object
+    gl                                             Lcom/badlogic/gdx/graphics/GL20; object
+    gl20                                           Lcom/badlogic/gdx/graphics/GL20; object
+    gl30                                           Lcom/badlogic/gdx/graphics/GL30; object
+    graphics                                       Lcom/badlogic/gdx/Graphics; object
+    input                                          Lcom/badlogic/gdx/Input; object
+    net                                            Lcom/badlogic/gdx/Net; object
+com.badlogic.gdx.backends.lwjgl.LwjglApplicationConfiguration
+    <bad#0>                                        iconFileTypes object
+    disableAudio                                   boolean    scalar
+com.badlogic.gdx.backends.lwjgl.LwjglNativesLoader
+    load                                           boolean    scalar
+com.badlogic.gdx.graphics.Cubemap
+    <bad#4>                                        data       object
+    assetManager                                   Lcom/badlogic/gdx/assets/AssetManager; object
+com.badlogic.gdx.graphics.Pixmap
+    blending                                       com.badlogic.gdx.graphics.Pixmap$Blending enum
+com.badlogic.gdx.graphics.Texture
+    assetManager                                   Lcom/badlogic/gdx/assets/AssetManager; object
+com.badlogic.gdx.graphics.TextureArray
+    <bad#2>                                        data       object
+com.badlogic.gdx.graphics.VertexAttributes$ReadonlyIterable
+    <bad#2>                                        iterator1  object
+com.badlogic.gdx.graphics.g2d.ParticleEmitter$GradientColorValue
+    temp                                           [F         object
+com.badlogic.gdx.graphics.g2d.PixmapPacker
+    <bad#0>                                        packStrategy object
+com.badlogic.gdx.graphics.g2d.freetype.FreeType
+    FT_ENCODING_ADOBE_CUSTOM                       int        scalar
+    FT_ENCODING_ADOBE_EXPERT                       int        scalar
+    FT_ENCODING_ADOBE_LATIN_1                      int        scalar
+    FT_ENCODING_ADOBE_STANDARD                     int        scalar
+    FT_ENCODING_APPLE_ROMAN                        int        scalar
+    FT_ENCODING_BIG5                               int        scalar
+    FT_ENCODING_GB2312                             int        scalar
+    FT_ENCODING_JOHAB                              int        scalar
+    FT_ENCODING_MS_SYMBOL                          int        scalar
+    FT_ENCODING_NONE                               int        scalar
+    FT_ENCODING_OLD_LATIN_2                        int        scalar
+    FT_ENCODING_SJIS                               int        scalar
+    FT_ENCODING_UNICODE                            int        scalar
+    FT_ENCODING_WANSUNG                            int        scalar
+    FT_FACE_FLAG_CID_KEYED                         int        scalar
+    FT_FACE_FLAG_EXTERNAL_STREAM                   int        scalar
+    FT_FACE_FLAG_FAST_GLYPHS                       int        scalar
+    FT_FACE_FLAG_FIXED_SIZES                       int        scalar
+    FT_FACE_FLAG_FIXED_WIDTH                       int        scalar
+    FT_FACE_FLAG_GLYPH_NAMES                       int        scalar
+    FT_FACE_FLAG_HINTER                            int        scalar
+    FT_FACE_FLAG_HORIZONTAL                        int        scalar
+    FT_FACE_FLAG_KERNING                           int        scalar
+    FT_FACE_FLAG_MULTIPLE_MASTERS                  int        scalar
+    FT_FACE_FLAG_SCALABLE                          int        scalar
+    FT_FACE_FLAG_SFNT                              int        scalar
+    FT_FACE_FLAG_TRICKY                            int        scalar
+    FT_FACE_FLAG_VERTICAL                          int        scalar
+    FT_KERNING_DEFAULT                             int        scalar
+    FT_KERNING_UNFITTED                            int        scalar
+    FT_KERNING_UNSCALED                            int        scalar
+    FT_LOAD_CROP_BITMAP                            int        scalar
+    FT_LOAD_DEFAULT                                int        scalar
+    FT_LOAD_FORCE_AUTOHINT                         int        scalar
+    FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH            int        scalar
+    FT_LOAD_IGNORE_TRANSFORM                       int        scalar
+    FT_LOAD_LINEAR_DESIGN                          int        scalar
+    FT_LOAD_MONOCHROME                             int        scalar
+    FT_LOAD_NO_AUTOHINT                            int        scalar
+    FT_LOAD_NO_BITMAP                              int        scalar
+    FT_LOAD_NO_HINTING                             int        scalar
+    FT_LOAD_NO_RECURSE                             int        scalar
+    FT_LOAD_NO_SCALE                               int        scalar
+    FT_LOAD_PEDANTIC                               int        scalar
+    FT_LOAD_RENDER                                 int        scalar
+    FT_LOAD_TARGET_LCD                             int        scalar
+    FT_LOAD_TARGET_LCD_V                           int        scalar
+    FT_LOAD_TARGET_LIGHT                           int        scalar
+    FT_LOAD_TARGET_MONO                            int        scalar
+    FT_LOAD_TARGET_NORMAL                          int        scalar
+    FT_LOAD_VERTICAL_LAYOUT                        int        scalar
+    FT_PIXEL_MODE_GRAY                             int        scalar
+    FT_PIXEL_MODE_GRAY2                            int        scalar
+    FT_PIXEL_MODE_GRAY4                            int        scalar
+    FT_PIXEL_MODE_LCD                              int        scalar
+    FT_PIXEL_MODE_LCD_V                            int        scalar
+    FT_PIXEL_MODE_MONO                             int        scalar
+    FT_PIXEL_MODE_NONE                             int        scalar
+    FT_RENDER_MODE_LCD                             int        scalar
+    FT_RENDER_MODE_LCD_V                           int        scalar
+    FT_RENDER_MODE_LIGHT                           int        scalar
+    FT_RENDER_MODE_MAX                             int        scalar
+    FT_RENDER_MODE_MONO                            int        scalar
+    FT_RENDER_MODE_NORMAL                          int        scalar
+    FT_STROKER_LINECAP_BUTT                        int        scalar
+    FT_STROKER_LINECAP_ROUND                       int        scalar
+    FT_STROKER_LINECAP_SQUARE                      int        scalar
+    FT_STROKER_LINEJOIN_BEVEL                      int        scalar
+    FT_STROKER_LINEJOIN_MITER                      int        scalar
+    FT_STROKER_LINEJOIN_MITER_FIXED                int        scalar
+    FT_STROKER_LINEJOIN_MITER_VARIABLE             int        scalar
+    FT_STROKER_LINEJOIN_ROUND                      int        scalar
+    FT_STYLE_FLAG_BOLD                             int        scalar
+    FT_STYLE_FLAG_ITALIC                           int        scalar
+com.badlogic.gdx.graphics.g3d.Material
+    counter                                        int        scalar
+com.badlogic.gdx.graphics.g3d.ModelBatch
+    <bad#2>                                        <bad#0>    object
+com.badlogic.gdx.graphics.g3d.loader.ObjLoader
+    logWarning                                     boolean    scalar
+com.badlogic.gdx.graphics.g3d.model.data.ModelNodeAnimation
+    <bad#1>                                        rotation   object
+com.badlogic.gdx.graphics.g3d.model.data.ModelNodePart
+    <bad#1>                                        uvMapping  object
+com.badlogic.gdx.graphics.g3d.particles.ParallelArray
+    Lcom/badlogic/gdx/graphics/g3d/particles/ParallelArray$Channel; <bad#3>    object
+com.badlogic.gdx.graphics.g3d.particles.ParallelArray$ChannelDescriptor
+    <bad#1>                                        count      object
+com.badlogic.gdx.graphics.g3d.particles.ParticleChannels$ColorInitializer
+    instance                                       Lcom/badlogic/gdx/graphics/g3d/particles/ParticleChannels$ColorInitializer; object
+com.badlogic.gdx.graphics.g3d.particles.ParticleChannels$Rotation2dInitializer
+    instance                                       Lcom/badlogic/gdx/graphics/g3d/particles/ParticleChannels$Rotation2dInitializer; object
+com.badlogic.gdx.graphics.g3d.particles.ParticleChannels$Rotation3dInitializer
+    instance                                       Lcom/badlogic/gdx/graphics/g3d/particles/ParticleChannels$Rotation3dInitializer; object
+com.badlogic.gdx.graphics.g3d.particles.ParticleChannels$ScaleInitializer
+    instance                                       Lcom/badlogic/gdx/graphics/g3d/particles/ParticleChannels$ScaleInitializer; object
+com.badlogic.gdx.graphics.g3d.particles.ParticleChannels$TextureRegionInitializer
+    instance                                       Lcom/badlogic/gdx/graphics/g3d/particles/ParticleChannels$TextureRegionInitializer; object
+com.badlogic.gdx.graphics.g3d.particles.ParticleShader
+    defaultFragmentShader                          String     scalar
+    defaultVertexShader                            String     scalar
+    implementedFlags                               long       scalar
+com.badlogic.gdx.graphics.g3d.particles.ParticleSystem
+    instance                                       Lcom/badlogic/gdx/graphics/g3d/particles/ParticleSystem; object
+com.badlogic.gdx.graphics.g3d.particles.renderers.ParticleControllerRenderer
+    <bad#4>                                        renderData object
+com.badlogic.gdx.graphics.g3d.particles.values.GradientColorValue
+    temp                                           [F         object
+com.badlogic.gdx.graphics.g3d.shaders.DepthShader
+    defaultFragmentShader                          String     scalar
+    defaultVertexShader                            String     scalar
+com.badlogic.gdx.graphics.g3d.utils.ShapeCache
+    <bad#18>                                       renderable object
+com.badlogic.gdx.graphics.g3d.utils.shapebuilders.BaseShapeBuilder
+    <bad#26>                                       matrices4Pool object
+com.badlogic.gdx.graphics.g3d.utils.shapebuilders.RenderableShapeBuilder
+    indices                                        [S         object
+    vertices                                       [F         object
+com.badlogic.gdx.graphics.glutils.ETC1
+    ETC1_RGB8_OES                                  int        scalar
+    PKM_HEADER_SIZE                                int        scalar
+com.badlogic.gdx.graphics.glutils.FileTextureData
+    copyToPOT                                      boolean    scalar
+com.badlogic.gdx.graphics.glutils.MipMapGenerator
+    useHWMipMap                                    boolean    scalar
+com.badlogic.gdx.graphics.profiling.GLProfiler
+    calls                                          int        scalar
+    drawCalls                                      int        scalar
+    listener                                       Lcom/badlogic/gdx/graphics/profiling/GLErrorListener; object
+    shaderSwitches                                 int        scalar
+    textureBindings                                int        scalar
+com.badlogic.gdx.input.RemoteInput
+    DEFAULT_PORT                                   int        scalar
+com.badlogic.gdx.maps.tiled.tiles.AnimatedTiledMapTile
+    lastTiledMapRenderTime                         long       scalar
+com.badlogic.gdx.math.CumulativeDistribution$CumulativeValue
+    <bad#1>                                        frequency  object
+com.badlogic.gdx.math.Intersector
+    best                                           Lcom/badlogic/gdx/math/Vector3; object
+    intersection                                   Lcom/badlogic/gdx/math/Vector3; object
+    tmp                                            Lcom/badlogic/gdx/math/Vector3; object
+    tmp1                                           Lcom/badlogic/gdx/math/Vector3; object
+    tmp2                                           Lcom/badlogic/gdx/math/Vector3; object
+    tmp3                                           Lcom/badlogic/gdx/math/Vector3; object
+    v2tmp                                          Lcom/badlogic/gdx/math/Vector2; object
+com.badlogic.gdx.net.HttpParametersUtils
+    defaultEncoding                                String     scalar
+    nameValueSeparator                             String     scalar
+    parameterSeparator                             String     scalar
+com.badlogic.gdx.net.HttpRequestBuilder
+    baseUrl                                        String     scalar
+    defaultTimeout                                 int        scalar
+    json                                           Lcom/badlogic/gdx/utils/Json; object
+com.badlogic.gdx.net.NetJavaImpl
+    <bad#16>                                       listeners  object
+com.badlogic.gdx.scenes.scene2d.ui.Cell
+    defaults                                       Lcom/badlogic/gdx/scenes/scene2d/ui/Cell; object
+    files                                          Lcom/badlogic/gdx/Files; object
+com.badlogic.gdx.scenes.scene2d.ui.Table$DebugRect
+    <bad#0>                                        color      object
+    pool                                           Lcom/badlogic/gdx/utils/Pool; object
+com.badlogic.gdx.scenes.scene2d.ui.Value
+    maxHeight                                      Lcom/badlogic/gdx/scenes/scene2d/ui/Value; object
+    maxWidth                                       Lcom/badlogic/gdx/scenes/scene2d/ui/Value; object
+    minHeight                                      Lcom/badlogic/gdx/scenes/scene2d/ui/Value; object
+    minWidth                                       Lcom/badlogic/gdx/scenes/scene2d/ui/Value; object
+    prefHeight                                     Lcom/badlogic/gdx/scenes/scene2d/ui/Value; object
+    prefWidth                                      Lcom/badlogic/gdx/scenes/scene2d/ui/Value; object
+com.badlogic.gdx.scenes.scene2d.utils.ClickListener
+    visualPressedDuration                          float      scalar
+com.badlogic.gdx.scenes.scene2d.utils.UIUtils
+    isLinux                                        boolean    scalar
+    isMac                                          boolean    scalar
+    isWindows                                      boolean    scalar
+com.badlogic.gdx.tools.bmfont.BitmapFontWriter
+    format                                         com.badlogic.gdx.tools.bmfont.BitmapFontWriter$OutputFormat enum
+com.badlogic.gdx.tools.flame.EventManager
+    mInstance                                      Lcom/badlogic/gdx/tools/flame/EventManager; object
+com.badlogic.gdx.tools.headers.HeaderFixer
+    filesChanged                                   int        scalar
+    filesScanned                                   int        scalar
+com.badlogic.gdx.tools.hiero.unicodefont.effects.EffectUtil
+    scratchImage                                   Ljava/awt/image/BufferedImage; object
+com.badlogic.gdx.tools.texturepacker.ColorBleedEffect
+    IN_PROCESS                                     int        scalar
+    REALDATA                                       int        scalar
+    TO_PROCESS                                     int        scalar
+    offsets                                        [[I        object
+com.badlogic.gdx.utils.BufferUtils
+    unsafeBuffers                                  Lcom/badlogic/gdx/utils/Array; object
+com.badlogic.gdx.utils.GdxNativesLoader
+    disableNativesLoading                          boolean    scalar
+    nativesLoaded                                  boolean    scalar
+com.badlogic.gdx.utils.IdentityMap$Entry
+    <bad#1>                                        value      object
+com.badlogic.gdx.utils.JsonWriter$OutputType
+    javascriptPattern                              Ljava/util/regex/Pattern; object
+    minimalNamePattern                             Ljava/util/regex/Pattern; object
+    minimalValuePattern                            Ljava/util/regex/Pattern; object
+com.badlogic.gdx.utils.ObjectMap$Entry
+    <bad#1>                                        value      object
+com.badlogic.gdx.utils.Predicate$PredicateIterator
+    iterable                                       Ljava/lang/Iterable<TT;>; object
+com.badlogic.gdx.utils.QuickSelect
+    <bad#2>                                        comp       object
+com.badlogic.gdx.utils.Select
+    instance                                       Lcom/badlogic/gdx/utils/Select; object
+com.badlogic.gdx.utils.SharedLibraryLoader
+    abi                                            String     scalar
+    is64Bit                                        boolean    scalar
+    isARM                                          boolean    scalar
+    isAndroid                                      boolean    scalar
+    isIos                                          boolean    scalar
+    isLinux                                        boolean    scalar
+    isMac                                          boolean    scalar
+    isWindows                                      boolean    scalar
+com.badlogic.gdx.utils.Sort
+    instance                                       Lcom/badlogic/gdx/utils/Sort; object
+com.badlogic.gdx.utils.compression.CRC
+    Table                                          [I         object
+com.codedisaster.steamworks.SteamAPI
+    isNativeAPILoaded                              boolean    scalar
+    isRunning                                      boolean    scalar
+com.esotericsoftware.spine.Animation$CurveTimeline
+    <bad#0>                                        <bad#0>    object
+com.esotericsoftware.spine.AnimationStateData
+    <bad#0>                                        <bad#1>    object
+com.esotericsoftware.spine.BlendMode
+    values                                         [Lcom/esotericsoftware/spine/BlendMode; object
+com.esotericsoftware.spine.attachments.AttachmentType
+    values                                         [Lcom/esotericsoftware/spine/attachments/AttachmentType; object
+com.gikk.twirk.commands.PatternCommandExample
+    PATTERN                                        String     scalar
+com.gikk.twirk.types.cheer.CheerImpl
+    <bad#1>                                        char       scalar
+com.google.gson.internal.JsonReaderInternalAccess
+    INSTANCE                                       Lcom/google/gson/internal/JsonReaderInternalAccess; object
+com.google.gson.internal.bind.ReflectiveTypeAdapterFactory$Adapter
+    <bad#18>                                       boundFields object
+com.jcraft.jogg.Page
+    crc_lookup                                     [I         object
+com.jcraft.jorbis.Drft
+    hsqt2                                          float      scalar
+    ntryh                                          [I         object
+    sqrt2                                          float      scalar
+    taui                                           float      scalar
+    taur                                           float      scalar
+    tpi                                            float      scalar
+com.jcraft.jorbis.FuncFloor
+    floor_P                                        [Lcom/jcraft/jorbis/FuncFloor; object
+com.jcraft.jorbis.FuncMapping
+    mapping_P                                      [Lcom/jcraft/jorbis/FuncMapping; object
+com.jcraft.jorbis.FuncResidue
+    residue_P                                      [Lcom/jcraft/jorbis/FuncResidue; object
+com.jcraft.jorbis.FuncTime
+    time_P                                         [Lcom/jcraft/jorbis/FuncTime; object
+com.jcraft.jorbis.Mapping0
+    seq                                            int        scalar
+com.jcraft.jorbis.Residue0
+    _01inverse_partword                            [[[I       object
+    _2inverse_partword                             [[I        object
+com.megacrit.cardcrawl.actions.common.DiscardAction
+    numDiscarded                                   int        scalar
+com.megacrit.cardcrawl.actions.common.ExhaustAction
+    numExhausted                                   int        scalar
+com.megacrit.cardcrawl.actions.common.PummelDamageAction
+    <bad#26>                                       POST_ATTACK_WAIT_DUR object
+com.megacrit.cardcrawl.actions.common.PutOnBottomOfDeckAction
+    numPlaced                                      int        scalar
+com.megacrit.cardcrawl.actions.common.PutOnDeckAction
+    numPlaced                                      int        scalar
+com.megacrit.cardcrawl.actions.defect.ScrapeAction
+    scrapedCards                                   Ljava/util/ArrayList; object
+com.megacrit.cardcrawl.actions.unique.CodexAction
+    numPlaced                                      int        scalar
+com.megacrit.cardcrawl.actions.unique.NightmareAction
+    numDiscarded                                   int        scalar
+com.megacrit.cardcrawl.actions.watcher.SwipeAction
+    <bad#2>                                        skipWait   object
+com.megacrit.cardcrawl.characters.CharacterManager
+    masterCharacterList                            Ljava/util/ArrayList; object
+com.megacrit.cardcrawl.core.CardCrawlGame
+    MUTE_IF_BG                                     boolean    scalar
+    TRUE_VERSION_NUM                               String     scalar
+    VERSION_NUM                                    String     scalar
+    alias                                          String     scalar
+    cancelButton                                   Lcom/megacrit/cardcrawl/ui/buttons/CancelButton; object
+    cardPopup                                      Lcom/megacrit/cardcrawl/screens/SingleCardViewPopup; object
+    cardsPurged                                    int        scalar
+    champion                                       int        scalar
+    characterManager                               Lcom/megacrit/cardcrawl/characters/CharacterManager; object
+    cheater                                        boolean    scalar
+    chosenCharacter                                com.megacrit.cardcrawl.characters.AbstractPlayer$PlayerClass enum
+    clientUtils                                    Lcom/codedisaster/steamworks/SteamUtils; object
+    combo                                          boolean    scalar
+    cursor                                         Lcom/megacrit/cardcrawl/core/GameCursor; object
+    debugRenderer                                  Lcom/esotericsoftware/spine/SkeletonRendererDebug; object
+    displayVersion                                 boolean    scalar
+    dungeon                                        Lcom/megacrit/cardcrawl/dungeons/AbstractDungeon; object
+    dungeonTransitionScreen                        Lcom/megacrit/cardcrawl/screens/DungeonTransitionScreen; object
+    elites1Slain                                   int        scalar
+    elites2Slain                                   int        scalar
+    elites3Slain                                   int        scalar
+    elitesModdedSlain                              int        scalar
+    fadeIn                                         boolean    scalar
+    goldGained                                     int        scalar
+    isPopupOpen                                    boolean    scalar
+    languagePack                                   Lcom/megacrit/cardcrawl/localization/LocalizedStrings; object
+    loadingSave                                    boolean    scalar
+    mainMenuScreen                                 Lcom/megacrit/cardcrawl/screens/mainMenu/MainMenuScreen; object
+    metricData                                     Lcom/megacrit/cardcrawl/metrics/MetricData; object
+    mode                                           com.megacrit.cardcrawl.core.CardCrawlGame$GameMode enum
+    monstersSlain                                  int        scalar
+    music                                          Lcom/megacrit/cardcrawl/audio/MusicMaster; object
+    mysteryMachine                                 int        scalar
+    nextDungeon                                    String     scalar
+    overkill                                       boolean    scalar
+    perfect                                        int        scalar
+    playCreditsBgm                                 boolean    scalar
+    playerName                                     String     scalar
+    playerPref                                     Lcom/megacrit/cardcrawl/helpers/Prefs; object
+    playtime                                       float      scalar
+    popupMX                                        int        scalar
+    popupMY                                        int        scalar
+    potionsBought                                  int        scalar
+    preferenceDir                                  String     scalar
+    psb                                            Lcom/badlogic/gdx/graphics/g2d/PolygonSpriteBatch; object
+    publisherIntegration                           Lcom/megacrit/cardcrawl/integrations/PublisherIntegration; object
+    queueCredits                                   boolean    scalar
+    relicPopup                                     Lcom/megacrit/cardcrawl/screens/SingleRelicViewPopup; object
+    sControllerScanner                             Ljava/util/Scanner; object
+    sInputDetectThread                             Ljava/lang/Thread; object
+    saveFile                                       Lcom/megacrit/cardcrawl/saveAndContinue/SaveFile; object
+    saveSlot                                       int        scalar
+    saveSlotPref                                   Lcom/megacrit/cardcrawl/helpers/Prefs; object
+    screenColor                                    Lcom/badlogic/gdx/graphics/Color; object
+    screenShake                                    Lcom/megacrit/cardcrawl/helpers/ScreenShake; object
+    screenTime                                     float      scalar
+    screenTimer                                    float      scalar
+    sound                                          Lcom/megacrit/cardcrawl/audio/SoundMaster; object
+    splashScreen                                   Lcom/megacrit/cardcrawl/screens/splash/SplashScreen; object
+    startOver                                      boolean    scalar
+    steelSeries                                    Lcom/megacrit/cardcrawl/integrations/SteelSeries; object
+    stopClock                                      boolean    scalar
+    tips                                           Lcom/megacrit/cardcrawl/helpers/GameTips; object
+    trial                                          Lcom/megacrit/cardcrawl/trials/AbstractTrial; object
+    viewport                                       Lcom/badlogic/gdx/utils/viewport/FitViewport; object
+com.megacrit.cardcrawl.core.TestGame
+    viewport                                       Lcom/badlogic/gdx/utils/viewport/FitViewport; object
+com.megacrit.cardcrawl.cutscenes.NeowEye
+    eyeImg                                         Lcom/badlogic/gdx/graphics/Texture; object
+    lid1                                           Lcom/badlogic/gdx/graphics/Texture; object
+    lid2                                           Lcom/badlogic/gdx/graphics/Texture; object
+    lid3                                           Lcom/badlogic/gdx/graphics/Texture; object
+    lid4                                           Lcom/badlogic/gdx/graphics/Texture; object
+    lid5                                           Lcom/badlogic/gdx/graphics/Texture; object
+    lid6                                           Lcom/badlogic/gdx/graphics/Texture; object
+com.megacrit.cardcrawl.events.AbstractEvent
+    DESCRIPTIONS                                   [Ljava/lang/String; object
+    NAME                                           String     scalar
+    OPTIONS                                        [Ljava/lang/String; object
+    type                                           com.megacrit.cardcrawl.events.AbstractEvent$EventType enum
+com.megacrit.cardcrawl.helpers.AsyncSaver
+    saveThread                                     Ljava/lang/Thread; object
+com.megacrit.cardcrawl.helpers.BlightHelper
+    blights                                        Ljava/util/ArrayList; object
+com.megacrit.cardcrawl.helpers.DrawMaster
+    drawList                                       Ljava/util/List; object
+com.megacrit.cardcrawl.helpers.GameDictionary
+    <bad#25>                                       parentWord object
+com.megacrit.cardcrawl.helpers.ShaderHelper
+    blurShader                                     Lcom/badlogic/gdx/graphics/glutils/ShaderProgram; object
+    gsShader                                       Lcom/badlogic/gdx/graphics/glutils/ShaderProgram; object
+    outlineShader                                  Lcom/badlogic/gdx/graphics/glutils/ShaderProgram; object
+    rsShader                                       Lcom/badlogic/gdx/graphics/glutils/ShaderProgram; object
+    waterShader                                    Lcom/badlogic/gdx/graphics/glutils/ShaderProgram; object
+    wsShader                                       Lcom/badlogic/gdx/graphics/glutils/ShaderProgram; object
+com.megacrit.cardcrawl.helpers.TrialHelper
+    trialKeysMap                                   Ljava/util/HashMap; object
+com.megacrit.cardcrawl.helpers.input.DevInputActionSet
+    decreaseOrbCount                               Lcom/megacrit/cardcrawl/helpers/input/InputAction; object
+    deleteSteamCloud                               Lcom/megacrit/cardcrawl/helpers/input/InputAction; object
+    drawCard                                       Lcom/megacrit/cardcrawl/helpers/input/InputAction; object
+    gainGold                                       Lcom/megacrit/cardcrawl/helpers/input/InputAction; object
+    hideCards                                      Lcom/megacrit/cardcrawl/helpers/input/InputAction; object
+    hideCombatInfo                                 Lcom/megacrit/cardcrawl/helpers/input/InputAction; object
+    hideCombatLowUI                                Lcom/megacrit/cardcrawl/helpers/input/InputAction; object
+    hideEndTurnButton                              Lcom/megacrit/cardcrawl/helpers/input/InputAction; object
+    hidePopUps                                     Lcom/megacrit/cardcrawl/helpers/input/InputAction; object
+    hideRelics                                     Lcom/megacrit/cardcrawl/helpers/input/InputAction; object
+    hideTopBar                                     Lcom/megacrit/cardcrawl/helpers/input/InputAction; object
+    increaseOrbCount                               Lcom/megacrit/cardcrawl/helpers/input/InputAction; object
+    toggleCursor                                   Lcom/megacrit/cardcrawl/helpers/input/InputAction; object
+    toggleDebug                                    Lcom/megacrit/cardcrawl/helpers/input/InputAction; object
+    toggleInfo                                     Lcom/megacrit/cardcrawl/helpers/input/InputAction; object
+    toggleVersion                                  Lcom/megacrit/cardcrawl/helpers/input/InputAction; object
+    uploadData                                     Lcom/megacrit/cardcrawl/helpers/input/InputAction; object
+com.megacrit.cardcrawl.helpers.input.InputHelper
+    ignoreOneCycle                                 boolean    scalar
+    isMouseDown                                    boolean    scalar
+    isMouseDown_R                                  boolean    scalar
+    isPrevMouseDown                                boolean    scalar
+    isPrevMouseDown_R                              boolean    scalar
+    justClickedLeft                                boolean    scalar
+    justClickedRight                               boolean    scalar
+    justReleasedClickLeft                          boolean    scalar
+    justReleasedClickRight                         boolean    scalar
+    mX                                             int        scalar
+    mY                                             int        scalar
+    pressedEscape                                  boolean    scalar
+    processor                                      Lcom/megacrit/cardcrawl/helpers/input/ScrollInputProcessor; object
+    scrollY                                        int        scalar
+    scrolledDown                                   boolean    scalar
+    scrolledUp                                     boolean    scalar
+    touchDown                                      boolean    scalar
+    touchUp                                        boolean    scalar
+com.megacrit.cardcrawl.helpers.input.ScrollInputProcessor
+    lastPressed                                    String     scalar
+    lastPressed2                                   String     scalar
+    lastPressedSwitch                              boolean    scalar
+com.megacrit.cardcrawl.helpers.steamInput.SteamInputActionSet
+    altDown                                        Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    altLeft                                        Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    altRight                                       Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    altUp                                          Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    cancel                                         Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    controller                                     Lcom/codedisaster/steamworks/SteamController; object
+    discardPile                                    Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    down                                           Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    drawPile                                       Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    inspectDown                                    Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    inspectLeft                                    Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    inspectRight                                   Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    inspectUp                                      Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    left                                           Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    map                                            Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    pageLeftViewDeck                               Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    pageRightViewExhaust                           Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    peek                                           Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    proceed                                        Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    right                                          Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    select                                         Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    settings                                       Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    topPanel                                       Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+    up                                             Lcom/megacrit/cardcrawl/helpers/steamInput/SteamInputAction; object
+com.megacrit.cardcrawl.integrations.steam.SteamIntegration
+    TEXT                                           [Ljava/lang/String; object
+    accountId                                      int        scalar
+    endIndex                                       int        scalar
+    gettingTime                                    boolean    scalar
+    isUploadingScore                               boolean    scalar
+    lbHandle                                       Lcom/codedisaster/steamworks/SteamLeaderboardHandle; object
+    lbScore                                        int        scalar
+    retrieveGlobal                                 boolean    scalar
+    startIndex                                     int        scalar
+    statsToUpload                                  Ljava/util/Queue; object
+    steamApps                                      Lcom/codedisaster/steamworks/SteamApps; object
+    steamFriends                                   Lcom/codedisaster/steamworks/SteamFriends; object
+    steamStats                                     Lcom/codedisaster/steamworks/SteamUserStats; object
+    steamUser                                      Lcom/codedisaster/steamworks/SteamUser; object
+    task                                           com.megacrit.cardcrawl.integrations.steam.SteamIntegration$LeaderboardTask enum
+    thread                                         Ljava/lang/Thread; object
+com.megacrit.cardcrawl.map.DungeonMap
+    blend                                          Lcom/badlogic/gdx/graphics/Texture; object
+    boss                                           Lcom/badlogic/gdx/graphics/Texture; object
+    bossOutline                                    Lcom/badlogic/gdx/graphics/Texture; object
+    bot                                            Lcom/badlogic/gdx/graphics/Texture; object
+    mapOffsetY                                     float      scalar
+    mid                                            Lcom/badlogic/gdx/graphics/Texture; object
+    top                                            Lcom/badlogic/gdx/graphics/Texture; object
+com.megacrit.cardcrawl.powers.AngerPower
+    <bad#2>                                        <bad#0>    object
+com.megacrit.cardcrawl.powers.EnvenomPower
+    <bad#2>                                        <bad#0>    object
+com.megacrit.cardcrawl.powers.ForcefieldPower
+    <bad#1>                                        char       scalar
+com.megacrit.cardcrawl.powers.HeatsinkPower
+    <bad#0>                                        <bad#18>   object
+com.megacrit.cardcrawl.powers.IntangiblePlayerPower
+    <bad#0>                                        <bad#10>   object
+    <bad#1>                                        <bad#0>    object
+com.megacrit.cardcrawl.powers.StrengthPower
+    <bad#1>                                        <bad#0>    object
+com.megacrit.cardcrawl.powers.WraithFormPower
+    <bad#2>                                        <bad#0>    object
+com.megacrit.cardcrawl.powers.deprecated.DEPRECATEDMasteryPower
+    <bad#2>                                        <bad#0>    object
+com.megacrit.cardcrawl.relics.QuestionCard
+    getUpdatedDescription                          int        scalar
+com.megacrit.cardcrawl.rooms.RestRoom
+    lastFireSoundId                                long       scalar
+com.megacrit.cardcrawl.rooms.TreasureRoomBoss
+    <bad#1>                                        choseRelic object
+com.megacrit.cardcrawl.screens.CharSelectInfo
+    <bad#1>                                        deck       object
+com.megacrit.cardcrawl.screens.compendium.CardLibSortHeader
+    img                                            Lcom/badlogic/gdx/graphics/Texture; object
+com.megacrit.cardcrawl.screens.compendium.CardLibraryScreen
+    drawStartX                                     float      scalar
+    drawStartY                                     float      scalar
+    padX                                           float      scalar
+    padY                                           float      scalar
+com.megacrit.cardcrawl.screens.custom.CustomMod
+    line_spacing                                   float      scalar
+    offset_x                                       float      scalar
+    text_max_width                                 float      scalar
+com.megacrit.cardcrawl.screens.mainMenu.EarlyAccessPopup
+    img                                            Lcom/badlogic/gdx/graphics/Texture; object
+    isUp                                           boolean    scalar
+com.megacrit.cardcrawl.screens.mainMenu.MenuButton
+    highlightImg                                   Lcom/badlogic/gdx/graphics/Texture; object
+com.megacrit.cardcrawl.screens.mainMenu.PatchNotesScreen
+    text                                           String     scalar
+com.megacrit.cardcrawl.screens.mainMenu.SaveSlot
+    uiColor                                        Lcom/badlogic/gdx/graphics/Color; object
+com.megacrit.cardcrawl.screens.stats.StatsScreen
+    achievements                                   Lcom/megacrit/cardcrawl/screens/stats/AchievementGrid; object
+    all                                            Lcom/megacrit/cardcrawl/screens/stats/CharStat; object
+    atlas                                          Lcom/badlogic/gdx/graphics/g2d/TextureAtlas; object
+com.megacrit.cardcrawl.shop.OnSaleTag
+    img                                            Lcom/badlogic/gdx/graphics/Texture; object
+com.megacrit.cardcrawl.ui.buttons.PeekButton
+    isPeeking                                      boolean    scalar
+com.megacrit.cardcrawl.vfx.CollectorStakeEffect
+    img                                            Lcom/badlogic/gdx/graphics/g2d/TextureAtlas$AtlasRegion; object
+com.megacrit.cardcrawl.vfx.DebuffParticleEffect
+    IMG_NUM                                        int        scalar
+com.megacrit.cardcrawl.vfx.ExhaustPileParticle
+    img                                            Lcom/badlogic/gdx/graphics/g2d/TextureAtlas$AtlasRegion; object
+com.megacrit.cardcrawl.vfx.FastSmokeParticle
+    img                                            Lcom/badlogic/gdx/graphics/g2d/TextureAtlas$AtlasRegion; object
+com.megacrit.cardcrawl.vfx.GlowyFireEyesEffect
+    <bad#2>                                        flippedX   object
+com.megacrit.cardcrawl.vfx.MapCircleEffect
+    img                                            Lcom/badlogic/gdx/graphics/Texture; object
+com.megacrit.cardcrawl.vfx.StaffFireEffect
+    this                                           Lcom/megacrit/cardcrawl/vfx/StaffFireEffect; object
+com.megacrit.cardcrawl.vfx.combat.AdditiveSlashImpactEffect
+    img                                            Lcom/badlogic/gdx/graphics/g2d/TextureAtlas$AtlasRegion; object
+com.megacrit.cardcrawl.vfx.combat.BiteEffect
+    bot                                            Lcom/badlogic/gdx/graphics/g2d/TextureAtlas$AtlasRegion; object
+    top                                            Lcom/badlogic/gdx/graphics/g2d/TextureAtlas$AtlasRegion; object
+com.megacrit.cardcrawl.vfx.combat.EmptyStanceParticleEffect
+    img                                            Lcom/badlogic/gdx/graphics/g2d/TextureAtlas$AtlasRegion; object
+com.megacrit.cardcrawl.vfx.combat.FastingEffect
+    img                                            Lcom/badlogic/gdx/graphics/g2d/TextureAtlas$AtlasRegion; object
+com.megacrit.cardcrawl.vfx.combat.HealPanelEffect
+    img                                            Lcom/badlogic/gdx/graphics/Texture; object
+com.megacrit.cardcrawl.vfx.combat.RipAndTearEffect
+    flipped                                        boolean    scalar
+com.megacrit.cardcrawl.vfx.combat.TimeWarpTurnEndEffect
+    img                                            Lcom/badlogic/gdx/graphics/g2d/TextureAtlas$AtlasRegion; object
+com.megacrit.cardcrawl.vfx.combat.ViceCrushEffect
+    img                                            Lcom/badlogic/gdx/graphics/g2d/TextureAtlas$AtlasRegion; object
+com.megacrit.cardcrawl.vfx.scene.DefectVictoryEyesEffect
+    img                                            Lcom/badlogic/gdx/graphics/Texture; object
+com.megacrit.cardcrawl.vfx.scene.EventBgParticle
+    img                                            Lcom/badlogic/gdx/graphics/g2d/TextureAtlas$AtlasRegion; object
+    img2                                           Lcom/badlogic/gdx/graphics/g2d/TextureAtlas$AtlasRegion; object
+com.megacrit.cardcrawl.vfx.scene.LightFlareLEffect
+    imgs                                           [Lcom/badlogic/gdx/graphics/g2d/TextureAtlas$AtlasRegion; object
+    renderGreen                                    boolean    scalar
+com.megacrit.cardcrawl.vfx.scene.LightFlareMEffect
+    imgs                                           [Lcom/badlogic/gdx/graphics/g2d/TextureAtlas$AtlasRegion; object
+    renderGreen                                    boolean    scalar
+com.megacrit.cardcrawl.vfx.scene.LightFlareSEffect
+    imgs                                           [Lcom/badlogic/gdx/graphics/g2d/TextureAtlas$AtlasRegion; object
+    renderGreen                                    boolean    scalar
+com.megacrit.cardcrawl.vfx.scene.TorchParticleLEffect
+    renderGreen                                    boolean    scalar
+com.megacrit.cardcrawl.vfx.scene.TorchParticleMEffect
+    renderGreen                                    boolean    scalar
+com.megacrit.cardcrawl.vfx.scene.TorchParticleSEffect
+    renderGreen                                    boolean    scalar
+com.megacrit.cardcrawl.vfx.scene.TorchParticleXLEffect
+    imgs                                           [Lcom/badlogic/gdx/graphics/g2d/TextureAtlas$AtlasRegion; object
+    renderGreen                                    boolean    scalar
+com.megacrit.cardcrawl.vfx.scene.WatcherVictoryEffect
+    img                                            Lcom/badlogic/gdx/graphics/g2d/TextureAtlas$AtlasRegion; object
+com.megacrit.cardcrawl.vfx.stance.StanceAuraEffect
+    switcher                                       boolean    scalar
+com.sun.jna.DefaultTypeMapper
+    <bad#2>                                        fromNativeConverters object
+com.sun.jna.DefaultTypeMapper$Entry
+    <bad#1>                                        converter  object
+com.sun.jna.NativeLong
+    unsigned                                       short      scalar
+com.sun.jna.StringArray
+    <bad#2>                                        original   object
+com.sun.jna.Structure$FFIType$FFITypes
+    ffi_type_double                                Lcom/sun/jna/Pointer; object
+    ffi_type_float                                 Lcom/sun/jna/Pointer; object
+    ffi_type_longdouble                            Lcom/sun/jna/Pointer; object
+    ffi_type_pointer                               Lcom/sun/jna/Pointer; object
+    ffi_type_sint16                                Lcom/sun/jna/Pointer; object
+    ffi_type_sint32                                Lcom/sun/jna/Pointer; object
+    ffi_type_sint64                                Lcom/sun/jna/Pointer; object
+    ffi_type_sint8                                 Lcom/sun/jna/Pointer; object
+    ffi_type_uint16                                Lcom/sun/jna/Pointer; object
+    ffi_type_uint32                                Lcom/sun/jna/Pointer; object
+    ffi_type_uint64                                Lcom/sun/jna/Pointer; object
+    ffi_type_uint8                                 Lcom/sun/jna/Pointer; object
+    ffi_type_void                                  Lcom/sun/jna/Pointer; object
+javazoom.jl.decoder.Crc16
+    polynomial                                     short      scalar
+net.java.games.input.AWTKeyboard
+    class$java$awt$event$KeyEvent                  Ljava/lang/Class; object
+net.java.games.input.ControllerEnvironment
+    class$net$java$games$input$ControllerEnvironment Ljava/lang/Class; object
+    defaultEnvironment                             Lnet/java/games/input/ControllerEnvironment; object
+net.java.games.input.DataQueue
+    class$net$java$games$input$DataQueue           Ljava/lang/Class; object
+net.java.games.input.DefaultControllerEnvironment
+    class$net$java$games$input$ControllerEnvironment Ljava/lang/Class; object
+    class$net$java$games$input$DefaultControllerEnvironment Ljava/lang/Class; object
+    libPath                                        String     scalar
+    log                                            Ljava/util/logging/Logger; object
+net.java.games.input.DirectInputEnvironmentPlugin
+    supported                                      boolean    scalar
+net.java.games.input.LinuxEventComponent
+    class$net$java$games$input$LinuxEventComponent Ljava/lang/Class; object
+net.java.games.input.LinuxEventDevice
+    class$net$java$games$input$Component$Identifier$Axis Ljava/lang/Class; object
+    class$net$java$games$input$Component$Identifier$Key Ljava/lang/Class; object
+net.java.games.input.LinuxNativeTypesMap
+    INSTANCE                                       Lnet/java/games/input/LinuxNativeTypesMap; object
+    class$net$java$games$input$LinuxNativeTypesMap Ljava/lang/Class; object
+    log                                            Ljava/util/logging/Logger; object
+net.java.games.input.OSXEnvironmentPlugin
+    supported                                      boolean    scalar
+net.java.games.input.PluginClassLoader
+    class$net$java$games$input$PluginClassLoader   Ljava/lang/Class; object
+    pluginDirectory                                String     scalar
+net.java.games.input.RawInputEnvironmentPlugin
+    supported                                      boolean    scalar
+net.java.games.input.RawKeyboard
+    class$net$java$games$input$RawIdentifierMap    Ljava/lang/Class; object
+net.java.games.input.UsagePage
+    class$net$java$games$input$ButtonUsage         Ljava/lang/Class; object
+    class$net$java$games$input$GenericDesktopUsage Ljava/lang/Class; object
+    class$net$java$games$input$KeyboardUsage       Ljava/lang/Class; object
+net.java.games.input.WinTabEnvironmentPlugin
+    supported                                      boolean    scalar
+org.apache.commons.codec.language.bm.Lang$LangRule
+    <init>                                         pattern    object
+org.apache.commons.codec.net.RFC1522Codec
+    <bad#28>                                       POSTFIX    object
+org.apache.commons.net.chargen.CharGenTCPClient
+    ()Ljava/io/InputStream;                        NETSTAT_PORT object
+    <bad#2>                                        <bad#1>    object
+org.apache.commons.net.ftp.parser.NetwareFTPEntryParser
+    <bad#4>                                        <bad#10>   object
+org.apache.commons.net.ftp.parser.OS400FTPEntryParser
+    <bad#26>                                       REGEX      object
+org.apache.commons.net.io.CopyStreamException
+    this                                           totalBytesTransferred object
+org.apache.commons.net.whois.WhoisClient
+    <bad#25>                                       double     scalar
+org.apache.logging.log4j.core.AbstractLogEvent
+    isIncludeLocation                              instant    object
+org.apache.logging.log4j.core.DefaultLoggerContextAccessor
+    INSTANCE                                       Lorg/apache/logging/log4j/core/DefaultLoggerContextAccessor; object
+org.apache.logging.log4j.core.appender.AbstractAppender
+    <bad#2>                                        handler    object
+org.apache.logging.log4j.core.appender.OutputStreamAppender
+    factory                                        Lorg/apache/logging/log4j/core/appender/OutputStreamAppender$OutputStreamManagerFactory; object
