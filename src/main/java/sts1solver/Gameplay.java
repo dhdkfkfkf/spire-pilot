@@ -118,6 +118,14 @@ public final class Gameplay {
      * consuming the whole answer on the first screen.
      */
     private static int pendingChoiceAt;
+    /**
+     * B190 (user m01149): how many screens the pending step's plan answers, from
+     * {@code Action.screenKinds}. {@link #pendingChoice} alone cannot say it -- an answer of
+     * "nothing on one screen" and "no screen at all" both split to zero segments.
+     */
+    private static int pendingScreens;
+    /** B190: one screen kind per answered screen, '|' separated like {@link #pendingChoice}. */
+    private static String pendingChoiceKinds = "";
     /** Last "a screen is open and we have no answer" signature, logged once (m16202-5). */
     private static String latentLogged = "";
     /** Last unanswerable card-screen signature (B71), logged once per screen+step. */
@@ -2693,8 +2701,11 @@ public final class Gameplay {
         // m16202-5: remember what this step expects from a screen. Some cards and potions queue an
         // action that opens the screen a frame or two later; the window keeps that answer available
         // even after this step's own pending has been resolved.
-        if (step != null && step.action != null && step.action.choice != null
-                && !step.action.choice.isEmpty()) {
+        // B190 (user m01149): a step whose plan answered a screen with NOTHING still has to keep
+        // that answer alive -- Action.screenKinds says a screen was answered even when choice is "".
+        if (step != null && step.action != null
+                && ((step.action.choice != null && !step.action.choice.isEmpty())
+                    || Action.chainCount(step.action.screenKinds) > 0)) {
             Gameplay.planPendingChoice(step.action);
         }
         try {
@@ -3205,7 +3216,7 @@ public final class Gameplay {
     }
 
     private static int choiceScreenCount() {
-        return choiceSegments(pendingChoice).length;
+        return Math.max(choiceSegments(pendingChoice).length, pendingScreens);
     }
 
     /**
@@ -3215,21 +3226,32 @@ public final class Gameplay {
      * caller can retry inside its settle window.
      */
     private static boolean answerNextScreen() {
-        String[] choices = choiceSegments(pendingChoice);
-        if (choices.length == 0) {
+        int screens = Gameplay.choiceScreenCount();
+        if (screens == 0) {
             return false;
         }
+        String[] choices = choiceSegments(pendingChoice);
+        String[] kinds = choiceSegments(pendingChoiceKinds);
         String[] displays = choiceSegments(pendingChoiceDisplay);
         String[] uuids = choiceSegments(pendingChoiceUuids);
         String[] prints = choiceSegments(pendingChoicePrints);
         String[] moved = choiceSegments(pendingChoiceMoved);
         String[] movedUuids = choiceSegments(pendingChoiceMovedUuids);
-        int at = Math.min(pendingChoiceAt, choices.length - 1);
-        boolean ok = Driver.resolveSelectionLive(choices[at], segmentAt(displays, at),
-                segmentAt(uuids, at), segmentAt(prints, at), segmentAt(moved, at),
-                segmentAt(movedUuids, at));
+        int at = Math.min(pendingChoiceAt, screens - 1);
+        String ids = segmentAt(choices, at);
+        boolean ok;
+        if (ids.trim().isEmpty() && !segmentAt(kinds, at).isEmpty()) {
+            // B190 (user m01149): the plan answered this screen with nothing -- pick nothing and
+            // press 确定. Driver refuses it unless the picker itself allows zero picks; it never
+            // guesses a card instead.
+            ok = Driver.resolveSelectionLiveEmpty(segmentAt(kinds, at));
+        } else {
+            ok = Driver.resolveSelectionLive(ids, segmentAt(displays, at),
+                    segmentAt(uuids, at), segmentAt(prints, at), segmentAt(moved, at),
+                    segmentAt(movedUuids, at));
+        }
         if (ok) {
-            if (pendingChoiceAt + 1 < choices.length) {
+            if (pendingChoiceAt + 1 < screens) {
                 pendingChoiceAt++;
                 // The next screen of the same action opens its own frames later; the answer stays
                 // alive (B158: no expiry clock) so it is still there when it does.
@@ -3253,6 +3275,10 @@ public final class Gameplay {
         pendingChoicePrints = action.choicePrints == null ? "" : action.choicePrints;
         pendingChoiceMoved = action.moved == null ? "" : action.moved;
         pendingChoiceMovedUuids = action.movedUuids == null ? "" : action.movedUuids;
+        // B190: the screens this step answered, including the ones it answered with nothing.
+        pendingChoiceKinds = action.screenKinds == null ? "" : action.screenKinds;
+        pendingScreens = Math.max(Action.chainCount(action.choice),
+                Action.chainCount(pendingChoiceKinds));
         pendingChoiceAt = 0;
     }
 
@@ -3264,6 +3290,8 @@ public final class Gameplay {
         pendingChoicePrints = "";
         pendingChoiceMoved = "";
         pendingChoiceMovedUuids = "";
+        pendingChoiceKinds = "";
+        pendingScreens = 0;
         pendingChoiceAt = 0;
     }
 
@@ -3279,11 +3307,12 @@ public final class Gameplay {
      * opened later (the autopilot path answers whatever is pending).
      */
     private static boolean answerSelectionStep(Action action) {
-        if (choiceSegments(pendingChoice).length == 0) {
-            // "答选牌（不选）" (B163): choosing NOTHING is a legal answer to an "up to N" picker, and
-            // it has no recorded chain to advance.
-            return Driver.resolveSelectionLive(action.choice, action.choiceDisplay,
-                    action.choiceUuids, action.choicePrints, action.moved, action.movedUuids);
+        boolean nothing = action.choice == null || action.choice.trim().isEmpty();
+        if (nothing && Gameplay.choiceScreenCount() == 0) {
+            // "答选牌（不选）" (B163/B190): choosing NOTHING is a legal answer to an "up to N" picker.
+            // It goes through the explicit 确定 path: the old call treated an empty id list as "no
+            // answer given" and fell back to picking the best card, which is a guess (B158).
+            return Driver.resolveSelectionLiveEmpty(action.screenKind);
         }
         return Gameplay.answerNextScreen();
     }
@@ -3292,12 +3321,15 @@ public final class Gameplay {
     private static String choiceSegmentText() {
         String[] displays = choiceSegments(pendingChoiceDisplay);
         String[] choices = choiceSegments(pendingChoice);
+        int total = Math.max(choices.length, pendingScreens);
         String text = "";
-        for (int i = 0; i < choices.length; i++) {
+        for (int i = 0; i < total; i++) {
             if (i > 0) {
                 text = text + " → ";
             }
-            text = text + (i < displays.length && !displays[i].isEmpty() ? displays[i] : choices[i]);
+            String one = i < displays.length && !displays[i].isEmpty() ? displays[i] : segmentAt(choices, i);
+            // B190: "no card picked, 确定 pressed" reads as 不选 in the panel, not as an empty string.
+            text = text + (one.isEmpty() ? "不选" : one);
         }
         return text;
     }
@@ -3314,7 +3346,9 @@ public final class Gameplay {
                 return;
             }
             String planned = pendingChoice == null ? "" : pendingChoice;
-            if (planned.isEmpty()) {
+            // B190: an answer that picks nothing is still an answer; only "the plan answered no
+            // screen here at all" is a difference to report.
+            if (planned.isEmpty() && Gameplay.choiceScreenCount() == 0) {
                 String sig = Driver.selectionKind() + "|" + Driver.namesOf(Driver.selectionCandidates());
                 if (!sig.equals(latentLogged)) {
                     latentLogged = sig;
@@ -3332,7 +3366,7 @@ public final class Gameplay {
             if (answerNextScreen()) {
                 status = "\u9009\u724c\uff1a" + choiceSegmentText();
                 Hud.set(Gameplay.lines());
-                Log.info("latent selection answered with " + planned
+                Log.info("latent selection answered with [" + choiceSegmentText() + "]"
                         + " (the screen opened after its step had been checked)");
                 return;
             }
@@ -3436,6 +3470,20 @@ public final class Gameplay {
     }
 
     /**
+     * B190 (user m01149): how many screens the pending step's plan answers, empty answers included.
+     *
+     * <p>Read off the ACTION (not the pending mirrors) because it is asked while a screen is
+     * already up, possibly before anything was cached for it.
+     */
+    private static int plannedScreens() {
+        Action a = pending == null ? null : pending.action;
+        if (a == null) {
+            return 0;
+        }
+        return Math.max(Action.chainCount(a.choice), Action.chainCount(a.screenKinds));
+    }
+
+    /**
      * B139: after a step is done, say it when the plan's answer chain was longer than the screens
      * the fight actually opened. Informational only: nothing is changed and nothing is guessed.
      */
@@ -3533,7 +3581,9 @@ public final class Gameplay {
             // old best-first pick ("最优一张") answered it with a card the plan had not assumed, and
             // every number after that step was fiction. Stop and leave the screen to the player; the
             // plan and the pending step stay untouched.
-            if (planned.isEmpty()) {
+            // B190 (user m01149): unless the plan's answer for this screen is "pick nothing" -- that
+            // is a real answer (plannedScreens() counts the screens, not the picked cards).
+            if (planned.isEmpty() && plannedScreens() == 0) {
                 String why = "\u8fd9\u4e00\u5c4f\u8ba1\u5212\u91cc\u6ca1\u6709\u7b54\u6848\uff08\u5b9e\u673a\u5f00\u4e86\u6c99\u76d2\u6ca1\u7b97\u5230\u7684\u754c\u9762\uff09\uff1b\u81ea\u52a8\u51fa\u724c\u5df2\u505c\u4e0b\uff0c\u8bf7\u4f60\u9009\uff0c\u9009\u5b8c\u70b9\u300c\u81ea\u52a8\u300d\u7ee7\u7eed";
                 Log.warnEvery("selection-no-answer", 5000L, "selection open with no planned answer at step "
                         + (Gameplay.step + 1) + "/" + (plan == null || plan.plan == null ? 0 : plan.plan.size())

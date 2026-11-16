@@ -808,6 +808,11 @@ public final class Driver {
         if (!turnTransitionFinished(gam)) {
             return false;
         }
+        // B188 (user m00750/m00778/m00820): a latched End Turn press is not a finished state.
+        // See endTurnPressWaiting() for the measurement; this is the only place it is enforced.
+        if (endTurnPressWaiting(gam)) {
+            return false;
+        }
         // GameActionManager.update() moves the next action into currentAction at the end of a frame
         // and runs it on the following one, so an empty queue is one tick early. Draining on that
         // tick left the last action (a heal, a block gain) stranded in currentAction, where nothing
@@ -817,6 +822,39 @@ public final class Driver {
         }
         return gam.actions.isEmpty() && gam.cardQueue.isEmpty() && gam.monsterQueue.isEmpty()
                 && gam.preTurnActions.isEmpty() && !gam.usingCard;
+    }
+
+    /**
+     * B188 (user m00750/m00778/m00820): a press of the End Turn button that nothing has consumed yet
+     * means the turn transition has NOT finished, and a drain must not call the board settled.
+     *
+     * <p>The failure this closes, measured on 计划妥当 (Well Laid Plans, which is the engine's
+     * RetainCardPower): Driver.endTurn() runs the end-of-turn card queue first, and the retain screen
+     * opens from inside that block -- a card being asked which one to keep. B151 deliberately returns
+     * early there with the press latched (player.endTurnQueued = true, turnHasEnded still false), so
+     * the answer could come before the rest of the block ran. Answering such a screen closes it with
+     * an EMPTY action queue, and the next drain reached isIdle() -- which looked only at the queues --
+     * declared the board settled, and returned. The latched press was never consumed: the turn never
+     * ended, the state stayed "turn 3, player still owes an end turn", and every later end turn was
+     * refused with "the end turn did not finish the turn (turn stayed 3)". In the live game the same
+     * shape is the freeze the user reported: the picker is answered, and nothing moves afterwards.
+     *
+     * <p>So the press is part of the state, exactly like a non-empty queue: while it waits, a drain
+     * keeps running (it reaches the press handling in {@link #drain(int, long)} within one frame and
+     * finishes the turn there), and {@link #settleBlock()} reports "action-busy" instead of letting
+     * the search canonicalise a half-ended turn. A decided fight is exempt: the game has no turn left
+     * to end there, and B128's escape animation is handled separately by {@link #escapePending()}.
+     */
+    private static boolean endTurnPressWaiting(GameActionManager gam) {
+        if (gam == null || !endTurnQueued(gam) || combatOver()) {
+            return false;
+        }
+        if (Log.allow("endturn-press-waiting", 4000L)) {
+            Log.info("an end turn press is still latched (turnHasEnded=" + gam.turnHasEnded
+                    + " turn=" + GameActionManager.turn + " actions=" + gam.actions.size()
+                    + "/" + gam.cardQueue.size() + "): the board is not settled until it is consumed");
+        }
+        return true;
     }
 
 
@@ -1394,7 +1432,11 @@ public final class Driver {
             // no-op that the search chained as if it were a decision -- the panel then showed four
             // end turns in one turn row. Give the queue one more frame budget first: a slow enemy
             // turn is not a stuck one.
-            if (!combatOver() && GameActionManager.turn == turnBefore) {
+            // B189 (user m01083): a pending answer is not a stuck turn -- do not spend a second
+            // drain on a screen that is already up (it would return with steps=0 and hide the
+            // first drain's count).
+            if (!drained.awaitingSelection && !combatOver()
+                    && GameActionManager.turn == turnBefore) {
                 drained = completeIfTruncated(drain(4000, Math.max(50L, millisCap)));
             }
         } finally {
@@ -1403,7 +1445,17 @@ public final class Driver {
         }
         drained.turnAdvanced = endTurnFinished(turnBefore, GameActionManager.turn, combatOver());
         drained.combatOver = combatOver();
-        if (!drained.turnAdvanced) {
+        // B189 (user m01083): an end turn that stopped on a pick screen the end-of-turn block
+        // opened (计划妥当's retain picker, 豹指导's play picker, ...) has NOT failed: the screen is
+        // waiting for its answer, and the answer's drain finishes this same end turn. B125's
+        // "the turn counter did not move" rule is about a turn that cannot finish, so it must not
+        // turn a pending answer into a refusal -- that refusal is what poisoned the whole
+        // 结束回合（选：X） step and truncated the printed plan at the step before it.
+        if (drained.awaitingSelection) {
+            sts1solver.util.Log.warnEvery("endturn-waiting", 30000L,
+                    "end turn stopped on a pick screen (turn " + turnBefore + " -> "
+                            + GameActionManager.turn + "): the answer finishes it");
+        } else if (!drained.turnAdvanced) {
             drained.timedOut = true;
             // B125 (m03996 #3/#4): a fight that is over has no end turn, and a turn that did not
             // advance must not be recorded as a decision. `Legal.applyOrRefuse` turns this into a
@@ -2236,6 +2288,62 @@ public final class Driver {
             }
         }
         return resolveSelectionLive(cardIds, displayNames, choiceUuids, choicePrints);
+    }
+
+    /**
+     * B190 (user m01149): the plan answered this picker with NOTHING -- pick nothing and press 确定.
+     *
+     * <p>This is a real answer, not a missing one: 计划妥当 ("خطط" / Well Laid Plans) opens a
+     * "keep one card" picker that the player may leave empty, and a player presses the confirm button
+     * with no card selected. It used to be impossible to say: an empty id list fell back to the
+     * best-first guess (B158 forbids guessing), and a grid answer could never be empty at all.
+     *
+     * @param kindHint the screen kind recorded in the plan, or null/"" when it was not recorded;
+     *                 a mismatch refuses instead of answering the wrong screen
+     */
+    public static boolean resolveSelectionLiveEmpty(String kindHint) {
+        SelectionKind kind = selectionKind();
+        if (kind == null || kind == SelectionKind.NONE) {
+            refused("not-settled", "no pick screen is open");
+            return false;
+        }
+        if (kindHint != null && !kindHint.trim().isEmpty() && !kindHint.trim().equals(kind.name())) {
+            refused("not-offered", "the plan answered a " + kindHint.trim()
+                    + " screen but a " + kind + " screen is open (" + selectionState() + ")");
+            return false;
+        }
+        if (kind == SelectionKind.REWARD) {
+            // The engine has no "skip" on a card reward screen: the open screen IS a decision.
+            refused("not-offered", "a card reward screen has no 「不选」 answer");
+            return false;
+        }
+        if (!allowsEmptyPick(kind)) {
+            refused("not-offered", "this picker does not allow picking nothing ("
+                    + selectionState() + ")");
+            return false;
+        }
+        Log.info("live selection: answering with 「不选」 (确定 only, " + kind + ")");
+        return answerLiveSelection(new java.util.ArrayList<AbstractCard>(), "不选");
+    }
+
+    /** B190: whether the open picker lets the player confirm without selecting anything. */
+    private static boolean allowsEmptyPick(SelectionKind kind) {
+        try {
+            if (kind == SelectionKind.HAND) {
+                return AbstractDungeon.handCardSelectScreen != null
+                        && AbstractDungeon.handCardSelectScreen.canPickZero;
+            }
+            if (kind == SelectionKind.GRID) {
+                // GridCardSelectScreen has no canPickZero; the two places it lets an empty confirm
+                // through are an anyNumber picker and a screen that only asks for confirmation.
+                return AbstractDungeon.gridSelectScreen != null
+                        && (AbstractDungeon.gridSelectScreen.anyNumber
+                            || AbstractDungeon.gridSelectScreen.isJustForConfirming);
+            }
+        } catch (Throwable t) {
+            Log.warn("allowsEmptyPick: " + t);
+        }
+        return false;
     }
 
     /**
@@ -3240,6 +3348,11 @@ public final class Driver {
             return false;
         }
         screen.selectedCards.clear();
+        if (chosen.isEmpty()) {
+            // B190 (user m01149): "pick nothing" on a grid is legal exactly where the engine lets the
+            // confirm through with nothing selected; everywhere else it is refused, never guessed.
+            return screen.anyNumber || screen.isJustForConfirming;
+        }
         int want = Math.max(1, gridSelectCount());
         java.util.List<AbstractCard> here = selectionCandidates();
         for (int i = 0; i < chosen.size() && screen.selectedCards.size() < want; i++) {

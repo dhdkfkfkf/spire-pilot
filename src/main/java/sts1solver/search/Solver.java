@@ -943,9 +943,12 @@ public final class Solver {
      * sliced session) go through here so a choice can never inherit another branch's auto-plays.
      */
     private static Action actionFor(Choice choice, Action action) {
-        Action a = choice.choice.isEmpty() ? action
+        // B190 (user m01149): a step that answered a screen with NOTHING still has an answer -- the
+        // click on 确定. It used to be folded away entirely (no label, no cached answer), so the
+        // panel showed a plain 结束回合 and autopilot had nothing to give the picker.
+        Action a = (choice.choice.isEmpty() && choice.screenKinds.isEmpty()) ? action
                 : action.withChoice(choice.choice, choice.choiceDisplay, choice.choiceUuids,
-                        choice.choicePrints);
+                        choice.choicePrints, choice.screenKinds);
         a.autoPlays = new ArrayList<String>(choice.autoPlays);
         // B140 (user m09491): the answer travels with the KIND of screen it was written on.
         a.screenKinds = choice.screenKinds;
@@ -2374,7 +2377,11 @@ public final class Solver {
             // B106: ask the same question expansion asks ("is a screen WAITING for an answer"), not
             // "which screen enum is set". A screen the game is only closing is not a decision, and
             // reading it as one is what made a plan step demand an answer it never had.
-            boolean expected = a.choice != null && !a.choice.isEmpty();
+            // B190 (user m01149): a screen answered with nothing is still a screen this step walked
+            // (screenKinds is what says so), so the replay has to wait for it and confirm it empty
+            // instead of treating the step as "asked nothing".
+            boolean expected = (a.choice != null && !a.choice.isEmpty())
+                    || (a.screenKinds != null && !a.screenKinds.isEmpty());
             if (!Driver.isAwaitingSelection()) {
                 if (!expected) {
                     // No answer was recorded and no screen is waiting: this step asked nothing.

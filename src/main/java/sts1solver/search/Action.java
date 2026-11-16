@@ -248,18 +248,43 @@ public final class Action {
 
     /** The same, with the fingerprints of the cards the answer names (B98). */
     public Action withChoice(String chosen, String display, String uuids, String prints) {
-        String text = display == null || display.isEmpty() ? chosen : display;
+        return withChoice(chosen, display, uuids, prints, screenKinds);
+    }
+
+    /**
+     * B190 (user m01149): the same, told which screens the step answered, so the label can name the
+     * clicks.
+     *
+     * <p>{@code kinds} comes from the expansion ({@code Choice.screenKinds}) and has one entry per
+     * screen. It has to be passed in rather than read off this action: the search attaches the kinds
+     * AFTER the branch is built, so reading them here would always see the empty pre-answer value.
+     */
+    public Action withChoice(String chosen, String display, String uuids, String prints,
+                             String kinds) {
+        String raw = chosen == null ? "" : chosen;
+        String text = display == null || display.isEmpty() ? raw : display;
         // A chain answer (one entry per screen, '|' separated: HeadChase asks twice) reads as
         // "A → B" in the panel and the log, never as a pipe.
         String shown = text.replace("|", " → ");
-        String suffix = chosen == null || chosen.isEmpty() ? "" : "（选：" + shown + "）";
+        String kindsNow = kinds == null ? "" : kinds;
+        // B190 (user m01149): EVERY screen the step answered gets its own click script, including the
+        // ones it answered with nothing (计划妥当's 保留 picker: "不选 → 确定"). The suffix used to be
+        // added only for a non-empty answer, so a step that left the picker empty looked like a plain
+        // 结束回合 in the panel, and autopilot had no answer to give it.
+        int screens = Math.max(chainCount(raw), chainCount(kindsNow));
+        String suffix;
+        if (screens > 0) {
+            suffix = "（" + clickScript(raw, screens) + "）";
+        } else {
+            suffix = raw.isEmpty() ? "" : "（选：" + shown + "）";
+        }
         Action a = new Action(handIndex, targetIndex, energyOnUse, potionSlot, label + suffix,
-                cardName, targetName, kind, chosen == null ? "" : chosen, cardId, cardUuid, text,
+                cardName, targetName, kind, raw, cardId, cardUuid, text,
                 uuids == null ? "" : uuids, cardPrint, prints == null ? "" : prints);
         a.turnBefore = turnBefore;
         a.turnAfter = turnAfter;
         a.autoPlays = new java.util.ArrayList<String>(autoPlays);
-        a.screenKinds = screenKinds;
+        a.screenKinds = kindsNow;
         a.screenKind = screenKind;
         // B163: the click script travels with the answer through every copy of the decision.
         a.moved = moved;
@@ -268,6 +293,40 @@ public final class Action {
         a.escaped = escaped;
         a.rngNormalized = rngNormalized;
         return a;
+    }
+
+    /** B190: how many '|' separated entries a chain has (an empty chain has none). */
+    public static int chainCount(String joined) {
+        if (joined == null || joined.isEmpty()) {
+            return 0;
+        }
+        int n = 1;
+        for (int i = 0; i < joined.length(); i++) {
+            if (joined.charAt(i) == '|') {
+                ++n;
+            }
+        }
+        return n;
+    }
+
+    /**
+     * B190 (user m01149): what the player has to DO, one entry per screen -- "选：打击 → 确定",
+     * "不选 → 确定", or "1) …  2) …" when one action answers several screens in a row.
+     */
+    private static String clickScript(String raw, int screens) {
+        String[] answers = raw.isEmpty() ? new String[0] : raw.split("\\|", -1);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < screens; i++) {
+            if (i > 0) {
+                sb.append("  ");
+            }
+            String one = i < answers.length ? answers[i] : "";
+            if (screens > 1) {
+                sb.append(i + 1).append(") ");
+            }
+            sb.append(one.trim().isEmpty() ? "不选 → 确定" : "选：" + one + " → 确定");
+        }
+        return sb.toString();
     }
 
     public static Action card(int handIndex, int targetIndex, int energyOnUse, String label) {

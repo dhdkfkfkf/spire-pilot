@@ -480,6 +480,12 @@ public final class Legal {
     }
 
     private static String describe(Action a) {
+        // B189 (user m01083): an end turn carries neither a card name nor an id, so the old
+        // fallback printed "the card at hand index -1" -- the line looked like a broken card play
+        // while the real step was 结束回合.
+        if (a.isEndTurn()) {
+            return "结束回合";
+        }
         if (a.cardName != null && !a.cardName.isEmpty()) {
             return a.cardName + (a.cardId == null || a.cardId.isEmpty() ? "" : " [" + a.cardId + "]");
         }

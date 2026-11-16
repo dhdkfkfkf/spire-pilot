@@ -4476,3 +4476,117 @@ pending 被清空后，`planIsStale()` 的 `pending == null` 分支只看 `curre
 **文档**：`docs/PLAN-P7.md` §15、`docs/PLAN.md` P7/B188/安装行、`docs/PLAN-WORKLOG.md` 2026-11-16「B188 / P7d」段。
 
 **发布（1.0.2，2026-11-16）**：按 user m00678「那就不要做了，上传github和创意工坊」，P7e（单遍遍历按瓶数分配 beam 名额）与「K 收窄到可用瓶数+1」**两个提速方案均不实施**，B188 以 P7b/P7c/P7d 的现状定稿发版。版本号 1.0.1 → 1.0.2（`resources/ModTheSpire.json`、工坊 description）；构建 jar 1,295,807 B / sha256 `BD3FFAE6DABF3D6232D857FBE6A0BEB7AE28B2833EDF4402889D35C4EF7DB021`（与 P7d 同尺寸，只差版本号字符）；已装入 `D:\Steam\steamapps\common\SlayTheSpire\mods` 与 `D:\mods-workshop\sts1-engine-solver\content`，工坊条目 **3839053516** 上传成功（输出 `Successfully updated workshop item!`，visibility 仍 private），GitHub 已推送 `master`。产品代码与 1.0.2 前一致，无性能/内存变化；回滚＝重传 1.0.1 的 jar 与 `D:\mods-workshop\sts1-engine-solver\config.json.bak-20261116`。详见 `docs/PLAN-WORKLOG.md` 同日「发布 1.0.2」段。
+
+### B188 结束回合里开的选牌屏（计划妥当）答完后，回合永远收不了尾（2026-11-17，用户 m00750 / m00778 / m00820）
+
+- **现象**：带「计划妥当 / 留一手」（Well Laid Plans，走 `RetainCardPower`）的战斗里，模拟能出计划、也能把选牌屏答上，
+  但答完之后这一局就再也不能行动：之后每一次「结束回合」都失败，日志刷 `lastRefusal = "the end turn did not finish the turn
+  (turn stayed 3, combatOver=false)"`；`A3 promote: cannot rebuild a deferred path ... at step N on 结束回合` 单场 2942 条，
+  而失败的动作在 `Legal.describe` 里只能兜底成 `the card at hand index -1`。用户实测口径（m00750）：
+  「计划妥当这张牌确实有问题。选牌的牌可能都有问题。我已经实测有问题了。」
+- **取证（引擎字节码，不是推测）**：`javap` 反编译 `desktop-1.0.jar`：
+  1. `AbstractRoom.endTurn()` 只做 `applyEndOfTurnTriggers()` → `addToBottom(ClearCardQueueAction)` →
+     `addToBottom(DiscardAtEndOfTurnAction)` → 三个牌堆 `resetAttributes()` → `addToBottom(new AbstractRoom$1())` →
+     `player.isEndingTurn = false`。**它自己从不把 `turnHasEnded` 置 true。**
+  2. `AbstractRoom$1.update()` 才 `addToBot(new EndTurnAction())`（→ `GameActionManager.endTurn()` 把 `turnHasEnded` 置 true）
+     + `addToBot(new WaitAction(1.2f))`（1.2 秒，SELECTION_DELTA=0.05 下约 24 帧）+ 非 skipMonsterTurn 时 `MonsterStartTurnAction`。
+  3. 真机消费「结束回合按钮」的地方：`AbstractRoom.update()` 先 `if (!isScreenUp) actionManager.update();`、再 `player.updateInput()`，
+     然后**在 isScreenUp 判断之外** `if (player.isEndingTurn) room.endTurn();`；`AbstractPlayer.updateInput()` 尾部（偏移 1015-1022）
+     在 `cardQueue.isEmpty() && !hasControl` 时置 `endTurnQueued=false; isEndingTurn=true`。
+  ⇒ **`endTurnQueued/isEndingTurn` 是一个 latching 的状态量**，语义与「动作队列非空」同级：它没被消费，这一回合就没跑完。
+- **根因**：`Driver.endTurn()` 先跑 `runEndOfTurnQueue()`（B151）；计划妥当的保留屏正是在这个结束回合块里打开的 ⇒ 走 B151 早退，
+  只把 `player.endTurnQueued=true` 记住，**此时 `gam.endTurn()` 还没被调用，`turnHasEnded` 仍是 false**，返回 awaitingSelection。
+  答完屏后 `resolveSelection() → drainAfterAnswer() → drain()`，此时动作队列已空、`turnHasEnded=false`，而 `Driver.isIdle()` 只看
+  五个队列 + `currentAction` + `usingCard` ⇒ **判定 settled 直接 break**，`Driver.java:510-544` 的 pressNow 分支（本该
+  `runEndOfTurnQueue + room.endTurn()`）一次都没执行 ⇒ 那个 press 永远挂在玩家身上，根状态变成「turn 3 且还欠一次结束回合」，
+  之后每步都从这里重放失败。帧长（用户猜的「帧数不对」）不是原因：B181 之后 `simDelta` 默认就是 `SELECTION_DELTA=0.05f`（`Driver.java:931`），
+  出牌与结束回合同一帧长；真正的漏点是把「队列空」当成了「这一段做完了」。
+- **修法（只改 `drive/Driver.java`，约 +38 行，不放宽任何判据）**：
+  1. `isIdle(GameActionManager)` 在 `turnTransitionFinished` 之后加 `if (endTurnPressWaiting(gam)) return false;`；
+  2. 新增 `private static boolean endTurnPressWaiting(GameActionManager)`：`gam == null || !endTurnQueued(gam) || combatOver()` → false，
+     否则按 `Log.allow("endturn-press-waiting", 4000L)` 限速打一行 `an end turn press is still latched (turnHasEnded=... turn=... actions=.../...)`，返回 true；
+  3. 效果：答完屏后的 drain 不再假 settled，继续走到 pressNow → `runEndOfTurnQueue()` → `room.endTurn()` → `AbstractRoom$1` →
+     `EndTurnAction` 才把 `turnHasEnded` 置 true → 怪物回合 → 回合号推进；`settleBlock()` 同理会返回 `action-busy` 而不是把半个回合当成可合并状态。
+  判据是从「队列空」换成引擎自己的「press 未消费 = 未完成」——不是放宽，而是收紧到与真机一致；`combatOver()` 时豁免（B128 的逃跑动画另由 escapePending 管）。
+- **代价 / 风险 / 影响**：`isIdle` 只有两个调用点（`drain()` 的 :427 与 `settleBlock()` 的 :845），不新增对象、无每节点开销，只在 press 挂着时多一次判空读取。
+  风险一处：若某个动作在没有真结束回合的情况下残留 `endTurnQueued`，该步会从「假 settled」变成「按毫秒上限 stalled」（日志可见，不会死循环）。
+  面板、路线、评分、Digest、自动出牌节奏、worker 指纹都不变，因为改动只影响「什么时候认为这一帧已经静止」。
+- **验证**：`tools/build.ps1` BUILD OK，jar 1,296,005 B / sha256 `D780675CEB49A0FDD5A9786F2A8AB63809B88039A665FC883FE43436382B6A42`；`tools/install.ps1 -SkipBuild` INSTALL OK（已替换 `D:\Steam\steamapps\common\SlayTheSpire\mods\sts1-engine-solver.jar`，源/目标哈希一致）。
+  **本轮未跑 `tools/run.ps1`**（用户 m00732 自行实测、m00778 要求减少门禁）。用户侧验收：打一场带计划妥当的战斗，看选牌答完后回合是否推进、
+  `A3 promote ... on 结束回合` 是否归零。
+- **教训**：沙盒里判断「这一段做完了没有」，要问引擎自己的规则（这个按钮被消费了吗、`turnHasEnded` 置了吗），不能问「我的队列空了吗」——
+  队列只是引擎状态的一部分，latch 型的输入状态与它在同一逻辑层。另一个教训：`Legal.describe()` 对 `Action.endTurn()` 的兜底文案是
+  `the card at hand index -1`，把「结束回合失败」写成了「找不到牌」，直接误导了上一轮定位（待办：给 endTurn 动作一个可读名字）。
+### B189 结束回合途中开的选牌屏被当成「引擎拒绝」，整步作废、计划截断（2026-11-17，用户 m01083 / m01101 / m01110）
+
+**现象**（`solver.log` 2026-11-17 00:42，大颚虫 JawWorm，HP 47/66，`pw=Retain Cards1`）
+
+- `00:42:15.181 WARN end turn refused: the end turn did not finish the turn (turn stayed 1, combatOver=false) steps=0 settled=false stalled=false awaitingSelection=true`
+- `00:42:23.293 WARN plan replay failed at step 4: sts1solver.search.ReplayException: the line cannot be replayed: the card at hand index -1 -- not-offered: the engine does not allow it (the end turn did not finish the turn ...)`
+- `00:42:23.294 ... (replayed 4 of 21 steps, first failure at 4 on 结束回合（选：打击）); it is not offered as a win`
+- 已装 jar 为 B188 构建（sha `D780675C…`），确认不是旧代码残留。
+
+**根因**（逐点复核）
+
+1. `Driver.endTurn()` 先 `gam.endTurn(); room.endTurn();`（`Driver.java:1404-1409`），随后 `drain(4000, …)`；保留屏在结束回合块里开，drain 在 `Driver.java:399-445` 里一旦 `isAwaitingSelection()` 就 `awaitingSelection=true; break` —— 这是正确行为。
+2. B125 的重试 `Driver.java:1435` 只看 `GameActionManager.turn == turnBefore`，不看 `awaitingSelection`，于是再跑一次 drain；第二次在 i=0 就撞到同一块屏并立刻返回（`steps=0`），把第一次的统计**覆盖**掉。
+3. `Driver.java:1444` 的拒绝判据同样只看 `turnAdvanced` ⇒ `refused=true`、`lastRefusal="the end turn did not finish the turn (turn stayed 1, combatOver=false)"`。
+4. `Legal.applyOrRefuse`（`Legal.java:291-299`）把 `refused` 变成 `ReplayException(... -- not-offered ...)`；`Legal.describe()`（`:482-487`）在无 cardName/cardId 时兜底成 `the card at hand index -1`，于是「等答屏」被写成「找不到牌」。
+5. B188 的 `endTurnPressWaiting()`（`Driver.java:848-858`）只在 press 已按下且没人消费时生效；本路径 press 已被 `room.endTurn()` 消费，所以 B188 修不到这里（这也是为什么 B188 之后仍有本 bug）。
+
+**「两次 drain」定性**：不是真凶。只跑一次同样误判（第一次 drain 的结论就是「屏开着 + 回合没涨」）。它是 B125 为「慢帧不是卡死」加的保险，删掉会丢掉「第一次被 `COMPLETION_STEPS=4000` 截断时再补一截」的能力，只留下空转和统计覆盖两个副作用。
+
+**修法**（只改 `drive/Driver.java` + `search/Legal.java`，约 8 行）
+
+- `Driver.java:1435`：`if (!drained.awaitingSelection && !combatOver() && GameActionManager.turn == turnBefore)` —— 屏开着不再空转。
+- `Driver.java:1444`：`if (drained.awaitingSelection) { Log.warnEvery("endturn-waiting", 30000L, "end turn stopped on a pick screen (turn X -> Y): the answer finishes it"); } else if (!drained.turnAdvanced) { …原 refused 块… }` —— 待答不是拒绝；discardMissing 记账保持在两分支之后。
+- `Legal.describe()`：开头 `if (a.isEndTurn()) return "结束回合";`。
+
+**代价 / 风险 / 影响**
+
+- 代价：零新增常驻对象、无每节点开销；每步多一次布尔读。
+- 风险：真正卡死的结束回合会晚一步暴露（下一次结束回合才 refused，日志照旧 `end turn refused`，不静默）；若某屏答完引擎仍不推进，本回合会被记为成功。回滚＝还原上述三处。
+- 影响：面板/计划里「结束回合（选：X）」可走完；`A3 promote ... on 结束回合` 应归零；Digest、评分、live 路径、自动出牌节奏不变；不触碰任何 mod 类（不重演 B185/B187 的替身写回风险）。
+
+**验证**：`tools/build.ps1` BUILD OK（141 源文件、555 entries、1,296,149 B、sha256 `28FCFF2C685CB1DCE5BDE5DAA0062540021CF8DCA86E24389C6439EF0F18E439`）；`tools/install.ps1 -SkipBuild` INSTALL OK。**未跑 `tools/run.ps1`**（用户 m00732 自行实测、m00778 减少测试）。验收＝带计划妥当打一场，看答屏后回合是否推进、`on 结束回合` 失败是否归零。既有 S182（`Probe.java:7294-7359`）只覆盖「屏先开着再按结束回合」，未覆盖「屏在结束回合途中才开」，本轮按用户要求不新增门禁。
+
+**教训**：`turnAdvanced == false` 只说明「这一回合还没结束」，不等于「引擎不许结束回合」；判定拒绝前必须先问「是不是有块屏在等我答」。
+
+### B190 选牌的「不选 + 确定」在计划里无法表示（计划妥当保留屏 / 任何 canPickZero 屏）（2026-11-17，用户 m01149）
+
+**现象**：计划妥当打出后，结束回合途中开的保留屏被计划当成「没有屏」——该步 label 就是「结束回合」，没有「（选：X）」。自动出牌走到屏前打一行 `selection open with no planned answer: kind=HAND candidates=... autopilot=true` 然后停手（用户原话「自动出牌没有确定这个动作」）。同一局另有 103 条 `answering screen 1 (HAND) resumed work that did not settle`，那是 B188/B189 的结算问题，与本条不同。
+
+**引擎事实（javap，不是推测）**
+
+1. `RetainCardPower.atEndOfTurn(boolean)`：回合末、手牌非空、无 Runic Pyramid、无 Equilibrium ⇒ `addToBot(new RetainCardsAction(owner, amount))`。
+2. `RetainCardsAction.update()`：`duration == 0.5f` 时 `AbstractDungeon.handCardSelectScreen.open(TEXT[0], amount, false, true, false, false, true)` 并 `addToBot(new WaitAction(0.25f))`；其余帧若 `!wereCardsRetrieved` 则遍历 `selectedCards.group` 置 `retain=true`（非虚无）、`player.hand.addToTop(c)`，最后 `wereCardsRetrieved = true`。⇒ 选 0 张合法，且动作自己收尾。
+3. `HandCardSelectScreen.open(String,int,boolean,boolean,boolean,boolean,boolean)` 的赋值顺序：`numCardsToSelect=iload_2`、`anyNumber=iload_3`、`canPickZero=iload 4`、`selectionReason=iload_1`、`upTo=iload 7`；canPickZero 为真时把确认按钮 `isDisabled=true; enable()`，否则 disable。⇒ 保留屏 = anyNumber=false / canPickZero=true / upTo=true / numCardsToSelect=1。
+4. `GamblingChipAction.update()`：`open(TEXT[0], 99, true, true)` ⇒ anyNumber=true / canPickZero=true，空集本来就合法。
+5. `GridCardSelectScreen` 没有 canPickZero 字段；能空确认的只有 `anyNumber` 与 `isJustForConfirming`。
+
+**根因：三处缺口**
+
+1. `search/Action.java:250-271 withChoice` 的 suffix 只在 `chosen` 非空时追加「（选：X）」，空答案的 label 与「没有屏」同形。
+2. `Gameplay.java:2688-2699 submit` 以 `choice` 非空为 `planPendingChoice` 的条件 ⇒ 空答案从不进 pending ⇒ `answerLatentSelection`（:3305-3344）判 `planned.isEmpty()` 后只打日志不代答。
+3. 实机执行：`Driver.resolveSelectionLive`（:2203-2262）`if (cardIds == null || cardIds.isEmpty()) return resolveSelectionLiveHeuristically();` —— 空答案会被当成「猜最优一张」（B158 明令禁止）；`fillGridSelection`（:3288-3304）结尾 `return !screen.selectedCards.isEmpty()` 让 GRID 空答案永远失败。
+
+（重放路径 `Solver.answerForReplay` 本来就能吃空答案：`resolveSelectionByNames` 有 `askedEmpty` 分支。缺的是「它认为这一步该有屏」——旧代码用 `a.choice` 非空当判据。）
+
+**修法**（四个文件）
+
+- `search/Action.java`：`withChoice(chosen, display, uuids, prints, kinds)` 新增 5 参重载 + `chainCount(String)` / `clickScript(raw, screens)`。有屏就按屏数生成点击脚本：「选：X → 确定」/「不选 → 确定」/多屏「1) …  2) …」；无屏保持旧文案。
+- `search/Solver.java:945-953 actionFor`：把 `choice.screenKinds` 传进 `withChoice`；「choice 空但 screenKinds 非空」时也造分支（旧代码直接复用原 action，等于把答案丢了）。`answerForReplay`（:2377）的 `expected` 改为 `choice 非空 || screenKinds 非空`。
+- `Gameplay.java`：新增 `pendingScreens` / `pendingChoiceKinds`（由 `Action.screenKinds` 段数来）；`submit` 条件 = 「choice 非空 || screenKinds 非空」；`choiceScreenCount()` = `max(choiceSegments, pendingScreens)`；`answerNextScreen` 对空段且 kind 已知的屏调 `Driver.resolveSelectionLiveEmpty(kind)`；`choiceSegmentText` 空段写「不选」；新增 `plannedScreens()` 并让 `answerLatentSelection` 与 tick 的「没有答案」停止条件只在屏数也是 0 时触发；`answerSelectionStep` 的空答案改走显式确定（不再落到启发式猜牌）。
+- `drive/Driver.java`：新增 `resolveSelectionLiveEmpty(String kindHint)`（kind 不符 / REWARD / 屏不允许空选一律 `refused`，否则 `answerLiveSelection(空, "不选")`，走既有 fill → consumed → closeCurrentScreen 校验）与 `allowsEmptyPick(kind)`（HAND=`canPickZero`，GRID=`anyNumber || isJustForConfirming`）；`fillGridSelection` 空集按同两字段放行。
+
+**对赌博筹码（用户第 2 问）**：不碰 `Action.moved`/`selectionWithMoves`、`Driver.moveToEndOfHand`、`picksFor` 的匹配顺序（uuid > print > id+name > id > name），也不碰 `selectionOptions` 的分支枚举（B161 的 anyNumber 全子集原样）。赌博筹码是 canPickZero=true 的屏，B190 之前它「选不选」这条分支在实机答不进去，修完是顺带修好，不是回归。
+
+**代价 / 风险 / 影响**
+
+- 代价：面板行每条多一次 split + 字符串拼接（不在节点循环里）；新增 2 个 static 字段；无每节点开销。
+- 风险：label 文案变化（「（选：X）」→「（选：X → 确定）」）只影响人读与日志比对，不参与判断；计划记录的屏种与实机不符时拒绝而不是猜（宁停不猜）；某屏答完引擎仍不开下一步时，B189 的 `endturn-waiting` 仍然写日志，不静默。回滚＝还原四个文件的改动。
+- 影响：面板/日志能看出「结束回合（不选 → 确定）」并被自动执行；搜索、评分、Digest、路线、live 路径与其它 mod 完全不变（不触碰任何 mod 类）。
+
+**验证**：`tools/build.ps1` BUILD OK（141 源文件、555 entries、1,297,569 B、sha256 `9A4D5945D00793676AE5EBDF5B097D8FB9EE8824B94ADD35DF373A30E99A036D`）；`tools/install.ps1 -SkipBuild` INSTALL OK（已装 `D:\Steam\steamapps\common\SlayTheSpire\mods\sts1-engine-solver.jar`，源/目标哈希一致）。**未跑 `tools/run.ps1`**（用户 m00732 自测、m00778 减少测试）；S133/S214/S215 都不覆盖「空答案的执行」，按 m00778 不新增门禁。验收＝带计划妥当打一场，看保留屏是否被自动「不选 → 确定」。
+
+**教训**：「答案为空」和「没有答案」是两件事，代码里不能用同一个空字符串表示。计划结构里已经有逐屏种类（`Action.screenKinds`），屏的个数一直是已知的——缺的只是没人把它当成答案的一部分。
