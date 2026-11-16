@@ -274,7 +274,8 @@ public final class Action {
         int screens = Math.max(chainCount(raw), chainCount(kindsNow));
         String suffix;
         if (screens > 0) {
-            suffix = "（" + clickScript(raw, screens) + "）";
+            // B191 (user m01447): the click script names the cards the panel shows, not the raw ids.
+            suffix = "（" + clickScript(text, raw, screens) + "）";
         } else {
             suffix = raw.isEmpty() ? "" : "（选：" + shown + "）";
         }
@@ -313,14 +314,22 @@ public final class Action {
      * B190 (user m01149): what the player has to DO, one entry per screen -- "选：打击 → 确定",
      * "不选 → 确定", or "1) …  2) …" when one action answers several screens in a row.
      */
-    private static String clickScript(String raw, int screens) {
-        String[] answers = raw.isEmpty() ? new String[0] : raw.split("\\|", -1);
+    private static String clickScript(String shownText, String raw, int screens) {
+        // B191 (user m01447): prefer what the panel shows (the localized card name) and fall back to
+        // the id only when this screen has no name -- a plan that reads "生存者（选：尖啸 → 确定）"
+        // must not print "PiercingWail" just because the answer was recorded by id.
+        String[] names = shownText == null || shownText.isEmpty()
+                ? new String[0] : shownText.split("\\|", -1);
+        String[] ids = raw == null || raw.isEmpty() ? new String[0] : raw.split("\\|", -1);
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < screens; i++) {
             if (i > 0) {
                 sb.append("  ");
             }
-            String one = i < answers.length ? answers[i] : "";
+            String one = i < names.length ? names[i] : "";
+            if (one.trim().isEmpty() && i < ids.length) {
+                one = ids[i];
+            }
             if (screens > 1) {
                 sb.append(i + 1).append(") ");
             }

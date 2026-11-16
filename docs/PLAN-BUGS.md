@@ -4590,3 +4590,21 @@ pending 被清空后，`planIsStale()` 的 `pending == null` 分支只看 `curre
 **验证**：`tools/build.ps1` BUILD OK（141 源文件、555 entries、1,297,569 B、sha256 `9A4D5945D00793676AE5EBDF5B097D8FB9EE8824B94ADD35DF373A30E99A036D`）；`tools/install.ps1 -SkipBuild` INSTALL OK（已装 `D:\Steam\steamapps\common\SlayTheSpire\mods\sts1-engine-solver.jar`，源/目标哈希一致）。**未跑 `tools/run.ps1`**（用户 m00732 自测、m00778 减少测试）；S133/S214/S215 都不覆盖「空答案的执行」，按 m00778 不新增门禁。验收＝带计划妥当打一场，看保留屏是否被自动「不选 → 确定」。
 
 **教训**：「答案为空」和「没有答案」是两件事，代码里不能用同一个空字符串表示。计划结构里已经有逐屏种类（`Action.screenKinds`），屏的个数一直是已知的——缺的只是没人把它当成答案的一部分。
+
+### B191 选牌点击脚本印的是卡牌 id 而不是中文名（2026-11-17，用户 m01447）
+
+**现象**：面板计划行写成「生存者（选：PiercingWail → 确定）」——同一份计划里其它步骤的牌名都是中文（「打击」「防御」），只有 B190 新加的「选：X → 确定」这一层露出了英文 id。
+
+**根因**：`search/Action.java` 的 `withChoice` 里 `text = display 为空 ? raw : display` 本来已经拿到面板名称，但 B190 新加的 `suffix = （clickScript(raw, screens)）` 传的是 `raw`（`choice.choice`，卡牌内部 id），于是标签从「选：尖啸」退化成「选：PiercingWail」。
+
+**修法**：`clickScript(String shownText, String raw, int screens)` 逐屏优先取 `shownText` 的段（面板名称），该段为空才用 `raw` 同下标的 id 段兜底；`withChoice` 调用改成 `clickScript(text, raw, screens)`。空答案屏（计划妥当保留屏）仍输出「不选 → 确定」。
+
+**代价 / 风险 / 影响**
+
+- 代价：每步多一次字符串 split（面板行构造，不在节点循环里），无新增字段。
+- 风险：纯文案，无行为变化；若某个屏的 display 列表为空（新出现的屏种类），仍会显示 id——可见，不静默。回滚＝把调用改回 `clickScript(raw, screens)`。
+- 影响：面板与日志的点击脚本统一显示中文名；搜索、评分、Digest、live 执行路径（`picksFor` 仍按 uuid/print/id/name 匹配）完全不变。
+
+**验证**：BUILD OK（141 源文件、555 entries、1,297,615 B、sha256 `39BF1B640A378B4F652348FF8C8C233C9A36E45FCD5CE54F8EC17702829CA82E`）；INSTALL OK（已装游戏 mods 目录，哈希一致）。未跑门禁（用户 m00732 自测 / m00778 减少测试）。
+
+**教训**：面板文案必须有且只有一个「显示名」来源；把 id 当文案用，平时看不出，一旦 id 与名称不同（`PiercingWail` 与「尖啸」）就暴露。

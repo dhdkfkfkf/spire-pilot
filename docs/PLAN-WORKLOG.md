@@ -2763,3 +2763,15 @@ offers [Defend_G, Malaise], the plan chose [催化剂]…)`，看着像 mod 出�
 | GitHub | 提交 `7ca490c` 已推送 master（10 个文件：4 个文档 + WORKSHOP-DESCRIPTION + ModTheSpire.json + 4 个源文件） |
 | 创意工坊 | 条目 3839053516：`D:\mods-workshop\sts1-engine-solver\content\sts1-engine-solver.jar` 已换新，config.json 以 GBK/936 无 BOM 回写（description 当前版本 1.0.3 + changeNote），备份 `config.json.bak-20261117`；上传返回「Successfully updated workshop item!」 |
 | 门禁 | 未跑（用户 m00732 自测 / m00778 减少测试） |
+
+## B191 / P7-选牌 点击脚本印 id 而不是中文名（2026-11-17；未跑门禁，用户实测）
+
+| 项 | 内容 |
+| --- | --- |
+| 用户口径（m01447） | 「所有面板给出的牌都显示中文。现在面板给出生存者弃牌选牌提示是英文」 |
+| 旧行为 | 计划行「生存者（选：PiercingWail → 确定）」——B190 的 clickScript 收到 raw id |
+| 根因 | `Action.withChoice` 里 `text` 已取到 display，但 `clickScript(raw, screens)` 传的是 id 串 |
+| 修法 | `clickScript(shownText, raw, screens)` 逐屏优先 display、该段为空才用 id 兜底；调用处改传 `text` |
+| 影响面 | 纯面板/日志文案；搜索、评分、Digest、live 匹配顺序不变；空答案解析仍写「不选 → 确定」 |
+| 门禁 | 未跑（m00732 自测 + m00778 减少测试） |
+| 安装物 | `mod/sts1-engine-solver.jar` 1,297,615 bytes / sha256 `39BF1B640A378B4F652348FF8C8C233C9A36E45FCD5CE54F8EC17702829CA82E`（BUILD OK + INSTALL OK） |
