@@ -2751,3 +2751,15 @@ offers [Defend_G, Malaise], the plan chose [催化剂]…)`，看着像 mod 出�
 | 安装物 | `mod/sts1-engine-solver.jar` 1,297,569 bytes / sha256 `9A4D5945D00793676AE5EBDF5B097D8FB9EE8824B94ADD35DF373A30E99A036D`（`tools/build.ps1` BUILD OK；`tools/install.ps1 -SkipBuild` INSTALL OK，源/目标哈希一致） |
 
 教训：「答案为空」≠「没有答案」，不能用同一个空串表示；屏的个数本来就记在 `Action.screenKinds` 里，缺的只是拿它当答案的一部分去执行。
+
+## 发布 1.0.3（2026-11-17）
+
+| 项 | 内容 |
+| --- | --- |
+| 内容 | B188（结束回合选牌屏答完回合收不了尾）、B189（结束回合途中的屏被误判成引擎拒绝）、B190（选牌「不选 + 确定」可表示并可自动执行，面板写点击脚本） |
+| 版本 | `resources/ModTheSpire.json` 1.0.2 → 1.0.3；`docs/WORKSHOP-DESCRIPTION.md` 当前版本行同步 |
+| 构建 | `tools/build.ps1` BUILD OK（141 源文件、555 entries、1,297,570 B），sha256 `489558812E1E482166BACF704D27040574915F4E8600B104A5AD41533EC60EF0` |
+| 实机 | `tools/install.ps1 -SkipBuild` INSTALL OK → `D:\Steam\steamapps\common\SlayTheSpire\mods\sts1-engine-solver.jar` |
+| GitHub | 提交 `7ca490c` 已推送 master（10 个文件：4 个文档 + WORKSHOP-DESCRIPTION + ModTheSpire.json + 4 个源文件） |
+| 创意工坊 | 条目 3839053516：`D:\mods-workshop\sts1-engine-solver\content\sts1-engine-solver.jar` 已换新，config.json 以 GBK/936 无 BOM 回写（description 当前版本 1.0.3 + changeNote），备份 `config.json.bak-20261117`；上传返回「Successfully updated workshop item!」 |
+| 门禁 | 未跑（用户 m00732 自测 / m00778 减少测试） |
