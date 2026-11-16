@@ -339,6 +339,17 @@ public final class World {
         // few of them per window instead of copying all of them (a full shallow copy would double the
         // fork cost); a write through one is named, put back, and watched on every later install.
         StaticWatch.afterInstall();
+        // B187 (user m01082/m01098): both mixer mutes above own the GAME's mixers; a mod that plays
+        // a sound from its own hook -- YuAi's heal postfix opens a javax.sound Clip -- bypasses
+        // both, and B185's "let it play, then close what it left" wrote an already-closed live clip
+        // back into the mod field, which the next window's flush() turned into a native crash
+        // (hs_err_pid17280). Instead every clip-typed mod static is parked on an inert stand-in for
+        // exactly this window, so the mod's own play() early-outs and no line is ever opened.
+        // It must run AFTER StaticWatch.afterInstall(): the watch has to snapshot the LIVE clip, not
+        // the stand-in, or it would write the stand-in into the real game at uninstall. uninstall
+        // still calls AudioQuiet.end() BEFORE StaticWatch.beforeUninstall(), so the live reference
+        // is back before the watch compares.
+        AudioQuiet.begin();
         // B182 (user m00001/m00148): the hand's glow ring is live-session presentation, and the
         // sandbox never renders it. AbstractCard.glowList held CardGlowBorder objects shared by
         // reference with the live hand (ClonePolicy shares every AbstractGameEffect), and
@@ -367,6 +378,11 @@ public final class World {
             failNextUninstall = false;
             throw new RuntimeException("B110 gate: uninstall interrupted on purpose");
         }
+        // B187: put the live clip references back BEFORE the static put-back below (the watch
+        // compares against them), and close any clip the window opened itself. A reference the
+        // window dropped is restored too; a reference whose line really died is written as null
+        // rather than handed back as a dead line (that write-back is what crashed B187).
+        AudioQuiet.end();
         // B105: compare the watched mod statics and put the live contents back BEFORE anything is
         // torn down, so a write the sandbox made cannot outlive the window.
         StaticWatch.beforeUninstall();

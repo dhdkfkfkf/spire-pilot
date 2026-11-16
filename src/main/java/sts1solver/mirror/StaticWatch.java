@@ -575,6 +575,20 @@ public final class StaticWatch {
         return "not sampled";
     }
 
+    /**
+     * B187 gate S255: the reference this window snapshotted for a watched field, or
+     * {@code "not sampled"} when the field was not part of it. Proves the audio stand-in is never
+     * what the watch records -- otherwise uninstall would write the stand-in into the real game.
+     */
+    public static synchronized Object snapshotValueForTest(Field f) {
+        for (Map.Entry<Watch, Snap> e : snaps.entrySet()) {
+            if (e.getKey().field == f) {
+                return e.getValue().staticValue;
+            }
+        }
+        return "not sampled";
+    }
+
     /** B169 gate S228: how many bare references were released during a window and left released. */
     public static synchronized int releasedForTest() {
         return released;

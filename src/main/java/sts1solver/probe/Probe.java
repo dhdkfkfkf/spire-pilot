@@ -6519,7 +6519,15 @@ Probe.core("S134 B84: a select screen opened by a power (Foresight scry) still g
                 // first winning line exists -- exactly the window B121 previews in.
                 PlanCache.clear();
                 Gameplay.reset();
-                Gameplay.setBudgetCapForTest(1200L);
+                // 2026-11-15: this gate used to run both halves on a 1200ms budget, which encoded an
+                // assumption about the MACHINE: at the 0.38 ms/node of the B121 era the B179 ladder's
+                // 35% deep rung (420ms) reached the ~280 nodes this board needs for its first ten-step
+                // win. On a loaded machine the same board costs 4.5 ms/node, so 420ms bought ~90 nodes,
+                // the narrow rung was spent before layer 7 and the search widened instead of going
+                // deep -- no winning line, six null previews, and the failure looked like a preview bug.
+                // Half (a) only needs *a* plan (a survival line publishes too), so it stays short; the
+                // deep half below gets a cap with real headroom and stops itself once it has sampled.
+                Gameplay.setBudgetCapForTest(2000L);
                 try {
                     // (a) the threshold really gates: a search shorter than it never shows a row.
                     Gameplay.setPreviewAfterMsForTest(600000);
@@ -6546,6 +6554,11 @@ Probe.core("S134 B84: a select screen opened by a power (Foresight scry) still g
                     // cache hit would publish a plan with no search at all and nothing to preview.
                     PlanCache.clear();
                     Gameplay.setPreviewAfterMsForTest(0);
+                    // Cap, not a target: the loop below stops the search as soon as it has sampled the
+                    // preview, so the cap only bounds the worst case (a machine too slow to ever reach
+                    // a winning line). ~280 nodes is the measured first-win point; 9000ms is 7x that
+                    // at today's 4.5 ms/node and still 3x at 10 ms/node.
+                    Gameplay.setBudgetCapForTest(9000L);
                     Gameplay.startQuickSolve();
                     String previewText = null;
                     boolean previewWasActive = false;
@@ -6553,11 +6566,13 @@ Probe.core("S134 B84: a select screen opened by a power (Foresight scry) still g
                     int previewPillsSeen = 0;
                     String previewFirstRow = "-";
                     boolean previewIsWin = false;
+                    int sampledNodes = -1;
                     deadline = System.currentTimeMillis() + 180000L;
                     while (!Gameplay.advanceQuickForTest(5L) && System.currentTimeMillis() < deadline) {
                         String now = String.join(" | ", Gameplay.lines());
                         if (previewText == null && now.contains("暂定路线")) {
                             previewText = now;
+                            sampledNodes = Gameplay.quickNodesForTest();
                             previewIsWin = Gameplay.previewWinForTest();
                             // Sample the strip in the very same tick: once the search finishes,
                             // finishQuick clears it, so a later read would only ever see nothing.
@@ -6570,9 +6585,14 @@ Probe.core("S134 B84: a select screen opened by a power (Foresight scry) still g
                                     previewFirstRow = sample.get(i).label;
                                 }
                             }
+                            // Sampled this tick: end the search here instead of burning the whole cap.
+                            // finishQuick still publishes and still drops the preview, which is the
+                            // tail asserted after the loop.
+                            Gameplay.stopQuickSolve();
                         }
                     }
-                    Log.info("  S171 preview: " + String.valueOf(previewText));
+                    Log.info("  S171 preview after " + sampledNodes + " node(s): "
+                            + String.valueOf(previewText));
                     Probe.check(previewText != null,
                             "the panel shows the held line while the search is still running",
                             String.valueOf(previewText));
@@ -10693,6 +10713,302 @@ Probe.core("S134 B84: a select screen opened by a power (Foresight scry) still g
                 } finally {
                     S229_BIG = new byte[16];
                     sts1solver.mirror.StaticWatch.resetForTest();
+                }
+            }
+        });
+
+        // B187 (user m01082/m01098): B185 let the window really run mod audio and then closed what
+        // the window left behind. That cleanup wrote an already-closed live clip back into the mod
+        // field, and the next window's stop()->flush() killed the JVM inside
+        // DirectAudioDevice.nFlush (hs_err_pid17280, 2026-11-15 21:22:02). The contract is now
+        // inverted: the window parks an inert stand-in (SandboxClip) in every clip-typed mod static,
+        // so a mod's play() early-outs and no line is opened at all; uninstall puts the live
+        // reference back only when its line is still open, and writes null when it is not.
+        // Clip proxies pin that contract without a device -- they prove nothing about the native
+        // layer, which is what S257 is for (rule I1).
+        Probe.core("S255 a window parks a stand-in clip instead of running mod audio (B187)",
+                new Runnable(){
+            @Override
+            public void run() {
+                java.lang.reflect.Field fLive;
+                java.lang.reflect.Field fSandbox;
+                try {
+                    fLive = Probe.class.getDeclaredField("S255_LIVE");
+                    fLive.setAccessible(true);
+                    fSandbox = Probe.class.getDeclaredField("S255_SANDBOX");
+                    fSandbox.setAccessible(true);
+                } catch (Throwable t) {
+                    Probe.check(false, "S255 can reach its own statics", String.valueOf(t));
+                    return;
+                }
+                sts1solver.mirror.AudioQuiet.resetForTest();
+                sts1solver.mirror.StaticWatch.resetForTest();
+                sts1solver.mirror.AudioQuiet.watchForTest(fLive);
+                sts1solver.mirror.AudioQuiet.watchForTest(fSandbox);
+                sts1solver.mirror.StaticWatch.watchForTest(fLive);
+                S255Clip live = new S255Clip("live");
+                javax.sound.sampled.Clip liveClip = S255Clip.proxy(live);
+                live.running = true;
+                S255_LIVE = liveClip;
+                S255_SANDBOX = null;
+                try {
+                    // ---- Window A: the stand-in contract ------------------------------------
+                    int swapped0 = sts1solver.mirror.AudioQuiet.swappedForTest();
+                    int closed0 = sts1solver.mirror.AudioQuiet.closedForTest();
+                    int cleared0 = sts1solver.mirror.AudioQuiet.clearedForTest();
+                    int putBack0 = sts1solver.mirror.AudioQuiet.putBackForTest();
+                    World a = World.captureLive();
+                    a.install();
+                    Object parked = S255_LIVE;
+                    Probe.check(sts1solver.mirror.SandboxClip.isSandbox(parked),
+                            "the window parks the inert stand-in in the clip static",
+                            String.valueOf(parked));
+                    Probe.check(parked != liveClip,
+                            "the stand-in is not the live clip", String.valueOf(parked));
+                    Probe.check(!live.closed && live.running,
+                            "the live clip is not touched by install",
+                            "closed=" + live.closed + " running=" + live.running);
+                    // This is exactly YuAiMusic.play()'s first instruction: a non-null field means
+                    // "already playing", so the real AudioSystem.getClip() is never reached.
+                    Probe.check(S255_LIVE != null,
+                            "a mod's play() early-outs on the stand-in and opens no line",
+                            String.valueOf(S255_LIVE));
+                    boolean standUp = false;
+                    if (sts1solver.mirror.SandboxClip.isSandbox(S255_LIVE)) {
+                        javax.sound.sampled.Clip stand = (javax.sound.sampled.Clip) S255_LIVE;
+                        stand.stop();
+                        stand.flush();
+                        stand.close();
+                        standUp = stand.isOpen() && stand.isRunning();
+                        Probe.check(stand.getFramePosition() == 0
+                                        && stand.getMicrosecondPosition() == 0L,
+                                "the stand-in reports a zero position",
+                                stand.getFramePosition() + " frame(s)");
+                        Probe.check(stand.getFormat() != null,
+                                "the stand-in reports a usable audio format",
+                                String.valueOf(stand.getFormat()));
+                        Probe.check(stand.getControl(javax.sound.sampled.FloatControl.Type.MASTER_GAIN)
+                                        instanceof javax.sound.sampled.FloatControl,
+                                "the stand-in answers a gain control a mod can cast",
+                                String.valueOf(stand.getControl(
+                                        javax.sound.sampled.FloatControl.Type.MASTER_GAIN)));
+                    } else {
+                        Probe.check(false, "the stand-in is a SandboxClip", String.valueOf(S255_LIVE));
+                    }
+                    Probe.check(!live.closed && live.running,
+                            "stop/flush/close on the stand-in never reach the live clip",
+                            "closed=" + live.closed + " running=" + live.running);
+                    Probe.check(standUp,
+                            "the stand-in still reports open/running after close()",
+                            String.valueOf(standUp));
+                    // The watch samples in afterInstall(), which now runs BEFORE the swap: it must
+                    // have recorded the live clip, or uninstall would write the stand-in into the
+                    // live game.
+                    Probe.check(sts1solver.mirror.StaticWatch.snapshotValueForTest(fLive) == liveClip,
+                            "StaticWatch snapshotted the live clip, not the stand-in (ordering)",
+                            String.valueOf(
+                                    sts1solver.mirror.StaticWatch.snapshotValueForTest(fLive)));
+                    // A clip the window opened for itself must still be closed (B185's half of the
+                    // mechanism stays).
+                    S255Clip leaked = new S255Clip("leaked");
+                    leaked.running = true;
+                    S255_SANDBOX = S255Clip.proxy(leaked);
+                    a.uninstall();
+                    Log.info("  S255 A parked=" + parked + " leakedClosed=" + leaked.closed
+                            + " liveClosed=" + live.closed + " liveRestored=" + (S255_LIVE == liveClip)
+                            + " sandboxCleared=" + (S255_SANDBOX == null) + " report="
+                            + sts1solver.mirror.AudioQuiet.report());
+                    Probe.check(leaked.closed,
+                            "a clip the window opened itself is closed", "closed=" + leaked.closed);
+                    Probe.check(S255_LIVE == liveClip,
+                            "the live reference is put back", String.valueOf(S255_LIVE));
+                    Probe.check(S255_SANDBOX == null,
+                            "a field the window filled is put back to null",
+                            String.valueOf(S255_SANDBOX));
+                    Probe.check(!live.closed && live.running,
+                            "the live clip survived the window untouched",
+                            "closed=" + live.closed + " running=" + live.running);
+                    Probe.check(sts1solver.mirror.AudioQuiet.swappedForTest() - swapped0 >= 2,
+                            "both watched fields were parked on the stand-in",
+                            String.valueOf(
+                                    sts1solver.mirror.AudioQuiet.swappedForTest() - swapped0));
+                    Probe.check(sts1solver.mirror.AudioQuiet.closedForTest() - closed0 == 1,
+                            "the window counts exactly the clip it opened",
+                            String.valueOf(
+                                    sts1solver.mirror.AudioQuiet.closedForTest() - closed0));
+                    Probe.check(sts1solver.mirror.AudioQuiet.putBackForTest() - putBack0 >= 1,
+                            "the live reference was put back",
+                            String.valueOf(
+                                    sts1solver.mirror.AudioQuiet.putBackForTest() - putBack0));
+                    Probe.check(sts1solver.mirror.AudioQuiet.clearedForTest() - cleared0 >= 1,
+                            "the field the window filled is counted as cleared",
+                            String.valueOf(
+                                    sts1solver.mirror.AudioQuiet.clearedForTest() - cleared0));
+                    Probe.check(!sts1solver.mirror.StaticWatch.writtenForTest().contains(
+                                    "sts1solver.probe.Probe#S255_LIVE"),
+                            "the static watch did not report a write to the clip static (the field"
+                                    + " only ever held the stand-in AudioQuiet parked there)",
+                            sts1solver.mirror.StaticWatch.writtenForTest().toString());
+
+                    // ---- Window B: a release is restored (overturns B169) -------------------
+                    int putBack1 = sts1solver.mirror.AudioQuiet.putBackForTest();
+                    int released1 = sts1solver.mirror.AudioQuiet.releasedForTest();
+                    World b = World.captureLive();
+                    b.install();
+                    Probe.check(sts1solver.mirror.SandboxClip.isSandbox(S255_LIVE),
+                            "the second window parks the stand-in again",
+                            String.valueOf(S255_LIVE));
+                    // The mod's LineListener clears the field on the audio thread: exactly what B169
+                    // used to leave released.
+                    S255_LIVE = null;
+                    b.uninstall();
+                    Probe.check(S255_LIVE == liveClip,
+                            "a reference the window released is put back (B187 overturns B169)",
+                            String.valueOf(S255_LIVE));
+                    Probe.check(sts1solver.mirror.AudioQuiet.releasedForTest() - released1 == 1,
+                            "the window counted exactly one release",
+                            String.valueOf(
+                                    sts1solver.mirror.AudioQuiet.releasedForTest() - released1));
+                    Probe.check(sts1solver.mirror.AudioQuiet.putBackForTest() - putBack1 >= 1,
+                            "a release is restored, not dropped",
+                            String.valueOf(
+                                    sts1solver.mirror.AudioQuiet.putBackForTest() - putBack1));
+
+                    // ---- Window C: a live clip that really died is not put back -------------
+                    int dead1 = sts1solver.mirror.AudioQuiet.closedSnapshotForTest();
+                    S255Clip dying = new S255Clip("dying");
+                    dying.running = true;
+                    S255_LIVE = S255Clip.proxy(dying);
+                    World c = World.captureLive();
+                    c.install();
+                    Probe.check(sts1solver.mirror.SandboxClip.isSandbox(S255_LIVE),
+                            "the third window parks the stand-in", String.valueOf(S255_LIVE));
+                    // The player quit the track on another thread: the line behind the snapshot is
+                    // gone. Writing it back is what crashed the JVM (B187).
+                    dying.closed = true;
+                    dying.running = false;
+                    c.uninstall();
+                    Probe.check(S255_LIVE == null,
+                            "a live clip that died while the window was open is not put back (B187)",
+                            String.valueOf(S255_LIVE));
+                    Probe.check(sts1solver.mirror.AudioQuiet.closedSnapshotForTest() - dead1 == 1,
+                            "the dead live reference is counted and reported",
+                            String.valueOf(sts1solver.mirror.AudioQuiet.closedSnapshotForTest()
+                                    - dead1));
+
+                    // ---- Window D: a stop() the stand-in cannot intercept is reported ------
+                    int stops1 = sts1solver.mirror.AudioQuiet.liveStopsForTest();
+                    S255Clip stopped = new S255Clip("stopped");
+                    stopped.running = true;
+                    javax.sound.sampled.Clip stoppedClip = S255Clip.proxy(stopped);
+                    S255_LIVE = stoppedClip;
+                    World d = World.captureLive();
+                    d.install();
+                    // A field the window rewrites to the live clip itself (a final field would look
+                    // the same): the stand-in is no longer in the way, so the stop must be reported.
+                    S255_LIVE = stoppedClip;
+                    stoppedClip.stop();
+                    d.uninstall();
+                    Probe.check(sts1solver.mirror.AudioQuiet.liveStopsForTest() - stops1 == 1,
+                            "a sandbox stop() of the LIVE clip is detected and reported",
+                            "liveStops=" + (sts1solver.mirror.AudioQuiet.liveStopsForTest()
+                                    - stops1));
+                    Probe.check(S255_LIVE == stoppedClip,
+                            "the stopped live clip is still the field's value",
+                            String.valueOf(S255_LIVE));
+
+                    // ---- Window E: a stand-in left by a window that never ended ------------
+                    int stale1 = sts1solver.mirror.AudioQuiet.staleForTest();
+                    S255_SANDBOX = sts1solver.mirror.SandboxClip.shared();
+                    World e = World.captureLive();
+                    e.install();
+                    Probe.check(sts1solver.mirror.AudioQuiet.staleForTest() - stale1 == 1,
+                            "a stand-in left by a window that never ended is reported as stale",
+                            String.valueOf(
+                                    sts1solver.mirror.AudioQuiet.staleForTest() - stale1));
+                    e.uninstall();
+                    Probe.check(S255_SANDBOX == null,
+                            "a stale stand-in is cleared instead of looped into the live game",
+                            String.valueOf(S255_SANDBOX));
+
+                    // The gate is about the REAL leak: when YuAi is loaded, its field must be found.
+                    boolean hasYuai = false;
+                    try {
+                        Class.forName("yuaimod.YuAiMusic", false, Probe.class.getClassLoader());
+                        hasYuai = true;
+                    } catch (Throwable ignored) {
+                        // that mod is not installed in this run
+                    }
+                    java.util.List<String> watched = sts1solver.mirror.AudioQuiet.watchedForTest();
+                    Log.info("  S255 watched=" + watched + " yuaiInstalled=" + hasYuai);
+                    Probe.check(!hasYuai || watched.contains("yuaimod.YuAiMusic#currentClip"),
+                            "the mod static that actually leaked is watched when that mod is loaded",
+                            watched.toString());
+                    Probe.check(watched.contains("sts1solver.probe.Probe#S255_LIVE"),
+                            "the gate's own clip static is watched", watched.toString());
+                    // A discovered field that reflection cannot open guards NOTHING. The real YuAi
+                    // field is private static, so this is the assertion that would have caught the
+                    // first version (it logged IllegalAccessException and protected nothing).
+                    Probe.check(!hasYuai || sts1solver.mirror.AudioQuiet.readableForTest(
+                                    "yuaimod.YuAiMusic#currentClip"),
+                            "the mod static that actually leaked is actually readable",
+                            sts1solver.mirror.AudioQuiet.blindForTest().toString());
+                    Probe.check(sts1solver.mirror.AudioQuiet.blindForTest().isEmpty(),
+                            "no watched clip static is left locked",
+                            sts1solver.mirror.AudioQuiet.blindForTest().toString());
+                } catch (Throwable t) {
+                    Probe.check(false, "S255 ran without throwing", String.valueOf(t));
+                } finally {
+                    if (World.anyInstalled()) {
+                        World.forceRestore();
+                    }
+                    S255_LIVE = null;
+                    S255_SANDBOX = null;
+                    sts1solver.mirror.StaticWatch.resetForTest();
+                    sts1solver.mirror.AudioQuiet.resetForTest();
+                }
+            }
+        });
+
+        // B187 + rule I1: the proxy gate above cannot prove that a REAL DirectAudioDevice line
+        // survives the same open/loop/stop/close sequence -- a fake Clip was exactly what stayed
+        // green while the game crashed (S255 v1). This one touches the real mixer. With no usable
+        // output device (headless/muted host) it logs SKIP and counts NOTHING: a skip is not a pass.
+        Probe.core("S257 a real javax.sound clip survives open/loop/stop/close (B187 device smoke)",
+                new Runnable(){
+            @Override
+            public void run() {
+                javax.sound.sampled.Clip clip = null;
+                try {
+                    javax.sound.sampled.AudioFormat fmt =
+                            new javax.sound.sampled.AudioFormat(8000.0f, 8, 1, false, false);
+                    javax.sound.sampled.DataLine.Info info =
+                            new javax.sound.sampled.DataLine.Info(
+                                    javax.sound.sampled.Clip.class, fmt);
+                    clip = (javax.sound.sampled.Clip)
+                            javax.sound.sampled.AudioSystem.getLine(info);
+                    byte[] silence = new byte[400];
+                    clip.open(fmt, silence, 0, silence.length);
+                    clip.loop(1);
+                    clip.stop();
+                    Probe.check(clip.isOpen(),
+                            "S257 the real clip is open after open/loop/stop",
+                            "open=" + clip.isOpen());
+                    clip.close();
+                    Probe.check(!clip.isOpen(),
+                            "S257 the real clip closes cleanly on a real device",
+                            "open=" + clip.isOpen());
+                } catch (Throwable t) {
+                    Log.warn("S257 SKIP: no usable javax.sound output device (" + t + "); the"
+                            + " native DirectAudioDevice layer is NOT covered by this run (rule I1)");
+                } finally {
+                    if (clip != null) {
+                        try {
+                            clip.close();
+                        } catch (Throwable ignored) {
+                            // already closed or never opened
+                        }
+                    }
                 }
             }
         });
@@ -17701,6 +18017,13 @@ private static void s78Write(File file, String text, long modified) {
      */
     static byte[] S229_BIG = new byte[16];
 
+    /**
+     * S255: the clip the LIVE game holds, and a second static the sandbox would leave its own clip
+     * in. Both are watched by AudioQuiet, which must close only what the window created.
+     */
+    static javax.sound.sampled.Clip S255_LIVE;
+    static javax.sound.sampled.Clip S255_SANDBOX;
+
     /** S157: the sizes of a screen's answer sets, e.g. {@code [0,1,2]}. */
     private static String optionSizes(java.util.List<java.util.List<AbstractCard>> opts) {
         StringBuilder sb = new StringBuilder("[");
@@ -17741,6 +18064,81 @@ private static void s78Write(File file, String text, long modified) {
 
         static void set(World world) {
             MIRROR.set(world);
+        }
+    }
+
+    /**
+     * S255: a Clip stand-in that needs no audio device. It records what AudioQuiet does to it --
+     * stop/pause clear running, start/loop set it, close marks it closed -- which is exactly the
+     * difference between "left looping in the live game" and "closed with its window".
+     */
+    static final class S255Clip
+    implements java.lang.reflect.InvocationHandler {
+        final String name;
+        boolean running;
+        boolean closed;
+
+        S255Clip(String string) {
+            this.name = string;
+        }
+
+        static javax.sound.sampled.Clip proxy(S255Clip s255Clip) {
+            return (javax.sound.sampled.Clip)java.lang.reflect.Proxy.newProxyInstance(
+                    Probe.class.getClassLoader(),
+                    new Class[]{javax.sound.sampled.Clip.class}, s255Clip);
+        }
+
+        @Override
+        public Object invoke(Object object, java.lang.reflect.Method method, Object[] objectArray) {
+            String string = method.getName();
+            if ("stop".equals(string) || "pause".equals(string)) {
+                this.running = false;
+                return null;
+            }
+            if ("start".equals(string) || "loop".equals(string)) {
+                this.running = true;
+                return null;
+            }
+            if ("close".equals(string)) {
+                this.closed = true;
+                this.running = false;
+                return null;
+            }
+            if ("flush".equals(string) || "drain".equals(string)) {
+                return null;
+            }
+            if ("isRunning".equals(string) || "isActive".equals(string)) {
+                return Boolean.valueOf(this.running);
+            }
+            if ("isOpen".equals(string)) {
+                return Boolean.valueOf(this.running || !this.closed);
+            }
+            if ("toString".equals(string)) {
+                return "S255Clip(" + this.name + ")";
+            }
+            if ("hashCode".equals(string)) {
+                return Integer.valueOf(System.identityHashCode(object));
+            }
+            if ("equals".equals(string)) {
+                return Boolean.valueOf(object == objectArray[0]);
+            }
+            Class<?> clazz = method.getReturnType();
+            if (clazz == Boolean.TYPE) {
+                return Boolean.FALSE;
+            }
+            if (clazz == Integer.TYPE) {
+                return Integer.valueOf(0);
+            }
+            if (clazz == Long.TYPE) {
+                return Long.valueOf(0L);
+            }
+            if (clazz == Float.TYPE) {
+                return Float.valueOf(0.0f);
+            }
+            if (clazz == Double.TYPE) {
+                return Double.valueOf(0.0d);
+            }
+            return null;
         }
     }
 }

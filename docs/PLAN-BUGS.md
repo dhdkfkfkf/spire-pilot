@@ -3890,6 +3890,8 @@ pending 被清空后，`planIsStale()` 的 `pending == null` 分支只看 `curre
 **③对 mod 的影响**：实机 `quiet()` 恒 false，**行为逐字不变**（雨爱在半血时照常播）；沙盒窗口内其它 mod 挂在 `healthBarUpdatedEvent` 上的表现监听不再被触发（它们本来也不应看到模拟中的血量变化）；面板输出、自动出牌、搜索候选与评分全部不变（没有任何逻辑读 `healthBarAnimTimer`）；其它 mod 兼容性——若某 mod 把**逻辑**写在这个方法上（不是表现），它在沙盒里会看不到事件；当前装的全部 mod 扫描后只有雨爱挂在这里，且只播特效。
 
 **已知边界**：①只静音这一个事件；其它纯表现派发（spine 动画已由 `AnimationMute` 处理、`BobEffect` 已由 B166 拷贝隔离）若再发现同类卡顿，按同一模式加白名单式 instrument；②手打（实机）路径完全没变，所以「以前不卡、现在每局都卡」的解释是搜索/回放对局的节点数变多（B164 的 `PostCombatLoot` 每胜利节点还要泵 `room.update()`），本修把这条放大项去掉，但不改变节点数。
+**订正（2026-11-15，B185）**：本节「沙盒窗口里 `YuAiMusic.play()` 根本没跑起来」只对**计划里没有回血步**的局面成立。回血步（香蕉、混沌药水、遗物回血等）会让沙盒真调 `AbstractCreature.heal(int)`，雨爱挂在 `heal(int)` 与 `heal(int, boolean)` 上的两个 postfix 在窗口内照常执行 → `javax.sound.sampled` 另开一条真实音频线，`MusicMute`(B45)/`SfxMute`(B65) 都管不到；症状不是卡帧，而是「后台雨爱声音重复播放」。已由 B185（`mirror/AudioQuiet`，机制 M50）在窗口卸载时回收并 `close` 掉这些 Clip。
+
 ## B169 — 雨爱在搜索后假死：静态监听把别的线程的「释放」回填掉了（user m20148）
 
 **现象**：实机打到半血雨爱正常响；搜索/计算结束后音乐不再响（假死），需退出重进才恢复。`solver.log` 21:37 只有 2 条 `WARN static watch: … yuaimod.YuAiMusic#currentClip (object)`（21:37:07.561 首报 + 21:37:17.958 的 5s 限流汇总 `1 write(s)`），不是「每个沙盒窗口写一次」那种数量级。
@@ -4281,6 +4283,96 @@ pending 被清空后，`planIsStale()` 的 `pending == null` 分支只看 `curre
 - **③ 对 mod 的影响**：不进 `Digest`（帧长不是任何哈希的一部分），不影响转移去重、worker 根指纹、live 未污染校验；面板、路线、自动出牌、评分、候选枚举、其它 mod 的共享对象全部不变；实机（live）路径不经过 `FramePlan`，屏打开时仍走 `screenDeltaApplies()` 的 1/60 s。唯一可见变化是**沙盒里每节点的帧数**，以及 `solver.log` 新增的 `profile:` 行（切片路径也会打一行）。
 - **已知边界**：①白名单是「按已装 jar 审计出来的」，不是运行时推断（审计脚本 `_tmp/audit/FrameAudit.java`，一次性工具）；②`exact=138` 那类 `== 初值` 判断靠「白名单类前 3 帧 0.05 s」兜住，非白名单类本来就逐帧 0.05 s；③屏帧存在时（`isScreenUp`）任何计划都不生效，这对 `BurnIncreaseAction` 这种 3 s 动作意味着一次 drain 内跑不完（停滞护栏在 49 步退出）——实机同样要 180 个 1/60 帧，属正确行为；④本版仍未把「实机 nodes/ms / 每秒世界线数」写成门禁，验收要靠用户实测日志（B183 的教训）。
 - **文档**：PLAN.md（bug 表 B184 行、收尾状态、新 sha、复测条目、历史范围改 B1–B184）、PLAN-P6（读数约定 + P6-94）、PLAN-WORKLOG（2026-11-14 B184）、TESTING（头部 sha/基线/明细）、SANDBOX-MECHANISMS（机制 M49 + 页脚）。
+
+## B185 — 沙盒窗口里不许真开 javax.sound 音频线（新机制 M50：窗口级 Clip 回收）
+
+> **状态：已实施（2026-11-15 01:20），已被 B187 取代（2026-11-15 晚）。** 本条的「窗口结束再 close」只消除了叠音、没有隔离执行：它会把**已关闭的实机 Clip 写回**字段，下一窗口 `stop()→flush()` 在 `DirectAudioDevice.nFlush` 原生崩溃（`hs_err_pid17280.log`）。B187 改为「窗口内把 Clip 静态换成惰性替身、一次线都不开」；本条的 `begin()/end()` 挂点与 `blind` 可读性断言保留，`close` 只用于窗口自己开出来的 Clip；B169 的「释放保持释放」在音频静态上被推翻。等你验收（m00149「做A，等我验收再上传创意工坊和github」）。 用户报「沙盒疑似没有隔离被『半血自动播放雨爱』mod 控制的接口，导致沙盒计算时雨爱声音在后台重复播放」，且明确「沙盒只需要模拟战斗相关的部分」。
+
+- **用户原话**：m00001「查一下 sts1 战斗求解器 mod…这个 mod 现在沙盒疑似没有隔离由『半血自动播放雨爱』mod 控制的接口导致沙盒计算时雨爱声音在后台重复播放。查一下哪里没有隔离，沙盒只需要模拟战斗相关的部分。告诉我修改方案但是先不动手」；m00149「做A，等我验收再上传创意工坊和github」。
+- **根因（不是「音量没关」，是「根本没经过我们的 mixer」）**：模拟回血时沙盒真的调用 AbstractCreature.heal(int) → 内部再调 heal(int, boolean)。雨爱（yuaimod.YuAiMusic）在这两个方法上都挂了 @SpirePostfixPatch，MTS 把 postfix 插在**每个 RETURN 之前**，因此窗口内两个 postfix 都会真跑：OnHealAmount / OnHealAmountShowEffect → YuAiController.evaluate(沙盒玩家) → YuAiMusic.play() → javax.sound.sampled.AudioSystem.getClip() 开一条**真实音频线**（loop）。而 mirror/MusicMute(B45) 只接管 CardCrawlGame.music、mirror/SfxMute(B65) 只接管 CardCrawlGame.sound，两者都管不到 javax.sound；drive/Driver.begin() 里的 Settings.SOUND_VOLUME = 0 也无效（雨爱音量＝MUSIC_VOLUME * MASTER_VOLUME，且 0 音量照样 getClip() 开线）。mirror/PresentationQuiet(B168) 只改写了 14 处 healthBarUpdatedEvent() 调用点，挡不住 heal 方法**自身**的 postfix（prefix 提前 return 也无效，postfix 仍挂在 RETURN 前）。
+- **「重复播放」是怎么被放大的**：每个搜索节点开一个窗口；窗口结束时 mirror/StaticWatch 把 YuAiMusic#currentClip 还原成窗口前的快照值，窗口内新建的 Clip 于是**失去引用但仍在 loop、没人 close**；下一个回血节点再建一个 ⇒ N 条叠加。同时 mod 自己的 active 位也被回滚，evaluate 每次看到 active && !isPlaying 就打「播放意外终止」。
+- **现场证据**：solver.log 01:26:31.875 quick search: started；01:26:36.172 yuaimod.YuAiMusic#currentClip was released (set to null) while a window was open; left released.；01:26:36.984 the sandbox wrote mod static yuaimod.YuAiBgm#STATE (map) … put back；01:26:37.170 1 write(s) to live-shared mod statics put back: [yuaimod.YuAiMusic#currentClip (object)]。YuAiBgm#STATE 只有 YuAiBgm.tick() 写，currentClip 只有 play/stop/LineListener 写 ⇒ 窗口内 evaluate/play 确实在跑。D:\Steam\steamapps\common\SlayTheSpire\sendToDevs\mts_process_launch.log 末尾 400 行统计：播放意外终止×70、开始循环播放×40、停止播放×24，且 7521–7597 行同一 HP 序列（22,27,15,17）重复两遍 —— 实机 HP 恒 17/74，那些 evaluate 收到的是沙盒玩家。
+- **5 个钩子的隔离现状**（本次只修真正漏的）：①GameLoopPatch→CardCrawlGame.update postfix：窗口内不跑（搜索在 BaseMod.receivePostUpdate 里同步跑），未隔离但不触发；②OnHealthBarUpdated→healthBarUpdatedEvent：已由 B168 隔离；③OnHealAmount→heal(int)：**未隔离**；④OnHealAmountShowEffect→heal(int, boolean)：**未隔离（主漏点）**；⑤OnGameVolumeChange→MusicMaster.updateVolume→syncVolume：未隔离，风险低（窗口内不跑）。
+- **修法（新文件 src/main/java/sts1solver/mirror/AudioQuiet.java，零 mod 类名依赖）**：初始化时扫描全部 mod 的静态字段，缓存所有 javax.sound.sampled.Clip 类型的字段（实测只命中 yuaimod.YuAiMusic#currentClip）；World.install() 在 MusicMute.begin(true) 之后 begin()，World.uninstall() 在 StaticWatch.beforeUninstall() **之前** end() —— 顺序是安全关键：先 close 掉窗口内新建的 Clip，再让 StaticWatch 把字段还原成实机快照。每个窗口都跑（不能像 StaticWatch 那样采样一次）。end() 时字段值 ≠ 记录值且新值是非空 Clip → stop(); flush(); close() 再还原；新值 null 沿 B169 的释放放行。
+- **补丁 1（真实 bug，门禁最初没抓到）**：首次带雨爱跑 S255 时日志出现 WARN audio quiet: cannot read yuaimod.YuAiMusic#currentClip: java.lang.IllegalAccessException … modifiers "private static" —— 字段被**发现**却**读不了**（没 setAccessible），保护等于零，而门禁当时仍 PASS（只查成员资格）。现已：all() 对每个候选先 f.setAccessible(true)；打不开的进 blind 清单并 Log.warnEvery("audio-quiet-blind", 30000L, …)，**不让盲字段冒充受保护字段**；新增 readableForTest(key) / blindForTest() 供门禁断言。
+- **门禁 S255(16)**「audio quiet: clips a sandbox window creates are closed on uninstall」：合成环境用假 Clip（Probe.S255Clip，Proxy 实现 Clip，记录 running/closed）+ 两个静态字段 Probe.S255_LIVE / Probe.S255_SANDBOX 模拟「实机字段」。断言覆盖：窗口内新建 Clip→close；沙盒覆写实机字段→原值还原且新 Clip 被 close；窗口计数＝2；沙盒对实机 Clip 调 stop() 被检出并报告；带真实雨爱时 readableForTest("yuaimod.YuAiMusic#currentClip") 为真且 blindForTest() 为空。
+- **反向验证（已还原）**：注释掉 World.java 的 AudioQuiet.begin();（约 336 行）与 AudioQuiet.end();（约 380 行）→ build+install（sha 0D9615C7D882A6C0664393C1BCB28DDAD26E791706C130A682BEF35C030A64FC）→ 跑 S255：**passed=4 failed=10**，红行 a clip the window left in a static is closed | closed=false、a sandbox clip that overwrote the live field is closed too | closed=false、the window counts exactly the two sandbox clips | 0、a sandbox stop() of the LIVE clip is detected and reported | liveStops=0 ⇒ 门禁有牙。
+- **结果**：S255 不带雨爱 passed=14 failed=0；加 setAccessible 后带 -Mods "YuAiBloodMusic" 跑 S255 → **passed=16 failed=0**、yuaiInstalled=true、watched=[yuaimod.YuAiMusic#currentClip, sts1solver.probe.Probe#S255_LIVE, sts1solver.probe.Probe#S255_SANDBOX]、无 IllegalAccessException、无 blind 字段；报告行 audio quiet: 3 mod clip static(s), 1 window(s), 2 sandbox clip(s) closed, 2 live reference(s) put back。全量 core **待复跑确认（S171 修复前全量 755/6 全在该门、其余 751 条全绿；S171 单跑 10/0；02:46 用户叫停复跑）**（门禁 S1–S255）。已装 jar 实测 **1,279,962 B，sha256 9D63ED91E329239EFB7E764DD22DFB6A9832A914AD401CB960CF0DC82C6432B2**（jar 非确定性，sha 以 Get-FileHash 实测为准）。
+- **① 代价**：每个窗口一次「遍历 mod 静态字段（只首次扫描并缓存）」+ 每个受保护字段一次 Field.get(null)，卸载时最多一次 stop/flush/close（微秒级，与搜索节点数同阶，不是每帧）。内存只有字段表（实测 1 条）与每窗口的记录值。不新增线程、不改帧长。
+- **② 风险**：①只保护**静态字段**里的 Clip，实例字段或集合（List/Map/数组）里藏的 Clip 抓不到 —— 记为已知边界；②同一 Clip 对象被 stop() 但字段未被改写时检测不到（A 方案的边界；B 方案才能彻底消音）；③close() 打真实音频线失败（驱动/设备占用）只记日志不抛；④扫描依赖 ModStatics 的候选枚举，mod 用非常规方式持有 Clip（native/本地库）则看不见；⑤回滚＝删 AudioQuiet.begin()/end() 两行后重编。
+- **③ 对 mod 的影响**：只在**沙盒窗口**内生效；窗口外实机雨爱照常播放，不受任何影响；不改 mod 的字段语义（窗口内新建的 Clip 一律 close，实机快照原值照旧还原）；面板、自动出牌、搜索结果、评分、候选枚举、其它 mod 的共享对象全部不变。可见变化：叠加循环消失（最多剩一个窗口长度的碎片），solver.log 新增 audio quiet: … clip static(s) … 摘要行与（异常时）audio-quiet-blind 告警。
+- **已知边界**：①「A 方案是通用兜底，不是彻底静音」——想在窗口内一声不出，需 B 方案（modsupport/YuAiQuiet，把 YuAiMusic.audioData 换成 44 字节静音 WAV、currentClip 换只读 Proxy）；本版按 m00149 只做 A；②B168 原结论「窗口里 clip 本来就没启动过」只在**计划里没有回血步**的局面成立，已在 B168 段落补订正；③未隔离 CardCrawlGame.update / MusicMaster.updateVolume 的 postfix —— 窗口内不跑、无实测症状，不做。
+- **文档**：PLAN.md（bug 表 B185 行、收尾状态、新 sha、复测第 64 条、订正 B168 行）、PLAN-P6（P6-95 + 订正 P6-78）、PLAN-WORKLOG（2026-11-15 B185 + 订正 B168 段）、SANDBOX-MECHANISMS（机制 M50 + 页脚）、TESTING（头部 sha/基线）。
+
+## B186 — S171 预览门禁把「机器速度」当常量（1200ms 预算 × B179 阶梯只给深档 35%）
+
+> **状态：已实施（2026-11-15 02:36），只改测试代码（probe/Probe.java 的 S171），产品代码零改动；等你验收（m00149）。**
+
+**起因**：B185 交付前跑全量 core 出 `failed=6`，6 条全部落在 S171（预览相关断言），其余 755 条通过。按项目规矩「门禁红了先怀疑门禁自己」，先做 A/B 对照，不动断言。
+
+**A/B 对照（先证明与 B185 无关）**：把 `World.java` 两处挂点注释成 `// BASELINE-CHECK: AudioQuiet.begin(); / AudioQuiet.end();` → build+install（sha `57DB2A72F66BEE147FBC1BE4E9B247F90897136C706808E7332EB5E8E7EFFB55`）→ `-Gates S171` 仍 **passed=4 failed=6**，且 (b) 读数与装 B185 时几乎一致（`nodes=44 totalNodes=276 … 1255ms` 对 `nodes=41 totalNodes=278 … 1258ms`）⇒ 不是 AudioQuiet 的开销或副作用。
+
+**根因**：S171 的 (b) 段只有在「搜索手里已经握着一条胜利线」时才有预览可采样，而这块板（seed 4242、80 HP、4×Strike_R+Bash+3×Defend_R、两只 LouseNormal + 一只 LouseDefensive）的第一条胜线约需 **281 个节点**。B179 的阶梯把 **35%** 预算给窄深档（1200ms → 420ms）：B121 记录的时代是 0.38 ms/节点，420ms ≈ 1100 节点，够；当前机器实测 4.5 ms/节点，420ms ≈ 90 节点，窄档没走到第 7 层就被加宽，于是整轮拿不到胜线，6 条断言全读 `null`（`S171 preview: null`、`rows=0 pills=0`）。验证：把该门预算临时改成 20000ms（`PROBE-EXPERIMENT`）→ **passed=10 failed=0**，预览在 3%（≈281 条世界线 / 1.3s）出现，读数为 `窄搜 beam=10 layers=9`、`暂定路线 · 10 步 · 预计 -6 HP` ⇒ 板、预览链路、断言都正常，红的是**预算里隐含的机器速度前提**。
+
+**修法（只改 `probe/Probe.java` 的 S171）**：
+- (a) 段 `setBudgetCapForTest` 1200→**2000ms**：这段只需要「有计划可发布」（生存线也会发布），不需要胜线；
+- (b) 段 →**9000ms**，并把它当**上限**而非目标：循环里一旦采到「暂定路线」，在同一拍完成采样后调 `Gameplay.stopQuickSolve()` 提前收尾（`finishQuick` 照常发布计划并清预览，尾部断言「发布后预览消失」不变）；
+- 日志改成 `S171 preview after N node(s): …`，万一为红也能直接看到当时搜了多少节点。
+- 注释里写明这段预算与 0.38→4.5 ms/节点的事实，避免下一个人再把它当常量。
+
+**门禁**：S171 仍是 **10 条断言**，一条没删、一条没放宽；(a) 覆盖「自然预算到期 → 发布计划」+「阈值不到绝不预览」，(b) 覆盖「采样预览条 → 停搜 → 发布后预览消失」，顺带把 `stopQuickSolve()` 的收尾路径也纳入门禁（此前无门禁覆盖）。
+
+**结果**：`-Gates S171` → **passed=10 failed=0**，整门约 3.5s（(a) 2s + (b) 采到即止），日志 `S171 preview after 281 node(s): …`。全量 core **待复跑确认（S171 修复前全量 755/6 全在该门、其余 751 条全绿；S171 单跑 10/0；02:46 用户叫停复跑）**（门禁 S1–S255）。安装物 jar **1,280,074 B**，sha256 `F24DE109C2D77A211923B62D6226BC3AE7CE720754B5337A35510BAD743D1F83`。
+
+**① 代价**：(b) 的墙钟上限从 1.2s 抬到 9s，但实际 1–2s 就采到并自行收尾，整门比原来（2×1.2s + 采样开销）大约多 1s；产品代码未改，游戏内运行时零开销、零内存增量。
+
+**② 风险**：预算抬高后若搜索真的退化到「再也找不到胜线」，门禁仍会红，只是晚约 9s 红 —— 判据没有被放宽，去掉的只是「必须在一台足够快的机器上跑」这个隐含前提；(b) 不再跑满整段预算，长预算下的自然收尾路径由 (a)（自然到期）与其它搜索门禁覆盖；`stopQuickSolve()` 依赖 `finishQuick` 发布最优线这一既有行为（本门现在直接盯着它，一旦被改坏会红）。
+
+**③ 对 mod 的影响**：无 —— 只动测试代码；面板输出、自动出牌节奏、搜索结果、评分、候选枚举、与其它 mod 的兼容性全部不变。
+
+**环境备注（给下次跑门禁的人）**：2026-11-15 02:29 实测本机 **4.5 ms/节点**（B121 记录为 0.38），当时后台有 3 个 `cloudmusic` + `audiodg` 与 DSH 自身占 CPU（瞬时总占用 40%，24 逻辑核；MuMu/MAA 未运行）。跑验收门禁前建议先关掉占 CPU 的音频/模拟器，否则真实 1200ms 快搜只查得到 ~280 个节点，与 B184 口径不可比。
+
+**文档**：本段 + PLAN.md（bug 表 B186 行、收尾状态与 core 计数）+ PLAN-P6.md（P6-96）+ PLAN-WORKLOG.md（2026-11-15 B186 段）+ TESTING.md（S171 说明补预算与提前收尾）。
+
+## B187 — 沙盒隔离收口：窗口内不许执行任何非战斗副作用（闪退根因 + 防复发规则）
+
+> **状态：已实施（2026-11-15，T1–T6 落地）。** 方案与实施结果见 `docs/PLAN-ISOLATION.md`（目标 G1–G5、任务 T1–T6、审计清单、规则 I1–I3、验收 5 步、第 11 节结果）。门禁 S255/S257 按验收阶段约定（user m00732）留待用户实机跑。用户 m01082「要修复隔离」、m01098「给我隔离修复的计划，不要让类似的bug出现，沙盒隔离好和战斗无关的东西。给我写进计划」。
+
+**起因（闪退）**：2026-11-15 21:22:02 游戏崩溃，`hs_err_pid17280.log` 记录 `EXCEPTION_ACCESS_VIOLATION (0xc0000005, reading 0x0)`，native frame 指令 `48 8b 01`（`mov rax,[rcx]`，rcx=0）。栈：`DirectAudioDevice.nFlush` ← `DirectDL.flush` ← `YuAiMusic.stop()` ← `YuAiController.evaluate` ← `HealthSoundPatch$OnHealAmountShowEffect.Postfix` ← `AbstractCreature.heal(int,boolean)` ← `HealAction.update()` ← `Driver.runEndOfTurnQueue` ← `Driver.drain` ← `Driver.endTurn` ← `Legal.apply` ← `Solver.expandCore` ← `Session.expandAndRecord` ← `Gameplay.tick` ← `SolverMod.receivePostUpdate`。
+
+**根因（比 B185 更深一层）**：沙盒窗口里仍**真执行**雨爱的 `heal` 后置钩子，它的 `evaluate→play()` 会开真实 `javax.sound` 线。B185 只做「窗口结束把沙盒新建的 Clip 关掉、把字段写回」，于是：①窗口内 evaluate 先 `stop()` 了**实机 clip L**（listener 关掉 L、字段置 null）→ ②`play()` 新建 clip A 写入字段 → ③窗口结束关掉 A、把**已关闭的 L 写回** → ④下一窗口 `stop()` 对 L 调 `flush()`（雨爱 `stop()` 在 flush 前不查 `isOpen()`）→ DirectSound 空指针 → JVM 崩溃。`liveStops=0` 说明字段已被 A 覆盖，B185 的「快照 vs 现值」比较看不见快照已死。solver.log 同秒有 `closed 1 sandbox javax.sound clip(s) ... put the live reference back`，下一窗口崩溃。
+
+**结论**：B185 修的是叠音症状，没有隔离执行；「从外部 close 别人的 Clip」反而把残留升级成崩溃。**B185 段的「已兜住」按此订正。**
+
+**修法（分层，已实施）**：
+- **L1 崩溃防护**：`AudioQuiet.end()` 写回前查快照 `isOpen()`，已关闭就写 `null` 并 WARN/计数；`closeQuietly` 每步前查 `isOpen()`；end() 整体 try/finally。
+- **L2 真隔离**：`begin()` 把受保护静态的 Clip 换成**惰性替身**（`java.lang.reflect.Proxy` 或 `SandboxClip implements Clip`）：`isOpen/isActive/isRunning→true`，`open/start/loop/stop/flush/close/drain→空操作`，位置/长度→0，其余返回类型正确的空值。⇒ `play()` 因 `currentClip != null` 早退，**一次线都不开**；`stop()/pause()` 只打替身。end() 还原快照；mod 在窗口内自己置 null 时**也还原**（推翻 B169 的「释放保持释放」）。
+- **L3 顺序**：`AudioQuiet.begin()` 必须从 `World.java:336` 挪到 `StaticWatch.afterInstall()`（:348）之后，否则 StaticWatch 会把替身当实机值快照并写回；`end()` 仍保持在 `beforeUninstall()`（:383）之前。
+- **L4 审计**：把非战斗副作用列成表（javax.sound / 音乐 / 音效 / HTTP metrics / 文件与存档 / 统计成就 / 鼠标输入 / 发光 / VFX / 动画骨架），逐项标「现有替身 / 门禁 / 缺口」。
+- **门禁**：S255 改新契约（替身语义、不写回已关闭快照、StaticWatch 不记录替身），新增 S257 真实 `DirectAudioDevice` 冒烟（无设备则 SKIP 且不计通过），全部做反向验证。
+
+**实施结果（2026-11-15）**：
+- **T1 崩溃守卫**：`AudioQuiet.end()` 写回前查快照 `isOpen()`，已关闭就写 `null` 并计 `closedSnapshot` + WARN `audio quiet: writing null instead of putting a dead line back (B187)`；`closeQuietly` 的 stop/flush 每步前查 `isOpen()`（close 仍无条件执行）；`end()` 整体 `try/finally{snaps.clear()}`，单点异常不再打断后续字段与 StaticWatch。
+- **T2 惰性替身**：新增 `mirror/SandboxClip.java`（`implements Clip` 单例，`isOpen/isActive/isRunning` 恒 true、生命周期方法全空操作并计 `swallowedCalls()`、位置/长度 0、格式用实机 `getFormat()` 缓存、`getControl` 返回私有 `SandboxFloatControl extends FloatControl`）。`AudioQuiet.begin()` 把每个非 final 的 Clip 型静态换成替身（**连当时为 null 的也换**——雨爱 `stop()` 会置 null，不补这步下一节点 `play()` 又会开真线），已关闭的替身按 stale 处理。`end()`：替身→写回快照（快照已死写 null）、窗口新建 Clip→close、`null`→**也写回快照**（推翻 B169，`released` 语义从「保持释放」改为「恢复」）。
+- **T3 顺序**：`World.install()` 的 `AudioQuiet.begin()` 挪到 `StaticWatch.afterInstall()` 之后；`uninstall()` 仍先 `end()` 再 `beforeUninstall()`。`StaticWatch.snapshotValueForTest(Field)` 供门禁钉住「快照到的是实机 clip」。
+- **T5 门禁**：S255 重写为 **37 条**（窗口 A–E：替身契约/play 早退/位置格式增益控件/StaticWatch 顺序/窗口自建 Clip 被 close/覆写还原/释放还原/快照已死写 null/liveStop 检出/stale 清理 + 雨爱可读性）；新增 **S257**（**2 条**，真实 `AudioSystem.getLine` 开 8kHz/8bit/mono 静音 → loop → stop → close；无设备只 WARN `S257 SKIP: …`，**0 条通过**，不伪装成绿）。
+- **落地物**：jar **1,287,415 B**、sha256 `E85332F8C3B26B6B44C8CAF00CF04D9F2E3E1421013692557C38BB8E51E4A08D`，已装 `D:\Steam\steamapps\common\SlayTheSpire\mods\sts1-engine-solver.jar`。
+- **实现偏差**：①`FloatControl` 是抽象类，必须写子类（计划写的「构造器 public」不成立）；②`adoptFormat` 首版误用实例字段导致编译失败，改为经 `INSTANCE.format`；③null 字段也塞替身（比计划严，原因见上）。门禁本轮**未跑**，S255/S257 与反向验证待用户执行。
+
+**防复发规则（已写入 SANDBOX-MECHANISMS 维护规则）**：**I1** 门禁用假对象不能证明真资源安全（S255 用 Proxy 假 Clip 全绿而实机崩溃，即反例）；涉及原生资源的修复至少一条断言走真实资源，否则显式声明「门禁不覆盖原生层」。**I2** 窗口内只换引用，不碰实机对象的生命周期（stop/close/flush/dispose）；跨窗口写引用必须成对 begin/end 且写回前过 `isOpen()/isValid()` 校验。**I3** 沙盒默认不执行展示层：新增 mod 交互先问「这是战斗状态吗」，不是就隔离并登记。
+
+**① 代价（实测）**：每窗口每字段一次 `Field.get`+`Field.set`（本机命中 1 个 `Clip` 静态，微秒级）；替身单例、无每节点分配、无新线程；`isOpen()` 只在 `end()` 每字段一次 JNI，不在搜索热路径；字节码 +7,341 B（1,280,074 → 1,287,415 B）。**② 风险**：替身返回值类型若与真实 Clip 有差异，mod 做类型断言可能抛异常（按表逐项给正确类型 + 用真实雨爱类跑 S255）；推翻 B169 会让「mod 主动置 null」的引用被还原（有意，窗口内外必须一致；替身连「字段为 null」也占位，窗口内 mod 看到 `currentClip != null` 是**有意**的——这是 `play()` 早退、G1 成立的前提，窗口外字段按快照恢复）；回滚＝还原 World 两处挂点与 AudioQuiet 改动后重编，T1/T2/T3 相互独立。**③ 对 mod 的影响**：只在沙盒窗口内生效，窗口外雨爱照常播放/停止；面板、自动出牌、搜索结果、评分、候选枚举、其它 mod 共享对象均不变；可见变化是窗口内不再有雨爱声音，日志 audio quiet 摘要改为「替身拦截 N 次 + 写回 N 次」。
+
+**已知边界**：只保护静态字段里的 Clip（实例字段/集合里的抓不到）；不覆盖绕过 Clip 直接开 `SourceDataLine` 的 mod；真实 `DirectAudioDevice` 的极端时序崩溃门禁覆盖不到（S257 只做一次开关冒烟，无设备时 SKIP＝0 通过）；实机 clip 在窗口内被别的线程真实关闭时只能写 null、不能阻止关闭（音乐会停，属正确语义但观感有差）；详见 PLAN-ISOLATION.md 第 9 节。
+
+**残余症状与决定（2026-11-16，user m00495「那不管这个bug」）**：
+- **现象**：计算期间雨爱「正常放一段 → 中间卡一下 → 从 0 帧重放」。**机制**：窗口内 `AbstractCreature.heal` 的后置钩子仍会进 `YuAiController.evaluate`；替身 `getFramePosition()` 恒 0、`stop()` 把字段置 null、窗口结束再写回实机引用，于是每次窗口/血线切换都从 0 帧重新 `play()`。实机 clip 本身从未被关闭（`putBack` 持续增长、无 `dead`/`blind` 行），所以是**观感问题、不是崩溃**。
+- **已评估、均未采纳**：**A 入口守卫**（`@SpirePatch(clz=yuaimod.YuAiController.class, method="evaluate", paramtypez={AbstractPlayer.class})` + `@SpirePrefixPatch`，`World.anyInstalled()` 时 `SpireReturn.Return(null)`）——技术上成立（`evaluate` 自身没有别人的 postfix，返回即跳过方法体），但要**编译期依赖创意工坊雨爱 jar**、还要自检补丁时序（类若在 MTS 注册前加载则贴不上），用户决定不做；**B 设备层**（自定义 `javax.sound.sampled.spi.MixerProvider`，窗口内 `AudioSystem.getClip()` 给惰性替身）——不引用雨爱、对全 mod 通用，但要手写 Mixer/Line/Clip 三层委托并全局劫持 `AudioSystem`，风险与工作量都过大；**C 绕开 `heal`（直接改 `currentHealth`）或替换其方法体**——会丢 `onPlayerHeal`/`onHeal`/`onNotBloodied` 语义（Magic Flower ×1.5、Mark of the Bloom 禁疗、红骷髅翻转加力量），属静默降低模拟真实性，**禁止**；而且沙盒里跑的是真游戏代码，`HealAction`/药水/遗物/power 自己会调 `heal`，只改我方调用点也绕不开。
+- **为什么不能从 `heal` 侧拦截**：MTS 无运行期禁补丁 API；`@SpirePrefixPatch` 返回 `SpireReturn.Return(null)` 也拦不住别的 mod 的 postfix（postfix 插在每个 RETURN 前，含 prefix 新增的 RETURN）；`@SpireInstrumentPatch` 在 ordering −1、早于 postfix 插入，看不到这些调用点。
+- **结论**：**B187 保留现状**（窗口内 Clip 替身：不崩、不残留、不真开线），把「计算期间雨爱重放」记为**已知边界、不修**。若将来要修，走 A 路线，需用户明确批准加编译期依赖。
+
+
+
 
 
 
