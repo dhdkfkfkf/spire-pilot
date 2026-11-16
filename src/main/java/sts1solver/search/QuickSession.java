@@ -38,7 +38,7 @@ public final class QuickSession {
      * wider rung used to be separate Sessions built from the same root, so each rung re-expanded
      * the layers the previous one had already run. The session now widens in place: same frontier,
      * same layer, same visited table; a wider beam only means the parked lines come back. */
-    private Solver.Session session;
+    private PotionTieredSession session;
     private Solver.Result best;
     private int finishedNodes;
     private int finishedExpansions;
@@ -278,11 +278,32 @@ public final class QuickSession {
         if (this.session == null) {
             return "准备中";
         }
-        if (this.session.rung() > 0) {
-            return "加宽搜 beam=" + this.session.beamWidth() + "（第 "
-                    + (this.session.rung() + 1) + "/" + this.session.rungs() + " 档）";
+        // P7d: the potion-worldline hint now also belongs to the tier layout (the default again),
+        // so the panel keeps showing which potion ceiling is running.
+        String h = this.session.hint();
+        String body;
+        if (this.session.cellMode()) {
+            // P7b: a cell is a single beam, so the in-place "widened to rung N" text would be wrong.
+            return this.session.phase();
         }
-        return "窄深搜 beam=" + NARROW_BEAM + " layers=" + this.session.layersRun();
+        if (this.session.rung() > 0) {
+            body = "加宽搜 beam=" + this.session.beamWidth() + "（第 "
+                    + (this.session.rung() + 1) + "/" + this.session.rungs() + " 档）";
+        } else {
+            body = "窄深搜 beam=" + NARROW_BEAM + " layers=" + this.session.layersRun();
+        }
+        return h.isEmpty() ? body : h + " \u00b7 " + body;
+    }
+
+    /**
+     * P7b: the potion-worldline hint the status line shows, e.g. {@code 药水 ≤1 瓶（2/3）· beam 28
+     * （2/4 档）}. Empty before a session exists and in the tier-order rollback, so nothing is added.
+     */
+    public String potionHint() {
+        if (this.portfolio != null) {
+            return this.portfolio.hint();
+        }
+        return this.session == null ? "" : this.session.hint();
     }
 
     /**
@@ -307,11 +328,14 @@ public final class QuickSession {
             return true;
         }
         if (this.session == null) {
-            // B177: one session for the whole ladder. The narrow rung runs first and keeps its
-            // unlimited node count, exactly as before; when it ends, the session itself widens and
-            // carries on (Session.widenToNextRung) instead of this class rebuilding from the root.
-            this.session = new Solver.Session(this.root, NARROW_BEAM, Limits.layers(), this.remaining(), 0, 0);
-            this.session.planWidening(this.widenBeams());
+            // B177: one session for the whole ladder. P7 (user m00001): that ladder now repeats once
+            // per potion tier, inside PotionTieredSession; the narrow rung keeps its unlimited node
+            // count, and each tier still widens in place (Session.widenToNextRung).
+            int[] widen = this.widenBeams();
+            int[] ladder = new int[widen.length + 1];
+            ladder[0] = NARROW_BEAM;
+            System.arraycopy(widen, 0, ladder, 1, widen.length);
+            this.session = new PotionTieredSession(this.root, ladder, Limits.layers(), this.remaining(), 0);
         }
         if (this.stopRequested) {
             this.session.requestStop();
@@ -334,7 +358,7 @@ public final class QuickSession {
             // B179: the portfolio is a ladder inside one session now, so a pass is a rung here too.
             return this.portfolio.passes();
         }
-        return this.session == null ? 0 : this.session.rung() + 1;
+        return this.session == null ? 0 : this.session.passes();
     }
 
     /**

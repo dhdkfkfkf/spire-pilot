@@ -695,7 +695,8 @@ public final class Solver {
     public static int[][] portfolioProfilesForTest() {
         return Solver.portfolioProfiles();
     }
-    private static final int[] PORTFOLIO_SHARES = new int[]{35, 25, 25, 15};
+    /** B179 shares; P7's tier driver reuses the same split for the rung ladders inside a tier. */
+    static final int[] PORTFOLIO_SHARES = new int[]{35, 25, 25, 15};
 
     private static Result solvePortfolioInternal(World world, long l) {
         // B179 (user m23836): the four beams share ONE session. This used to build a fresh Session
@@ -705,11 +706,13 @@ public final class Solver {
         // {@code deadlines} (the historical 35/25/25/15).
         long started = System.currentTimeMillis();
         int[][] profiles = Solver.portfolioProfiles();
-        long[] deadlines = Solver.rungDeadlines(profiles.length, l);
-        int[] beams = Solver.rungBeams(profiles);
-        Solver.Session session = new Solver.Session(world, profiles[0][0], profiles[0][1], l,
-                0, profiles[0][2]);
-        session.planWidening(beams, deadlines, null);
+        // P7 (user m00001): the ladder is now the LADDER INSIDE one potion tier; the tiers themselves
+        // (0 potions, 1 potion, ... K) are run by PotionTieredSession and merged on net HP.
+        int[] ladder = new int[profiles.length];
+        for (int i = 0; i < profiles.length; i++) {
+            ladder[i] = profiles[i][0];
+        }
+        PotionTieredSession session = new PotionTieredSession(world, ladder, profiles[0][1], l, 0);
         long deadline = started + l;
         while (!session.advance(Math.max(4L, deadline - System.currentTimeMillis()))) {
             if (System.currentTimeMillis() > deadline + 2000L) {
@@ -732,7 +735,7 @@ public final class Solver {
      * B179: cumulative wall-clock deadline per rung, from the historical shares of the job budget
      * ({@link #PORTFOLIO_SHARES}). Entry 0 is the narrow rung's deadline, the last is the whole budget.
      */
-    private static long[] rungDeadlines(int rungs, long budgetMs) {
+    static long[] rungDeadlines(int rungs, long budgetMs) {
         long[] out = new long[rungs];
         long cumulative = 0L;
         for (int i = 0; i < rungs; ++i) {
@@ -2889,6 +2892,80 @@ public final class Solver {
         choice.ritualDamage = ritual;
     }
 
+    /**
+     * P7 (user m00001): how many potions the search may actually drink from the root. Deliberately
+     * stricter than {@link #potionsLeft()}: a Smoke Bomb sits in the belt but Legal never offers it
+     * as a drink. P7c: this is no longer the tier ceiling by itself -- see {@link #potionSlots(World)}
+     * and {@code PotionTieredSession.tierCount}: a tier above today's count still differs whenever
+     * the fight can create a potion (Entropic Brew, Alchemize, mod potions), so the ceiling is the
+     * belt capacity, and this count only decides whether the job tiers at all.
+     */
+    static int potionCountUsable(World world) {
+        int n = 0;
+        try {
+            world.install();
+            try {
+                ArrayList bar = AbstractDungeon.player.potions;
+                for (int i = 0; i < bar.size(); ++i) {
+                    Object p = bar.get(i);
+                    if (p == null || p instanceof PotionSlot) continue;
+                    if (PotionBook.usable((com.megacrit.cardcrawl.potions.AbstractPotion)p)) ++n;
+                }
+            } finally {
+                world.uninstall();
+            }
+        } catch (Throwable throwable) {
+            return 0;
+        }
+        return n;
+    }
+
+    /**
+     * P7c (user m00172): the belt capacity the GAME reports, not a constant. Vanilla is three slots,
+     * but Potion Belt and mods raise {@code AbstractPlayer.potionSlots}, and that capacity -- not
+     * today's potion count -- bounds how many potions a line may drink, because a fight can refill
+     * the belt (Entropic Brew, Alchemize, mod potions). Falls back to the live belt size when the
+     * field reports nothing, and 0 when the game cannot be inspected.
+     */
+    static int potionSlots(World world) {
+        try {
+            world.install();
+            try {
+                if (AbstractDungeon.player == null) return 0;
+                int slots = AbstractDungeon.player.potionSlots;
+                if (slots <= 0) {
+                    ArrayList bar = AbstractDungeon.player.potions;
+                    slots = bar == null ? 0 : bar.size();
+                }
+                return Math.max(0, slots);
+            } finally {
+                world.uninstall();
+            }
+        } catch (Throwable throwable) {
+            return 0;
+        }
+    }
+
+    /** P7: potion steps already taken along this line. */
+    static int potionUses(List<Action> path) {
+        int n = 0;
+        for (int i = 0; i < path.size(); ++i) {
+            Action a = path.get(i);
+            if (a != null && "potion".equals(a.kind)) ++n;
+        }
+        return n;
+    }
+
+    /** P7: the same candidate list with every potion action removed (the tier's ceiling is reached). */
+    static List<Action> withoutPotions(List<Action> acts) {
+        ArrayList<Action> out = new ArrayList<Action>(acts.size());
+        for (int i = 0; i < acts.size(); ++i) {
+            Action a = acts.get(i);
+            if (a == null || !"potion".equals(a.kind)) out.add(a);
+        }
+        return out;
+    }
+
     private static int potionsLeft() {
         try {
             int n = 0;
@@ -3393,10 +3470,16 @@ public final class Solver {
 
     /** Park a beam overflow candidate, keeping the list bounded without dropping the best ones. */
     private static void defer(List<Deferred> deferred, Node node, int layer) {
+        Solver.defer(deferred, node, layer, 0);
+    }
+
+    /** P7: same, with a per-tier ceiling so a wider beam can park more than the global 2000. */
+    private static void defer(List<Deferred> deferred, Node node, int layer, int cap) {
         if (node == null || node.path == null || node.digest == null) {
             return;
         }
-        if (deferred.size() < Limits.deferred()) {
+        int limit = cap > 0 ? Math.max(Limits.deferred(), cap) : Limits.deferred();
+        if (deferred.size() < limit) {
             deferred.add(new Deferred(node.path, node.score, node.rank, node.hpLoss, layer, node.deathSaves, node.digest, node.positionKey));
             return;
         }
@@ -3977,9 +4060,42 @@ public final class Solver {
         private int skipRebuild;
         /** B107: lines skipped because they would reach a step this search cannot replay. */
         private int skipPoisoned;
+        /*
+         * P7 (user m00001): potion-tier controls. The tiered driver narrows a rung to "at most N
+         * potions drunk", keeps the potion price out of the ranking INSIDE that tier (the price is
+         * charged once, at the cross-tier merge, through netHpLoss) and gives wider tiers a wider
+         * beam plus a bigger parked list. A plain Session leaves every field at its default, so the
+         * blocking solve() and the untiered portfolio behave exactly as before.
+         */
+        private int maxPotionUses = Integer.MAX_VALUE;
+        private boolean deferPotionCost;
+        private int deferredCap;
+        private int promoteFloor;
+        private boolean tiered;
 
         public void requestStop() {
             this.stopRequested = true;
+        }
+
+        /** P7: do not offer any more potion actions once a line has drunk this many. */
+        public void limitPotionUses(int n) {
+            this.maxPotionUses = Math.max(0, n);
+        }
+
+        /** P7: keep the potion price out of the in-tier ranking (the merge charges it instead). */
+        public void deferPotionCost(boolean b) {
+            this.deferPotionCost = b;
+        }
+
+        /** P7: parked-line ceiling / promotion quota that grow with the tier beam. */
+        public void setCaps(int deferredCap, int promoteFloor) {
+            this.deferredCap = deferredCap;
+            this.promoteFloor = promoteFloor;
+        }
+
+        /** P7: this session is one potion tier; skip the B174 counterfactual (tier 0 is the baseline). */
+        public void markTiered() {
+            this.tiered = true;
         }
 
         /*
@@ -4362,7 +4478,7 @@ public final class Solver {
                     for (int i = 0; i < arrayList.size(); ++i) {
                         Node overflow = (Node)arrayList.get(i);
                         if (!kept.contains(overflow)) {
-                            Solver.defer(this.deferred, overflow, this.layer + 1);
+                            Solver.defer(this.deferred, overflow, this.layer + 1, this.deferredCap);
                         }
                     }
                 }
@@ -4404,6 +4520,12 @@ public final class Solver {
                     Log.warn("slow candidates: " + (candUs / 1000L) + "ms layer=" + this.layer
                             + " node=" + this.nodeIndex + "/" + this.frontier.size()
                             + " actions=" + this.currentActs.size() + " (B170)");
+                }
+                // P7: a tier only allows its own number of potions, so once the line has drunk
+                // that many the potion branches are not offered at all (they are pure dead ends).
+                if (this.maxPotionUses != Integer.MAX_VALUE
+                        && Solver.potionUses(node.path) >= this.maxPotionUses) {
+                    this.currentActs = Solver.withoutPotions(this.currentActs);
                 }
                 ++this.expansions;
                 ++this.expansionsThisLayer;
@@ -4479,7 +4601,13 @@ public final class Solver {
                 int growthHp = GrowthBook.credit(arrayList, now, this.startGrowth);
                 int n2s = Math.max(0, n - growthHp);
                 int saves = DeathSaves.used(this.startFairies, choice.fairies, choice.lizardTail);
-                int n3 = Solver.score(n2s, n2, choice.win, choice.dead, this.layer + 1, choice.mhp, choice.block, choice.alive, saves, choice.gold - this.startGold) + (choice.win ? Solver.lootPoints(choice.loot) : 0) + (choice.win ? Solver.healPoints(choice.postHeal) : 0) + (choice.win ? GrowthCredit.valueOf(arrayList) : 0);
+                // P7 (user m00001): inside a potion tier the price of a potion is NOT charged on the
+                // node -- charging it here is exactly the 18000-point cliff that kept the "drink the
+                // dexterity potion first" line out of the beam. The spend is still recorded in n2 and
+                // still charged once by netHpLoss/compareRoutes when the tiers are merged, so the
+                // final route ranking is unchanged in scale.
+                int n2Score = this.deferPotionCost ? 0 : n2;
+                int n3 = Solver.score(n2s, n2Score, choice.win, choice.dead, this.layer + 1, choice.mhp, choice.block, choice.alive, saves, choice.gold - this.startGold) + (choice.win ? Solver.lootPoints(choice.loot) : 0) + (choice.win ? Solver.healPoints(choice.postHeal) : 0) + (choice.win ? GrowthCredit.valueOf(arrayList) : 0);
                 Node node3 = new Node(choice.child, arrayList, n3, Solver.rankOf(n3, choice.block, choice.energy, choice.powers), n, GameActionManager.turn, choice.win, choice.dead, choice.monsters, saves, choice.digest);
                 node3.positionKey = choice.positionKey;
                 node3.postHeal = choice.postHeal;
@@ -4561,6 +4689,11 @@ public final class Solver {
             // it for this search so a slow promotion cannot shrink it halfway through.
             if (this.promotionLimit <= 0) {
                 this.promotionLimit = Solver.promotionLimit(left);
+                // P7: a wider tier parks and replays proportionally more lines, otherwise the extra
+                // beam width only feeds the parked list and never reaches the answer.
+                if (this.promoteFloor > 0) {
+                    this.promotionLimit = Math.max(this.promotionLimit, this.promoteFloor);
+                }
             }
             if (this.promotedThisRung >= this.promotionLimit) {
                 this.promoteWhy = "已回放 " + this.promotedThisRung + " 条，到本档的上限";
@@ -4830,9 +4963,13 @@ public final class Solver {
             }
             // B174 (user m21993 / m22084): say what the planned potion buys. Log only -- the search,
             // the ranking and the printed plan are untouched.
-            String counterfactual = Solver.potionCounterfactual(this.root, list, list4, this.startHp);
-            if (!counterfactual.isEmpty()) {
-                Log.info(counterfactual);
+            // P7 (T6): a tiered run reports its own tier-0 baseline instead; the extra counterfactual
+            // replay would just re-search the same fight a fifth time.
+            if (!this.tiered) {
+                String counterfactual = Solver.potionCounterfactual(this.root, list, list4, this.startHp);
+                if (!counterfactual.isEmpty()) {
+                    Log.info(counterfactual);
+                }
             }
             this.result.provenOptimal = this.best.win && this.provenOptimal;
             this.result.frontierExhausted = this.frontierDead;
@@ -4861,26 +4998,21 @@ public final class Solver {
         }
     }
 
+    /**
+     * B179 shell kept for the callers (Gameplay, the panel, QuickSession, probes): the portfolio is
+     * a four-rung ladder, and since P7 that ladder runs once per potion tier. All accounting lives in
+     * {@link PotionTieredSession}; this class only owns the job's clock and the stop flag.
+     */
     public static final class PortfolioSession {
-        // Same profiles as the blocking portfolio: one algorithm, two front ends (P2-8).
         /** Test hook: the widest beam this session will run (B172 gate S232). */
         public static int topBeamForTest() {
             int[][] p = Solver.portfolioProfiles();
             return p[p.length - 1][0];
         }
-        private static final int[] SHARES = PORTFOLIO_SHARES;
         private final World root;
         private final long budgetMs;
         private final int maxNodes;
-        /**
-         * B179 (user m23836): ONE session runs the whole ladder. The portfolio used to build a new
-         * Session from the same root for every member, so the narrow member's work was expanded
-         * again -- same boards, same children, same order -- by each wider member. The rungs now
-         * share the frontier, the layer and the visited table: a wider beam only means the parked
-         * lines come back, and each rung keeps its historical share of the budget and node cap.
-         */
-        private Session current;
-        private Result best;
+        private PotionTieredSession current;
         private volatile boolean stopRequested;
         private boolean finished;
 
@@ -4895,12 +5027,12 @@ public final class Solver {
         }
 
         public Result result() {
-            return this.best;
+            return this.current == null ? null : this.current.result();
         }
 
         public void requestStop() {
             this.stopRequested = true;
-            Session session = this.current;
+            PotionTieredSession session = this.current;
             if (session != null) {
                 session.requestStop();
             }
@@ -4920,12 +5052,12 @@ public final class Solver {
             return this.current == null ? 0 : this.current.expansions();
         }
 
-        /** B179: how many rungs this ladder plans (the number of portfolio profiles). */
+        /** B179: how many rungs the running tier plans (the number of portfolio profiles). */
         public int rungsForTest() {
             return this.current == null ? 0 : this.current.rungs();
         }
 
-        /** B179: which rung is running (0 = narrow). */
+        /** B179: which rung of the running tier (0 = narrow). */
         public int rungForTest() {
             return this.current == null ? -1 : this.current.rung();
         }
@@ -4935,47 +5067,39 @@ public final class Solver {
             return this.current == null ? -1 : this.current.beamWidth();
         }
 
-        /** B179: passes (rungs) run so far; a "pass" is a rung of the shared session. */
+        /** B179: passes (rungs) run so far by the running tier; a "pass" is a rung of one tier. */
         public int passes() {
             return this.current == null ? 0 : this.current.rung() + 1;
         }
 
         public int bestActions() {
-            if (this.best != null) {
-                return this.best.plan.size();
-            }
             return this.current == null ? 0 : this.current.bestActions();
         }
 
-        /**
-         * B115 (m00748): the best line available right now, for the panel's preview row.
-         *
-         * <p>The running session can already hold a line even though nothing has finished, so it
-         * wins over the finished-best fallback.
-         */
+        public List<Action> bestPath() {
+            return this.current == null ? null : this.current.bestPath();
+        }
+
+        public boolean bestIsWin() {
+            return this.current != null && this.current.bestIsWin();
+        }
+
+        public int bestHpLoss() {
+            return this.current == null ? -1 : this.current.bestHpLoss();
+        }
+
+        public int bestNetHpLoss() {
+            return this.current == null ? -1 : this.current.bestNetHpLoss();
+        }
+
+        /** B115 (m00748): the best line available right now, for the panel's preview row. */
         public List<Action> previewPath() {
-            if (this.current != null) {
-                List<Action> running = this.current.bestPath();
-                if (running != null) {
-                    return running;
-                }
-            }
-            if (this.best == null || this.best.plan == null || this.best.plan.isEmpty()) {
-                return null;
-            }
-            ArrayList<Action> out = new ArrayList<Action>(this.best.plan.size());
-            for (Step step : this.best.plan) {
-                out.add(step.action);
-            }
-            return out;
+            return this.current == null ? null : this.current.previewPath();
         }
 
         /** B120 (m02336): whether the line {@link #previewPath()} holds already wins. */
         public boolean previewWin() {
-            if (this.current != null) {
-                return this.current.bestIsWin();
-            }
-            return this.best != null && this.best.win;
+            return this.current != null && this.current.previewWin();
         }
 
         /** B119 (m02060): the running session's deadline (see Session#compensatePause). */
@@ -4987,47 +5111,29 @@ public final class Solver {
 
         /** B118 (m01978): expected HP cost of {@link #previewPath()}, or -1 when none is held. */
         public int previewHpLoss() {
-            if (this.current != null) {
-                int running = this.current.bestHpLoss();
-                if (running >= 0) {
-                    return running;
-                }
-            }
-            return this.best == null ? -1 : this.best.hpLoss;
+            return this.current == null ? -1 : this.current.previewHpLoss();
         }
 
-        /**
-         * B173 (user m21300): the same held line's cost on the shared ruler, in the same order of
-         * preference as {@link #previewHpLoss()}.
-         */
+        /** B173 (user m21300): the same held line's cost on the shared ruler. */
         public int previewNetHpLoss() {
-            if (this.current != null) {
-                int running = this.current.bestNetHpLoss();
-                if (running >= 0) {
-                    return running;
-                }
-            }
-            return this.best == null ? -1 : Solver.netOf(this.best);
+            return this.current == null ? -1 : this.current.previewNetHpLoss();
         }
 
         public String phase() {
             if (this.finished) {
                 return "done";
             }
-            if (this.current == null) {
-                return "准备中";
-            }
-            if (this.current.rung() > 0) {
-                return "加宽搜 beam=" + this.current.beamWidth() + "（第 "
-                        + (this.current.rung() + 1) + "/" + this.current.rungs() + " 档）";
-            }
-            return "窄搜 beam=" + this.current.beamWidth() + " layers=" + this.current.layersRun();
+            return this.current == null ? "准备中" : this.current.phase();
+        }
+
+        /** P7b: the potion-worldline hint of the running cell (empty in the tier-order rollback). */
+        public String hint() {
+            return this.current == null ? "" : this.current.hint();
         }
 
         /*
-         * B179: the four profiles become one ladder. The per-rung deadlines are the historical
-         * shares of the job budget, so a weak narrow rung still cannot eat the whole search, and
-         * the node caps keep the same proportion when a node budget was given.
+         * B179: the four profiles become one ladder. P7: the ladder repeats once per potion tier,
+         * each tier on its own share of the budget and node cap, and the answers are merged on net HP.
          */
         public boolean advance(long l) {
             if (this.finished) {
@@ -5035,24 +5141,19 @@ public final class Solver {
             }
             if (this.current == null) {
                 int[][] profiles = Solver.portfolioProfiles();
-                int[] beams = Solver.rungBeams(profiles);
-                long[] deadlines = Solver.rungDeadlines(profiles.length, this.budgetMs);
-                int[] caps = null;
-                int firstNodes = 0;
-                if (this.maxNodes > 0) {
-                    caps = new int[Math.max(0, profiles.length - 1)];
-                    for (int i = 1; i < profiles.length; ++i) {
-                        caps[i - 1] = Math.max(200,
-                                this.maxNodes * SHARES[Math.min(i, SHARES.length - 1)] / 100);
-                    }
-                    firstNodes = Math.max(200, this.maxNodes * SHARES[0] / 100);
+                int[] ladder = new int[profiles.length];
+                for (int i = 0; i < profiles.length; i++) {
+                    ladder[i] = profiles[i][0];
                 }
-                this.current = new Session(this.root, profiles[0][0], profiles[0][1],
-                        this.budgetMs, firstNodes, profiles[0][2]);
-                this.current.planWidening(beams, deadlines, caps);
-                Log.info("portfolio ladder (B179): beams=" + java.util.Arrays.toString(beams)
-                        + " deadlinesMs=" + java.util.Arrays.toString(deadlines)
-                        + " nodes=" + firstNodes);
+                this.current = new PotionTieredSession(this.root, ladder, profiles[0][1],
+                        this.budgetMs, this.maxNodes);
+                Log.info("portfolio ladder (B179): beams=" + java.util.Arrays.toString(ladder)
+                        + " potionTiers=" + this.current.tiersForTest()
+                        + " potionSlots=" + this.current.slotsForTest()
+                        + " usablePotions=" + this.current.usablePotionsForTest()
+                        + " cellMode=" + this.current.cellMode()
+                        + " cells=" + this.current.cellsForTest()
+                        + " nodes=" + this.maxNodes);
             }
             if (this.stopRequested) {
                 this.current.requestStop();
@@ -5060,7 +5161,6 @@ public final class Solver {
             if (!this.current.advance(l)) {
                 return false;
             }
-            this.best = this.current.result();
             this.finished = true;
             return true;
         }

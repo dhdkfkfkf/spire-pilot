@@ -4371,8 +4371,108 @@ pending 被清空后，`planIsStale()` 的 `pending == null` 分支只看 `curre
 - **为什么不能从 `heal` 侧拦截**：MTS 无运行期禁补丁 API；`@SpirePrefixPatch` 返回 `SpireReturn.Return(null)` 也拦不住别的 mod 的 postfix（postfix 插在每个 RETURN 前，含 prefix 新增的 RETURN）；`@SpireInstrumentPatch` 在 ordering −1、早于 postfix 插入，看不到这些调用点。
 - **结论**：**B187 保留现状**（窗口内 Clip 替身：不崩、不残留、不真开线），把「计算期间雨爱重放」记为**已知边界、不修**。若将来要修，走 A 路线，需用户明确批准加编译期依赖。
 
+## B188 — 药水在「该早喝」的局面被排到格挡之后（中间节点把喝药记成纯损失，先喝的分支进不了前沿）
+
+> **状态：✅ 已实施并安装，待用户实测**（user m00201 已批准计划；user m00300 定「不写门禁，我自己可以测试」⇒ 实现按 docs/PLAN-P7.md 的 T1–T8 落地，T1–T6/T8 完成，T7 由用户实机验，清单见 PLAN-P7 §5）
+
+**起因（user m00001，原话）**：「sts1-engine-solver自己看日志为什么打地精大块头敏捷药水没有第一时间喝？先喝敏捷药水再打出幽灵铠甲能少扣2血」。追加：user m00149 指出同瓶数下先喝 HP 更多、分数理应更高；user m00167 给出参考实现（`C:\Users\YOKI\Desktop\CombatSolver-main`，按瓶数分档）；user m00201 要求「每档 beam 适当加宽以适应喝药水」并写进计划。
+
+**现象（solver.log，2026-11-16 10:43，物理行）**：
+- 1786 行 plan（14 步）：第 10 步「幽灵铠甲」、第 11 步「敏捷药水」、第 12 步「防御」。
+- 1788 行 trace：步 10 `t=3 b=10`；步 11 `t=3 b=10 mhp=60`；步 12 防御 `with b=17` / `without b=15`；最终 with loss=17、without loss=19。
+- ⇒ 药水的 +2 敏只落在第 12 步的防御上；若在第 10 步之前喝，这 2 点格挡会加在幽灵铠甲上，正好少扣 2 血。
+- 1779 行 B174 探针 `replayOk=false`、1778 行 replay 在 step 12 报「重锤+ [Bludgeon] -- not-settled: a screen is open (DEATH)」。**T1 已定性**：`Solver.planText()`（`Solver.java:3240-3249`）只按 `this.plan` 下标拼 `Step.action.label`；`Result.plan` 是 `Solver.replay`（`Solver.java:2069`）按 action 列表逐个执行后生成的 `List<Step>`（`Step.action` 就是被回放的那个 Action）⇒ 打印顺序 == 回放顺序，不存在错序。1778 行的错位是回放走到第 12 步时前序药水/格挡改变了手牌与能量、真实动作变成「重锤+」，且该步开着 DEATH 屏导致 `not-settled`。
+
+**根因（代码级）**：
+1. `Legal.actions()`（`Legal.java:84-125`）候选顺序＝卡牌 → 药水 → 结束回合；入口 `Solver.candidates`（`Solver.java:2936`）。
+2. 叶子计分只有「已花」：`Solver.java:4474-4487` 的 `int n2 = Math.max(0, startPotionHp - choice.potionHp)`，`Solver.score(n2s, n2, …)` 按 `POINTS_PER_HP=2000` 扣分（一瓶 `potionHp=9` ⇒ 18000 分）。**喝下那一步整层瞬降 18000，而「继续持有」不加分** ⇒ 同一父节点下先喝的分支无条件落后。
+3. 落后就被淘汰：`defer()` 上限 `DEFERRED_LIMIT=2000`（`Solver.java:48`）、`sortDeferred` 按 rank→score→digest（`:3418`）、每轮提升上限 `MAX_PROMOTIONS_CAP=60`（`:60`），先喝的分支既进不了 beam 也进不了停车场。
+4. 次因：喝 0/1/2 瓶的线共用同一条一维前沿（`portfolioProfiles()`，`Solver.java:680-692`），「喝 N 瓶」这一档从未被独立评估。
+5. 净效应：搜索系统性把喝药往后推，推到「没有别的可打」的回合才执行；此时能吃到加成的只剩后面的防御牌。
+
+**修法（已实施；细节见 docs/PLAN-P7.md §11）**：
+- **A 对称记账（实现口径已更正）**：计划原式 `+ choice.potionHp * POINTS_PER_HP` 经推导是错的——设起手药水价值 `S`、叶子仍持有 `H`，`n2 = S - H` 是已花，原式等于把叶子药水项记成 `-(S-H)+H = 2H-S`，喝一瓶会让分数再掉 `2v`（9 HP 药 ⇒ 36000 分），比原来的 18000 更糟。实际实现：**档内叶子不计药水价**（`Solver.java:4581` 的 `int n2Score = this.deferPotionCost ? 0 : n2;`），药水成本只在档间合并时由 `netHpLoss`/`compareRoutes` 收一次；`provenOptimal` 仍要求真实 `n2==0`。效果：喝药那一步不再瞬降，先喝提前拿到的格挡立刻体现为更高分。
+- **B 分档搜索**：新增 `sts1-engine-solver/src/main/java/sts1solver/search/PotionTieredSession.java`（档循环，`startTier()` :137、`advance()` :271、`tierDone()` :247、`finishAll()` :228）。0 瓶 → 1 瓶 → … → K 瓶（K=min(根可用药水,5)），档内 `maxPotionUses` 剪枝（`Solver.java:4498-4500`，`candidates` 之后、`defer` 之前用 `Solver.withoutPotions` 过滤）；每档独立 `new Session` + `planWidening`；预算 0 瓶档 40%、其余 60% 按 2^(K-i) 归一，档内仍按 `{35,25,25,15}` 切 beam；某档 win 且（`provenOptimal` 或净扣血 ≤0）直接停；结果逐档合并，净扣血并列**少喝优先**（`PotionTieredSession.better` :218）。
+- **每档 beam 加宽**（user m00201 第 1 条）：`tierBeam(base,tier) = tier<=0 ? base : min(Limits.beam(), base + ceil(base×step×tier/100))`（`PotionTieredSession.java:110`，`step` 默认 25）；仍过 `effectiveBeam()`（堆守卫可压到 `GUARDED_BEAM=48`）；`tier>0` 时同步放大停车场 `max(Limits.deferred(), 2000, 32×beam)` 与回放名额 `max(60, beam/2)`（`Session#setCaps`），否则宽出来的名额被上限吃掉（本局 deferred=2000/promoted=229 已顶格）。
+- **B174 探针改口径**：档位模式（`limits.length > 1`）下 `Session.finish()` 不再跑「剥药回放」，由 `PotionTieredSession` 直接打 `potion tier: baseline tier=0 loss=…`；单档（无药或回滚开关）仍保留旧探针。
+- 三条入口都接上了：`Solver.solvePortfolioInternal`、`PortfolioSession`（改为纯委托壳）、`QuickSession`（narrowDeep 分支）。阻塞式 `Solver.solve`（昂贵战斗：boss 房或怪 maxHealth≥200，`Gameplay.java:2332`）**本轮不接档位**，仍是单前沿 + 阻塞收尾，已记入 PLAN-P7 §8 边界。
+- 回滚键 `settings.txt search.potionTiers=off`（另有 `search.potionBeam`、`search.potionBeamStep=25`）。
+
+**验收（不写门禁，user m00300 自己实测；详见 docs/PLAN-P7.md §5）**：① `plan:` 步序与 `trace:` 逐步骤序一致；② 喝药那一步面板预计损失不再陡差约 9 HP；③ `potion tier:` 出现 tier=0..K 且 tier=1 不含第 2 瓶；④ `beam=` 随档位约 +25%/档、不超 `limits`；⑤ 各档累计用时单调、末档 ≤ 总预算；⑥ 主诉场景（地精大块头、敏捷药水 + 幽灵铠甲）药水步号 < 幽灵铠甲步号且预计损失 15（现状 17）。
+
+**结果**：✅ 已构建安装——`mod\sts1-engine-solver.jar` 1,293,146 B，sha256 `9C8E9CA5A8E39686BC240D34C91E0658BB7DC6B1B91D84FD73F2BB4DA200AEC4`，已装到 `D:\Steam\steamapps\common\SlayTheSpire\mods\sts1-engine-solver.jar`。**本轮未跑 `tools/run.ps1`**（user m00732 自行实测；T7 由用户验收主诉场景：药水步号 < 幽灵铠甲步号、预计损失 17→15）。
+
+**① 代价**：每档一次 Session 构造（几十 ms 级，档数 ≤ 6，最多 6 个档）；档内叶子省掉一次药水价乘加（比旧口径更便宜）；宽档节点数随 beam 线性增长，但预算按份额切分 ⇒ 总时长不增，首档 40% 先出结果；内存峰值≈最宽一档（受 `effectiveBeam` 堆守卫约束），档间顺序执行不叠加。
+**② 风险**：档内不扣药水价 ⇒ 中间层「喝不喝」的边界会移动（终局净扣血口径不变，面板数字仍含药水价）；药水按 `PotionBook` 战略价计价，不等于真实价值，该留 Boss 的药可能被提前喝；`Solver.solve` 阻塞路径未接档位（见边界），极端昂贵战斗仍可能重演「先甲后药」；单档回滚路径已保证 `markTiered()`/`deferPotionCost()` 不生效，旧口径完整保留。回滚＝`search.potionTiers=off`。
+**③ 影响**：面板 plan 与预计损失（药水更早出现）、自动出牌顺序、`solver.log` 新增 `potion tier:` 行、`settings.txt` 新增三键；与其它 mod 无交互（不改镜像/static 还原）。
+
+**已知边界**：药水价值取 `PotionBook` 战略价（≈9–10 HP），不是本场真实边际价值；不建模「留到下一场」的跨战斗价值；开屏类药水随机流仍按实机 seed；§9 的 planText/replay 顺序疑点 T1 已定性为回放期 DEATH 屏所致、非打印错序，不并入本 bug 的修法；**阻塞式 `Solver.solve`（boss 房或任一怪 maxHealth≥200，`Gameplay.java:2332`）不接档位**，仍是单前沿。
+
+**结论（T1 补充）**：`planText()` 的打印顺序就是回放执行顺序（`Solver.java:3240-3249` 遍历 `this.plan`，`Result.plan` 由 `replay` 按 action 顺序生成），所以「先甲后药」是搜索选线结果、不是打印错位；本 bug 的修法针对搜索本身。
+
+**文档**：`docs/PLAN-P7.md`（方案与任务表）、`docs/PLAN.md` 板块表 P7 行 + 在跟条目 B188 行、`docs/PLAN-WORKLOG.md` 2026-11-16 小节。
+
+### B188 / P7b 后续改造：cell 顺序（rung 外层）+ 药水档提示（2026-11-16，已构建安装，待实测）
+
+**来源**：user m00331 要求「面板模仿 STS2 mod 提示当前在算用几瓶药水的世界线」＋「顺序改成第一档 beam 的 0→n 瓶跑完再第二档 beam」＋「先给计划」；计划＝`PLAN-P7` §12；实施指令＝user m00001「完成sts1-engine-solverP7 后续改造计划」。
+
+**做法**：
+- 执行单元从「药水档」改为 **cell=(beam rung, 药水档)**，严格 rung 外层：`r=0: t=0..K` → `r=1: …`。每 cell 一个独立 `Solver.Session`（单 beam、`planWidening(null)`、`limitPotionUses`、`deferPotionCost(true)`、`markTiered()`；t>0 放大停车场/回放名额）。
+- 预算与节点按 `rungShare`（`PORTFOLIO_SHARES` 按 ladder 实际长度归一）× `potionShare`（0 瓶 40%、其余 60%×2^(K-i)/Σ）双权重切分；剩余 ≤300ms 收尾 `time`；早停＝任一 cell `win && (provenOptimal || netOf<=0)`。
+- 新提示：`PotionTieredSession.hint()`（`药水 ≤1 瓶（2/3）· beam 28（2/4 档）· 0 瓶基线 净损 15`）并入 `phase()`，`QuickSession.potionHint()` 接到 `Gameplay.java:728-737` 状态行；深度搜索经 `PortfolioSession.hint()` 同样可见。`worldlineText()` 未改。
+- 回滚：`settings.txt search.potionOrder=tier`（旧顺序）／`search.potionTiers=off`（总回滚，单 Session + 完整 ladder、无 cell 日志无提示）。
+
+**验证状态**：`tools/build.ps1` BUILD OK；jar 1,295,185 B / sha256 `D6D9D262DD586CBB27C0018ABC1E4EE5A7029210913D345F6599FC5B62A24A6F`，已装入游戏 mods。**未跑门禁、未启动游戏**（user m00300/m00732），验收由用户实测（`PLAN-P7` §12.6 六条）。
+
+**① 代价**：Session 数 (K+1)×R（K=2、R=4 ⇒ 12 vs 改造前 3），每 cell 从 root 重展开 ⇒ 同预算节点/耗时约 +5~15%，每档略浅；总时长仍受总预算封顶；内存峰值＝最宽单 cell。
+**② 风险**：0 瓶宽档被推到最后，预算不足时最终线可能变差；早停更难触发、用时更贴上限；面板/状态行文案变化若有整行断言会红；每 cell 一次 `World.install/uninstall`（最多 12 次）；`potionOrder=tier` 分支无门禁覆盖。回滚见上。
+**③ 影响**：面板/状态行新增药水档与基线净损提示；自动出牌顺序与预计损失仍由合并结果决定（净扣血优先、并列少喝）；`solver.log` 新增 `potion cell:` / `potion tiers: cells=` 汇总（旧 `potion tier:` 仅单档/旧顺序）；`settings.txt` 新键 `search.potionOrder`；不改镜像、不动 static 还原、与其它 mod 无交互。
+
+**文档**：`docs/PLAN-P7.md` §12（状态）/ §13（实现记录与偏差）、`docs/PLAN.md` P7 行 + 安装行、`docs/PLAN-WORKLOG.md` 2026-11-16「B188 / P7b 实施」段。
+
+### P7c：药水档上限改读游戏数据（user m00172，2026-11-16）
+
+**现象/要求**：用户指出「药水并不是上限只有3，改成读取游戏内的数据」；旧实现唯一的写死上限是 `PotionTieredSession.java:53` `MAX_TIERS=6`，档数由 `min(potionCountUsable, 5)` 决定，于是「当前手里 2 瓶」就只能出 3 档。
+
+**做法**：
+- 读游戏：`Solver.potionSlots(World)` 读 `AbstractDungeon.player.potionSlots`（`javap` 确认为 `public int`），≤0 回退 `potions.size()`；`world.install()/finally uninstall()`，异常返回 0。
+- 定档：`PotionTieredSession.tierCount(usable, slots, budgetMs, rungs)` —— usable≤0 ⇒ 0（保持单档旧路径）；否则 `cap=max(usable, slots)`，再按 `(budgetMs/300)/rungs-1` 的预算地板收窄，返回 `min(cap, byBudget)`。即档位上限＝本局药水槽容量（Potion Belt/mod 可 >3；Entropic Brew/Alchemize 可在战斗中补药）。
+- 可见性：hint 追加「，槽 N」（`药水 ≤1 瓶（2/3，槽 3）· beam 28（2/4 档）· 0 瓶基线 净损 15`）；日志新增 `potion tiers: usable=… slots=… K=… tiers=…`，`portfolio ladder` 行追加 `potionSlots=/usablePotions=`；`worldlineText()` 未改。
+- 订正旧注释：`potionCountUsable` 原 javadoc 说「limit 高于可喝瓶数只会重复上一档」，该结论在会生成药水的战斗里不成立，已改写。
+
+**验证状态**：`tools/build.ps1` BUILD OK；jar 1,295,693 B / sha256 `4A155B622BF12691603A3D6ED4A5A7DBCE92A07FAA989070F6D8E5435077B644`，已装入游戏 mods。**未跑门禁、未启动游戏**，验收由用户实测（`PLAN-P7` §14）。
+
+**① 代价**：构造多一次 `World.install/uninstall`；cell 数 `(K+1)×R` 随槽位增长（槽 3/持有 2 ⇒ 16 vs P7b 的 12），同预算每 cell 更浅；总时长仍封顶；内存峰值＝最宽单 cell。
+**② 风险**：槽多药少时高档可能重复低档结论，浪费其份额（几何衰减，最坏 10~15%）；`potionSlots` 异常值靠回退与预算地板兜底；提示/日志文字变化撞整行断言会红；`potionTiers=off` 时字段为 0、不显示槽位。回滚：`potionTiers=off` / `potionOrder=tier` / 构造器改回 `min(usable,5)`。
+**③ 影响**：面板显示「（i/K，槽 N）」，K 随本局槽位；自动出牌与预计损失口径不变；`solver.log` 新行；无新 settings 键；不改镜像、不动 static 还原、与其它 mod 无交互。
 
 
 
 
 
+
+
+
+### P7d：顺序改回档外层 + 重复计算审查（user m00561，2026-11-16）
+
+**现象/要求**：用户 m00561 ①「还是改回先计算0药水的1到4档再计算到n药水的0到4档。现在这样太慢了。」②「检查是否有重复计算，比如药水1第一档和药水2第一档会不会重复计算」。
+
+**结论（重复计算审查）**：
+- 同档内相邻 beam：tier 布局不重复（同一 `Solver.Session` 上 `planWidening`/`widenToNextRung` 复用前沿）；cell 布局**重复**（`startCell()` 每个 cell 都 `new Solver.Session(root, beam…)` + `planWidening(null)`，同档 4 个 beam 各从根展开一次，再乘 K+1 档）——这是“太慢”的主因。
+- 药水 1 瓶档 vs 2 瓶档：**不是同一搜索**，不能互替。三处参数不同：`limitPotionUses(k)`、起始 beam `tierBeam(base,t)=base+ceil(base*25%*t)`、`t>0` 的 `setCaps(max(2000,32*beam), max(60,beam/2))`。
+- 档间“不含药水”的根前缀：被重搜 K+1 次（结构性重复）。彻底消除需在同一 Session 上逐档放宽 `maxPotionUses` 并复用前沿，等于改 `Solver.java:4526` 的剪枝与停车场结算，本轮不做，记为已知边界。
+
+**做法**：
+- `Limits.potionOrderBeam()`（`Limits.java:273`）默认 `beam` → **`tier`**；只有 `beam|cell|cells|beam*` 进 cell 布局。默认回到 `startTier()`：档外层，档内 10→28→64→128 原地加宽。
+- `PotionTieredSession.hint()`（`:683`）不再要求 cellMode（仅 `limits.length<=1` 时为空），tier 布局 beam 后跟「（加宽 r/R 档）」；`phase()`（`:656`）与 `QuickSession.phase()`（`QuickSession.java:271`）把 hint 前置，面板提示在两种顺序下都可见。
+- cell 路径（`startCell()` :288 / `cellDone()` :465 / `nextCell()` :222）原样保留，供 A/B 与回滚使用。
+
+**验证状态**：`tools/build.ps1` BUILD OK（JDK 21.0.11、`--release 8`、555 entries）；jar 1,295,807 B / sha256 `05D00831DD59261954FB63E659204680F8C32DED5095B740BA2587FF4067D973`，已装入游戏 mods。**未跑门禁、未启动游戏**，验收由用户实测（`PLAN-P7` §15）。
+
+**① 代价**：默认 Session 数 16 → 4，同预算每档更深、档内无重复展开；总预算/节点上限公式不变；内存峰值仍为最宽一档的树。
+**② 风险**：P7b 观察点（rung 外层、`potion cell:` 行）默认消失，需 `search.potionOrder=beam`；tier 布局早停按档（proven/净损≤0），无逐 cell 早停；档间前缀仍重复；状态行多出「加宽 r/R 档」，整行断言会红。回滚：`search.potionOrder=beam` / `search.potionTiers=off` / 默认值改回 `beam`。
+**③ 影响**：面板/状态行继续显示药水档提示（现覆盖 tier 布局）；预计损失与自动出牌口径不变；`solver.log` 默认回到 `potion tier:` 行，`potion tiers:` 走 `tiers=` 分支，`potion cell:` 仅 opt-in；settings 键不变；不改镜像、不动 static 还原、与其它 mod 无交互。
+
+**文档**：`docs/PLAN-P7.md` §15、`docs/PLAN.md` P7/B188/安装行、`docs/PLAN-WORKLOG.md` 2026-11-16「B188 / P7d」段。
+
+**发布（1.0.2，2026-11-16）**：按 user m00678「那就不要做了，上传github和创意工坊」，P7e（单遍遍历按瓶数分配 beam 名额）与「K 收窄到可用瓶数+1」**两个提速方案均不实施**，B188 以 P7b/P7c/P7d 的现状定稿发版。版本号 1.0.1 → 1.0.2（`resources/ModTheSpire.json`、工坊 description）；构建 jar 1,295,807 B / sha256 `BD3FFAE6DABF3D6232D857FBE6A0BEB7AE28B2833EDF4402889D35C4EF7DB021`（与 P7d 同尺寸，只差版本号字符）；已装入 `D:\Steam\steamapps\common\SlayTheSpire\mods` 与 `D:\mods-workshop\sts1-engine-solver\content`，工坊条目 **3839053516** 上传成功（输出 `Successfully updated workshop item!`，visibility 仍 private），GitHub 已推送 `master`。产品代码与 1.0.2 前一致，无性能/内存变化；回滚＝重传 1.0.1 的 jar 与 `D:\mods-workshop\sts1-engine-solver\config.json.bak-20261116`。详见 `docs/PLAN-WORKLOG.md` 同日「发布 1.0.2」段。

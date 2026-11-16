@@ -723,13 +723,18 @@ public final class Gameplay {
             phaseStart = System.nanoTime();
             Gameplay.refreshPreview(elapsed);
             Gameplay.lastPreviewUs = (System.nanoTime() - phaseStart) / 1000L;
+            // P7b (user m00331): "which potion worldline is being searched now", appended to the
+            // status line as well as the panel, so the player sees the tier move without opening it.
+            String hint = quick.potionHint();
+            hint = hint.isEmpty() ? "" : " \u00b7 " + hint;
             if (sts1solver.ui.DeepBudget.unlimited(cap)) {
                 // No percentage without a denominator (P2-12): the moving worldline count is the
                 // "it is still working" signal the player asked for.
-                status = "计算中 · " + worldlineText(quick) + " · 已用 " + (elapsed / 1000) + "s（不限）";
+                status = "计算中 · " + worldlineText(quick) + hint
+                        + " · 已用 " + (elapsed / 1000) + "s（不限）";
             } else {
                 int pct = (int)Math.min(95L, elapsed * 100L / cap);
-                status = "计算中 " + pct + "% · " + worldlineText(quick);
+                status = "计算中 " + pct + "% · " + worldlineText(quick) + hint;
             }
             phaseStart = System.nanoTime();
             Hud.set(lines());

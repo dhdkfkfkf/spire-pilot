@@ -247,6 +247,67 @@ public final class Limits {
         return potionsOffered() ? "\u836f\u6c34: \u5141\u8bb8" : "\u836f\u6c34: \u7981\u7528";
     }
 
+    /**
+     * P7 (user m00001): whether the portfolio searches the belt in TIERS (drink 0 potions, then 1,
+     * ... up to every potion in the bar) instead of one frontier where a line that drank is already
+     * 18000 points behind.
+     *
+     * <p>Default on. {@code search.potionTiers=off} is the rollback switch: the four-rung portfolio
+     * then runs exactly as it did before P7 (no tier split, potion cost charged on every node).
+     */
+    public static boolean potionTiers() {
+        return yes("search.potionTiers", true);
+    }
+
+    /**
+     * P7b (user m00331) / P7d (user m00561): the order the portfolio runs in.
+     *
+     * <p>{@code tier} (default since P7d): one session per potion tier, the whole beam ladder widened
+     * in place inside that session -- tier 0 runs beams 1..4, then tier 1, and so on. This is the
+     * fast layout: the search tree is kept while the beam grows, so a tier expands each prefix once.
+     *
+     * <p>{@code beam}: the P7b cell layout -- one fresh session per (beam rung, potion tier) cell, so
+     * every cell re-expands the fight from the root. It is opt-in (and slower: it paid for the A/B
+     * comparison, not for a speed win) because the user reported the cell order as "too slow".
+     */
+    public static boolean potionOrderBeam() {
+        String v = read("search.potionOrder", "tier").trim().toLowerCase(java.util.Locale.ROOT);
+        if (v.isEmpty()) {
+            return false;
+        }
+        return v.equals("beam") || v.equals("cell") || v.equals("cells") || v.startsWith("beam");
+    }
+
+    /**
+     * P7: whether a higher potion tier runs a proportionally wider beam
+     * ({@code tierBeam = base * (1 + step * tier)}), because every potion adds a "drink / keep"
+     * fork to every decision. Default on; {@code search.potionBeam=off} pins every tier to its
+     * profile's own beam.
+     */
+    public static boolean potionBeam() {
+        return yes("search.potionBeam", true);
+    }
+
+    /** P7: percent added per tier by {@link #potionBeam()} (default 25, clamped to 0..100). */
+    public static int potionBeamStep() {
+        String v = read("search.potionBeamStep", "25").trim();
+        try {
+            return Math.max(0, Math.min(100, Integer.parseInt(v)));
+        } catch (Throwable t) {
+            return 25;
+        }
+    }
+
+    /** Shared parser for the on/off switches (same spellings every other switch accepts). */
+    private static boolean yes(String key, boolean fallback) {
+        String v = read(key, fallback ? "on" : "off").trim().toLowerCase(java.util.Locale.ROOT);
+        if (v.isEmpty()) {
+            return fallback;
+        }
+        return !(v.equals("off") || v.equals("no") || v.equals("false") || v.equals("0")
+                || v.equals("ban") || v.equals("\u5173") || v.equals("\u7981\u7528"));
+    }
+
     /** Replaces (or appends) one key in settings.txt, keeping every other line untouched. */
     private static void write(String key, String value) {
         try {

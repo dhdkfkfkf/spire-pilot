@@ -742,7 +742,6 @@ S97 solve: win splits=0 deepest=32 hpLoss=0 potions=1 potionHp=9 saves=0 complet
 证据：`evidence/P2-19-POTIONS-20261031.txt`（sha256 `DB8BC4C1…469FE`）；安装版 jar
 `654942 bytes` / sha256 `1424DBCD…8223`。仍未做：P2-21b「不喝药基线」对照。
 
-
 ## B54 卡顿诊断器：4 秒采样 + GC + 相位（660/0）
 
 用户 m16133「先按上面做诊断器」。两份 hang dump 一份停在读盘（`CharStat.<init>` 4.2 s）、一份停在 GL
@@ -799,7 +798,6 @@ AUTOTEST RESULT passed=668 failed=0
 卡顿（m16202-1，只查不改）：`hang-20261031-185424.txt` 4.2 s，`phase=CHAR_SELECT`，`gc=26/1857ms heap=1274/7106MB`，20 次采样 9 个不同栈顶（`nSwapBuffers` 占 9 次）；最多次栈是 `CharStat.<init>` 读 `STSData*.json` ← `CharacterManager.recreateCharacter` ← `MainMenuScreen.<init>` —— 是游戏自己构造主菜单 + vsync，不是我们的循环，也不是长 GC。结论与 B52/B54 一致，未改代码。
 
 证据 `evidence/P2-24-P2-25-B55-B56-20261031.txt`；安装版 jar 664353 bytes / sha256 `D03A1184986A3B24C1358509AD31AE7245410A77FD0C54317B4B68EAC01DC9B5`。
-
 
 ## 重复怪物标号（P2-26；677/0）
 
@@ -1020,7 +1018,6 @@ AUTOTEST RESULT passed=165 failed=0 (core gates only, 104 extended gate(s) skipp
 ```
 安装 jar 723261 bytes / sha256 `4FD8EB819A7CE6F09DD2B9E779F1294B072C64E208A5AE5DB9E54AD75AED8FD7`；完整套件 740/0。
 
-
 ## B66 / P2-38 结算窗 + 手牌选牌判据（核心 174/0，完整 749/0）
 
 用户 m19362 指出：自动打出燃烧契约之后必定停下并提示重算，怀疑是「检测太快」。
@@ -1036,7 +1033,6 @@ AUTOTEST RESULT passed=165 failed=0 (core gates only, 104 extended gate(s) skipp
 
 「还有 N 条候选未展开」= `frontierLeft`（前沿里没展开的）+ `deferred`（A3 停车场，上限 2000），两者都是"还能再算"的候选；
 不是被排除的世界线，也与开局掉血无关（掉血只参与排序）。
-
 
 ## P2-39 / B67 面板随大小调整内容（核心 191/0，完整 766/0）
 
@@ -1108,7 +1104,6 @@ input mute: a screen is open, leaving the cursor alone (a slider would be dragge
 ```
 
 按用户 m20027-1「这次对话所有改动不要整套验证，只要关心改动的地方」，本轮**没有**跑核心/完整套件。
-
 
 ## B71 ս����ѡ����������ߣ�ֻ������Ž� 28/0��
 
@@ -1318,7 +1313,6 @@ jar 776839 bytes / sha256 26DA7625…08E8。
 - 顺带修好两条被 B84 改坏的门禁对照线：S82 的「旧 fast 卡帧复现 bug」必须同时关掉屏帧规则；S136 的装计划时机必须至少先跑一帧 `AbstractRoom.update()`，否则世界切换检测会把刚装的计划清掉。
 - 教训：门禁读 `Gameplay.tick()` 的瞬时状态不可靠（同一帧接受后立即被「战斗结束」清理），要用 `verifiedSteps()` 这类不复位的计数器；探针驱动 live 引擎必须走真实房间帧。
 
-
 ## B86 / P2-57 / P2-58 — 多屏选牌（头追）与上限三档（2026-11-02）
 
 - 问题：头追（CaiNongMod `HeadChase` → `ExchangeCardsOfTwoPilesAction`）在弃牌堆与抽牌堆各选一次，自动出牌「不卡也不换」。实机两屏都由真引擎开出，卡在我们这一层：泵 8 帧把 0.1s 窗口烧完 → 动作出队、第二屏被顺手关掉；`Solver.expand` 只枚举第一屏；`pendingChoice` 只有一个槽。
@@ -1338,7 +1332,6 @@ jar 776839 bytes / sha256 26DA7625…08E8。
 - 门禁：S141（手牌屏选 2 张真离开手牌、实机未动）、S142（static-final 容器按内容镜像与还原）。核心 318/0、完整 893/0；安装 jar 814357 B / `AEC918646288278465F3B19F545EEADBE9902CC1DD450EAB718045DF4BB9E949`。
 - 顺带：S133「大帧丢牌」旧断言按新语义改成 `inHand=false & discarded=false & exhausted=false`。
 - 教训：`HandCardSelectScreen` 与 `GridCardSelectScreen` 语义不同——grid 屏点击只 `selectedCards.add`，不搬 targetGroup；所以只改 HAND 分支。Java 21 反射无法替换 static final 字段（实测 `IllegalAccessException`），只能原地改内容。
-
 
 ## B88 / P2-61 — 出牌后流程审计 + 效果终态补算（2026-11-02，核心 323/0）
 
@@ -1387,7 +1380,6 @@ B76 的 `mirror/ExhaustAttrs` 只按「消耗堆张数变化」补，以下两�
 `tools/run.ps1 -AllMods -Gates S143` → 7/0。真加载 CaiNongMod 后：选两张打击 → 静态列表存 2 张且都是打击 → 两张牌真离开手牌 →
 再打一次搞里头 → 两张牌经 limbo 真的打出（`noScreen=true limboEmpty=true block=18 liveHand=true liveList=true energyMirrored=true`）。
 踩坑：`EnergyPanel.totalCount` 是**当前能量**（`hasEnoughEnergy` 看它），`player.energy.energy` 是上限，只设后者会让 `canUse` 为假。
-
 
 ## B89 / P2-63 — 强制结束回合由引擎闩锁判定（2026-11-02，核心 328/0、完整 903/0）
 
@@ -1438,7 +1430,6 @@ B76 的 `mirror/ExhaustAttrs` 只按「消耗堆张数变化」补，以下两�
   ninja 三瓶药水（`potions.AmoXilin` / `LexKelaPotion` / `NH42SO4`）沙盒与面板路径 Digest 一致（3/3 PASS）。
   首跑 FAIL 是量法问题（面板路径只入队、沙盒路径已结算），门禁里补 `actionManager.update()` 泵，见 B99。
 
-
 - 同日（第三次）：**B100「加载不到的名字被判成原版」**（全量套件唯一失败 `a third-party subscriber counts as a hook`）：
   `util/Provenance.java#isGameName` 的 catch 从 `return true` 改为 `return false`（未知不能证明是原版），
   全量套件 `passed=925 failed=0`。
@@ -1447,7 +1438,6 @@ B76 的 `mirror/ExhaustAttrs` 只按「消耗堆张数变化」补，以下两�
   门禁 **S152**（开关真的去掉药水分支：offered=1 / banned=0）与 **S153**（同一局跑两遍，差价进日志：
   JawWorm+Cultist / 25HP / 8s → 带药 hpLoss=5 且用 1 瓶，不带药 hpLoss=15 且用 0 瓶）。
   core 套件 `passed=353 failed=0`，全量 `passed=925 failed=0`。
-
 
 - 同日（第四次，用户 m02901「重放失败，应该是按兵不动的问题」）：BideTime 复现失败但**挖出 A3 重建的两处真缺口**。
   - 先排除：`BideProbe`（4 实验）证明「卡内结束回合」在沙盒里正确（turn 1→2、抽满、+1 能量）、
@@ -1487,7 +1477,6 @@ B76 的 `mirror/ExhaustAttrs` 只按「消耗堆张数变化」补，以下两�
   ninja `live=match=14/14`、菜农 `live=match=12/12`；jar 873735 B / sha256 DD86B24F…798DDF。
 - 文档：`PLAN-BUGS.md` B103、`PLAN-P6.md` P6-16 ✅、`PLAN.md` 板块行改 P6-01…P6-16（S145-S155）。
 
-
 ### 2026-11-03 上午 B104 + B105：删掉指向不存在按钮的文案；P2-62 的廉价一半（user m04121/m04331）
 
 - **B104（文案）**：面板在预算不足时报「点「加深」还能继续找」，而「加深」在 B43 就删了。改为
@@ -1512,7 +1501,6 @@ B76 的 `mirror/ExhaustAttrs` 只按「消耗堆张数变化」补，以下两�
   `Statics.MOD_CONTAINERS` / `CLONE`，让该字段每分支独立）**暂不做**。判据已备：一旦 solver.log 出现
   `static watch: the sandbox wrote mod static …`，把这个字段注册进去（约 2 行 + 一条门禁），再用 modchar 复验。
 
-
 ### 2026-11-03 中午 B106：结束回合「最多 N 张」选牌屏真正变成决策（user m04431/m04473）
 
 - 用户报「计算时卡住几秒又恢复」，查日志=回放失败重试爆炸（见 B106 现象段），并追问「为什么计划里没有选牌答案」。
@@ -1529,7 +1517,6 @@ B76 的 `mirror/ExhaustAttrs` 只按「消耗堆张数变化」补，以下两�
 - 回归：core **371/0**（原 365，+S157 六条）；jar 884k 级，install sha256 `F379DBA80DA15852D1A12084ED0629144331CA6681EAD5C84987BD079260C3C5`。
 - 文档：`PLAN-BUGS.md` **B106**；`PLAN-P6.md` **P6-18**；`PLAN.md` 板块行改 P6-01…P6-18 / S145-S157 / core 371/0。
 - **仍未修（独立问题，等批准）**：回放失败后仍会逐条重试整张停牌表并每条打两行日志（1318 条 → 帧 2–3 秒）。
-
 
 ### 2026-11-03 下午 B107：删掉回放失败的「重试」，把「这一步重放不了」只学一次（user m04644/m04656/m04659）
 
@@ -1586,7 +1573,6 @@ B76 的 `mirror/ExhaustAttrs` 只按「消耗堆张数变化」补，以下两�
 - 文档：`PLAN-P6.md` **P6-22**、`PLAN.md` 板块行（P6-01…P6-22）、`TESTING.md` 基线。
 - 阶段 2/3 未做（按用户指示）：判定（写入检测 + 兄弟 fork Digest 差异）与回滚（注册后与 live parity 复核）。
 
-
 ### 2026-11-03 晚 B109 阶段 2（策略 A）：用实测决定一个字段要不要进镜像（user m04965）
 
 - 用户选 A：只有"隔离该字段会改变同一动作的结果"才注册（B 更全但算力代价大）。
@@ -1600,7 +1586,6 @@ B76 的 `mirror/ExhaustAttrs` 只按「消耗堆张数变化」补，以下两�
 - 回归：core **`passed=397 failed=0`**（原 393，+S162 四条）；install sha256 `F71F2483912CF9606F792DDBE20F7C9BFA4431D2F2C2FF22664F2A4CE10F45CD`。
 - 文档：`PLAN-P6.md` **P6-23**、`PLAN.md` 板块行、`TESTING.md` 基线。
 - 阶段 3（注册后的 parity 复核 + 撤销黑名单）未做。
-
 
 ### 2026-11-03 深夜 B109 阶段 3：注册后的 parity 复核 + 撤销黑名单（user m05034「做」）
 
@@ -1617,7 +1602,6 @@ B76 的 `mirror/ExhaustAttrs` 只按「消耗堆张数变化」补，以下两�
 - 文档：`PLAN-P6.md` **P6-24**、`TESTING.md` 基线。
 - 至此 B109 三阶段完成：运行期注册 → 隔离对照判定 → parity 复核与回滚。未做的仍是"把结果写进面板"（目前只在 solver.log）。
 
-
 ### 2026-11-03 深夜 B109 阶段 3 收尾：黑名单必须真的生效（user m05034「做」）
 
 - 阶段 3 主体（probation + parity 复核 + 撤销拉黑）已随前一条落地，但复查发现一个缺口：**黑名单只是记录，没有参与判定**。
@@ -1629,7 +1613,6 @@ B76 的 `mirror/ExhaustAttrs` 只按「消耗堆张数变化」补，以下两�
 - 回归：`-Gates "S163"` → `passed=5 failed=0`（六条断言里含综合判定）；core **`passed=402 failed=0`**（原 401）。
   install sha256 `A2CB9A825E069CDBB0D8778540D24AB8870659C69BC9777616BC902B4D34A01E`。
 - 文档：`TESTING.md` 基线（402/0、S1–S163、新 sha）。`PLAN-P6` P6-24 保持"阶段 3 完成"。
-
 
 ### 2026-11-03 晚 B110：世界泄漏会把实机存档重定向进沙盒（user m05088/m05182）
 
@@ -1651,7 +1634,6 @@ B76 的 `mirror/ExhaustAttrs` 只按「消耗堆张数变化」补，以下两�
 - 文档：`PLAN-BUGS.md` **B110**、`PLAN-P6.md` **P6-25**、`PLAN.md` 板块行（P6-01…P6-25 / S145-S164 / core 405/0）、`TESTING.md` 基线。
 - 仍未修：`SlaverRed.changeState` 的 NPE（触发源）、以及"从不 uninstall 的调用点"。
 
-
 ### 2026-11-03 晚 B111：动画替身 NPE（SlaverRed.changeState）——B110 的引信（user m05311 继续）
 
 - 用户要求继续做：把上次事故的触发源修掉。
@@ -1669,7 +1651,6 @@ B76 的 `mirror/ExhaustAttrs` 只按「消耗堆张数变化」补，以下两�
 - 回归：core passed=408 failed=0（S1–S165）；install sha256 36BDF0353786C11B3E481881304F99F7675156FE1C95A252343207030DFDD850。
 - 文档：PLAN-BUGS B111、PLAN-P6 P6-26、PLAN.md 板块行（P6-01…P6-26、S145-S165、core 408/0）、TESTING 基线（408/0、S1–S165、新 jar sha）。
 - 说明：本轮多次 compress 失败（会话代际与压缩账本不一致，报 ref 失效），按用户 m05311 的指示不再尝试。
-
 
 ### 2026-11-03 晚 B112：门禁遗留的合成自动存档（user m05182 的直接后果）
 
@@ -1720,8 +1701,6 @@ B76 的 `mirror/ExhaustAttrs` 只按「消耗堆张数变化」补，以下两�
 - 顺带答复（无需改动）：面板「节奏」= `ui/AutoPace` 的 `autoplayDelayMs`，自动出牌时两个动作之间的等待毫秒，档位 0/250/450/750/1000（默认 450），0 表示瞬间；存 settings.txt。
 - 文档：PLAN-BUGS B117（并订正 B115 的「单行文本」描述）、PLAN-P6 P6-31（P6-29 标注被升级）、PLAN.md（bug 表 + 收尾状态 425/0 + 新 sha + 第 5 条验收改成路线条）、TESTING 基线、本条目。
 
-
-
 ### 2026-11-03 晚 B118：计算中的预览加上预计掉血（user m01978）
 
 - 需求：预览也要像算完的面板那样给出「预计掉多少血」。
@@ -1739,7 +1718,6 @@ B76 的 `mirror/ExhaustAttrs` 只按「消耗堆张数变化」补，以下两�
 - 门禁：新增 **S174** 8/8（识别 SETTINGS 屏、暂停期节点 52→52 不增、文本含「暂停」、恢复后 elapsed 86→126 即只涨 40ms、暂停后仍能跑完）；core **434/0**（S1–S174）。
 - 产物：jar 942589 B，sha256 4AC970AD6F0A027C910116343CFDE702182599FEC4247C073523EC9D0813550B，已安装。
 - 已知边界：窗口失焦不算暂停（游戏本身还在跑）；暂停期间玩家退出战斗不会被拦；回滚只需去掉 `tick()` 顶部两段 gate。
-
 
 ### 2026-11-03 晚 B120：零伤最优不再「计算中」（user m02336）
 
@@ -1800,7 +1778,6 @@ B76 的 `mirror/ExhaustAttrs` 只按「消耗堆张数变化」补，以下两�
 - 修法：`Step.turnBefore/turnAfter` + `replay()` 测量 + `planTrace()` 的 `t=a->b skip=N`/`auto=`；`planIsStale()` 看剩余步骤；`settle wait` 每 2 s 一行；「越过即完成」（turn 超过沙盒测得的结束回合且队列安静）；顺手修 B125 的 `!stuck` 误标。
 - 门禁 S183（跳过跨度 1→3）/S184（planIsStale 真值表 2 条）；core 460/0（S1–S184）；jar sha256 44B7BA67B751F62B75C5B70B5276E40AF259DB30D184E95086F0E26B337FBCA0（998360 B）。
 
-
 ### 2026-11-04 B127：面板给出付不起的牌（能不能打用了两套判据）（user m04994 / m05130）
 
 - **触发**：蛇花战 12:36 的 34 步计划开头 `农盘+ | 农盒 | 按兵不动+ | 昏睡`，实机前两张花光 3 能量，
@@ -1852,7 +1829,6 @@ core **476/0**（S1–S187，_tmp/run-core-b129.txt）。jar 1008516 B，sha256 
 教训：①在门禁里用 fork/install 手工复现逃离会互相踩（`another world is installed` + 泄漏的 world），必须在 sandbox 内改再加能力、再 `readBack`；②临时诊断用完必须 grep 清干净（本轮清掉 Solver 的 `POTION diag`、Driver 的 `escape-diag`/`drain-diag`、Probe 的 `S186 peek/trace/plan`）。
 
 已知边界：沙盒读不到本场金币奖励真实金额（发金币在真机 UI 帧），用真实 roll 中点显式定价；逃离未建模遗物/药水位。
-
 
 ### 2026-11-04 晚 B130：地精头子预计血量比实机多 10（死怪能力没清，user m06143/m06264）
 
@@ -1940,7 +1916,6 @@ core **476/0**（S1–S187，_tmp/run-core-b129.txt）。jar 1008516 B，sha256 
 - 验证：S197 2/2；core 511/0（S1–S197）；jar 4E6A7BA0…E62A（1,062,364 B）已装。
 - 代价/风险/影响已报：多存屏种类、每屏多一次 settle 泵帧、假线被丢弃（计划可能变短但更诚实）、`screenKinds` 为空时行为不变。
 
-
 ### 2026-11-06 B141：头追第二块选牌屏被关掉（user m09905）
 
 - 根因：`ExchangeCardsOfTwoPilesAction` 吃掉第一块 grid 的选择后不清 `selectedCards`、直接 `duration=FASTER; return`，第二块屏下一帧才 `open`（`callOnOpen()` 里 clear）；我们用 `selectedCards.isEmpty()` 判「已消费」⇒ 第二块屏一开就判成答完并 `closeCurrentScreen()` ⇒ 动作读到空选择、搬牌不发生、无异常无日志；沙盒同源（`selectionQuestion()` 的 group 指纹认不出同一堆连问两次）。
@@ -1957,7 +1932,6 @@ core **476/0**（S1–S187，_tmp/run-core-b129.txt）。jar 1008516 B，sha256 
 - 门禁 **S200**（4 条）：合成战斗里往手牌塞一张灼伤（回合末 2 伤、无格挡）→ 按按钮 → 灼伤被回合末块打出、玩家掉 2、回合正好 +1。
 - 验证：`-Gates "S64,S200,S201"` → 15/0；core **532/0**（S1–S201）；jar `F023BDD72255C2D1DF5D5498437367897F16155F7E52D568418B7A41EFD54D14`（1,078,365 B）已装。
 - 代价/风险/影响：代价≈0（每回合一次按钮调用）；风险＝若某个窗口里 `overlayMenu` 为空会走退化分支并 WARN（行为等同 B142 前，不会更差）；影响＝实机自动出牌现在会真的结算回合末（灼伤/腐朽/Regret 掉血、遗物触发、球与姿态），面板计划里那些掉血从此与实机对上；这解释了「面板比实际少掉血」类偏差的最后一类。
-
 
 ### 2026-11-06 B143：面板删「停止」、加「局外收益」开关（user m10519 第 2、3 条；本轮补记）
 
@@ -1983,7 +1957,6 @@ core **476/0**（S1–S187，_tmp/run-core-b129.txt）。jar 1008516 B，sha256 
 - 已知更深一层：即使开关打开，50 金币＝25 金/HP 只值 2 HP，而毒种的负收益（`onVictory()` 塞「腐朽」）沙盒从不跑（PostCombatHealing 注释已写明 onVictory 不执行）⇒ 负收益在两条路径都不可见。
 - 待修方案（用户未批，按 m04606 不擅自改评分）：A 同分时偏好步数更少的线（计划里自然不带白打牌）；B 胜节点跑引擎 onVictory 结算（诅咒可见，但改动大）；C 关掉开关时把「只产出局外价值」的牌判为无价值（需要语义标签，有特判风险）。A 是唯一低成本且不动语义的选项。
 
-
 ### 2026-11-06 B145：S112 成长计价门禁依赖玩家设置（core 4 条红）
 
 - 现象：装 B144 的 jar 后全量 core `passed=528 failed=4`，4 条全在 S112，`credit=0 ritual=0 …`。
@@ -1992,14 +1965,12 @@ core **476/0**（S1–S187，_tmp/run-core-b129.txt）。jar 1008516 B，sha256 
 - 验证：`-Gates "S112,S201,S64"` 20/0（S112 `credit=23 … restored=true`）；core 532/0（S1–S201）；jar `ABD6F6E5…7BBA`（1,079,507 B）。
 - 代价/风险/影响：只改门禁；产品代码、开关语义、评分、面板、其它 mod 均不变。`s113Scan()` 的 `otherCredit` 也会因开关关掉显示 0，但只打印不断言，未改。
 
-
 **为什么「点播」的选项总是「毒种」（2026-11-06 追查，未改代码）**
 
 - 点播的 ChooseOneAction 是 4 张种子牌（`_tmp/demand/CaiNongMod/cards/Demand.java:81-94`，按 农种/毒种/装唐/发癫 顺序加入，已有该 power 的会被过滤掉）。
 - 排序用的是 `Driver.cardValue`（Driver.java:2339-2352）：`damage*2 + block*2 + max(0,magicNumber)*2 + (cost<0 ? 2 : 3-cost) + upgraded*2 + rarity.ordinal()`。四张种子 cost=-2、rarity=SPECIAL（`javap` 实测枚举序：BASIC,SPECIAL,COMMON,UNCOMMON,RARE,CURSE ⇒ SPECIAL.ordinal()=1），只有 magicNumber 不同：农种 3 / 毒种 7 / 装唐 1 / 发癫 7 ⇒ cardValue 依次 **9 / 17 / 5 / 17**。`selectionOptions`（Driver.java:1504-1522）按 cardValue 降序稳定排序 ⇒ 毒种与发癫并列第一，稳定排序保留 mod 给出的先后 ⇒ **第一分支永远是毒种**。
 - 搜索确实把四条分支都展开（`Limits.choiceBranches` 对 REWARD 返回无上限，combos 默认 48），但四条**同分**：`Solver.score`（Solver.java:2133-2163）只有 HP/药水/胜负/层数/怪物血/格挡/怪物数，没有 power、能量、金币、masterDeck 项；四个种子的实际效果一个是 `onVictory()`（沙盒从不执行，PostCombatHealing 注释已写明），另一个是农种在 3 回合后 in-combat 塞「腐朽」——进的是 masterDeck，而 masterDeck 既不进 Digest 也不进评分 ⇒ 四条分支的分数完全一样。`Solver.java:1571` 是严格 `>`，同分保留先到的节点，而先到的是 probe 的 all-first 分支（Solver.java:909-960，`expandScreens` 每屏答案取 `options.get(0)`）⇒ 计划写成「点播（选：毒种）」。
 - 结论：不是求解器偏好毒种，而是「价值并列时取第一个」+「毒种在 value 启发式里并列最高且被 mod 先给出」。若已持有毒种，发癫会顶上（同样 17）；只有种子之间的局外代价可计价（例如 B 让 onVictory 真的跑）之后，选哪个才可能变得有意义——而四个种子都塞同一张「腐朽」，所以即便做了 B，选谁仍然同分；B 改变的是「点播这一步本身值不值得打」，不是「选哪个种子」。
-
 
 **评分口径速查：金币、能力、能量到底进不进分（user m11469 追问，2026-11-06；金币一栏已按 B146/m11490 改写）**
 
@@ -2226,7 +2197,6 @@ core **476/0**（S1–S187，_tmp/run-core-b129.txt）。jar 1008516 B，sha256 
 - 结果：S216 5/0；全量 core `passed=593 failed=0`（S1–S216）；jar sha256 `4D1E6D4EB878169121AC6E23843E5C5641F543F4C2AF33D8AA55185089210B7C`（1,130,506 B）已装。
 - 关于「换选/取消每步扣 1 分」：`Solver.score` 的 `layer` 项本来就是每出一层 −1 分（`10000000 - StrategicDeficit*2000 - (monsterHp*20 + alive*400 + block*2 + layer)`），1 HP = 2000 分 ⇒ 一层 1 分等价于 0.0005 HP，小到只能当平局裁刀（正好是我要的性质：不改变任何真实收益的比较，只让「同样好的两条线」偏向更短的）。所以不需要新增「操作扣分」机制，`layer` 已经给了；真正要防的「选/取消死循环」由搜索的深度上限与 `Limits` 兜住（每答一次屏消耗一步）。
 
-
 ## 2026-11-07 B164 — 战后奖励页计入胜利评分（user m16960/m17196/m17363）
 
 - 现象：solver.log:1250 的 15 步计划末「头槌→抢劫的 ｜ 结束回合」，step14 live/sandbox 一致（8→3），计划主动放跑小偷；实机上打死小偷会把贼赃 20 金以奖励项归还。
@@ -2340,7 +2310,6 @@ core **476/0**（S1–S187，_tmp/run-core-b129.txt）。jar 1008516 B，sha256 
 - 风险：档内仍按 `score` ⇒ 非胜线净掉血可被棋盘项破同分（<1 HP）；跨档更保血、可能少拿战利品；回滚＝删字段 + `better` 回旧算式 + 面板回 `bestHpLoss`，S233 立刻红。
 - 影响：面板「预计 -N HP」变净掉血并标注抵扣；自动出牌/回放/digest/beam 排序不变；其它 mod 无接触点。
 
-
 ## 2026-11-10 12:42 B173 订正 — 净掉血尺子不再扣战利品（user m21803）
 
 - 现象/要求：用户指出「不要显示战利品抵扣」——奖励（金币/卡/遗物/药水）在每场胜利里近乎常数，若拿它抵血，「掉 6 血换相当于 6 血的战利品」会被算成 0 血最优，这种错误不能出现。
@@ -2387,7 +2356,6 @@ core **476/0**（S1–S187，_tmp/run-core-b129.txt）。jar 1008516 B，sha256 
 - 风险：误判「已静止」会把半截状态合并 ⇒ `settleBlock()` 的七种原因 + S242 钉住；合并改变 beam 名额分配 ⇒ 结果可能与之前不同（有意），靠全量 core 确认无退化；回滚＝删 positionKey，S242/S243 立刻红。
 - 影响：只有日志多一行观测；面板 UI、自动出牌、回放、digest、计划格式、跨档合并、评分不变；其它 mod 无交互。
 - 边界：**跨档重算未解**（每个加宽档都是新 Session、从根重建，零跨档记忆）。
-
 
 ## 2026-11-10 B177 — 加宽阶梯改成在同一个 Session 内逐档进行（不再每档从根重建）
 
@@ -2485,10 +2453,6 @@ core **476/0**（S1–S187，_tmp/run-core-b129.txt）。jar 1008516 B，sha256 
 - **安装物**：`D:/Steam/steamapps/common/SlayTheSpire/mods/sts1-engine-solver.jar`，1,258,662 B / sha256 `56486847279F6FCF439EAF0A52C0289800495624DABCF794A87D2B7B8D633AF7`（jar 非确定性；反向验证那版是 `EEB3609D…`）。
 - **代价/风险/影响**：每帧一次 `currentAction` 判空 + 白名单查表 + 一次 `Field.getFloat`，无每节点对象；白名单 6 条是手工维护项；6 类之外仍是 0.05 s/帧 ⇒ **吞吐回不到 1000/s**，只能回收这 6 类的帧数；帧长不进 `Digest` ⇒ 面板/路线/评分/自动出牌/worker 指纹/其它 mod 全不变，live 路径不经过 `FramePlan`。
 - **验证口径**：B183 的教训（只看 steps、不看实机吞吐）写进 S253 的注释与 PLAN-BUGS 的已知边界；本次仍靠用户实测 nodes/ms 收尾，日志里新增 `profile:` 行可用于对照。
-
-
-
-
 
 ## 2026-11-14 发布 1.0.0 到创意工坊（private，用户验收前不公开）
 
@@ -2626,7 +2590,6 @@ offers [Defend_G, Malaise], the plan chose [催化剂]…)`，看着像 mod 出�
 - 风险：替身与真实 Clip 的行为差异（严格类型断言可能抛异常，已按表给正确类型）；B169 在音频静态上被推翻（mod 主动置 null 的字段窗口结束会被还原，窗口内外一致）；实机 clip 在窗口内被别的线程真实关闭时只能写 null（音乐会停）。
 - 影响：窗口内不再有雨爱声音（一次线都不开）；窗口外照常播放/停止；面板、自动出牌、搜索结果、评分、候选枚举与其它 mod 共享对象不变；`solver.log` 的 `audio quiet` 摘要新增 `stand-in swap(s)`/`release(s) restored`/`closed live clip(s) dropped` 等计数；「写回已关闭 Clip → 下一窗口 flush 崩溃」这条路径消失。
 
-
 ## 2026-11-16 B187 残余症状定性：计算期间雨爱重放＝已知边界，不修
 
 - 用户 m00415「重做计划…让沙盒对这个播放雨爱的mod没有影响…沙盒隔离自己要的东西，不要引用雨爱mod使用的函数」→ 要求先给计划；m00495「那不管这个bug」→ 决定不修。
@@ -2650,3 +2613,98 @@ offers [Defend_G, Malaise], the plan chose [催化剂]…)`，看着像 mod 出�
   2026-11-16 09:57:38 输出 `ACCOUNT ID: 1088547740` / `Submitting workshop item update` / `Successfully updated workshop item!` ⇒ 工坊条目 **3839053516** 已更新（config 里 visibility 仍为 `private`，公开与否由作者在工作坊页面决定）。
 - 文档：6 处旧 jar sha（`FE0C514E…`）全部换成 E85332F8…——`docs/PLAN-ISOLATION.md:183`、`docs/PLAN-BUGS.md:4359`、`docs/PLAN-WORKLOG.md:2622`、`docs/PLAN.md:40` 与 `:179`、`docs/SANDBOX-MECHANISMS.md:128`、`docs/TESTING.md:8`；PLAN.md B187 行状态补「1.0.1 已于 2026-11-16 发布」。
 - 代价/风险/影响：**只改版本号字节，无代码、无性能、无内存变化**；风险＝工坊条目仍是 private（需作者手动公开）、上传器依赖 Steam 运行时（无人值守环境不可用）；对本 mod 的实际影响＝玩家侧版本号显示 1.0.1，行为与 1.0.0 完全一致（B187 修复本身已在 1.0.0 的 jar 里）。
+
+## 2026-11-16 B188 / P7 药水分档搜索（计划已出，未写代码）
+
+> 更新（同日）：已按 T1–T6/T8 实施并安装，见下一段「B188 / P7 实施」；本段的 A 记账公式已被推导推翻，实施口径以下一段为准。
+
+- 触发：user m00001「sts1-engine-solver自己看日志为什么打地精大块头敏捷药水没有第一时间喝？先喝敏捷药水再打出幽灵铠甲能少扣2血」；user m00149 补充「同瓶数先喝分数应更高」；user m00167 指定参考实现 `C:\Users\YOKI\Desktop\CombatSolver-main`（按瓶数分档）并要求先出计划；user m00201 追加「每档 beam 适当加宽」与「写进计划」。
+- 取证（solver.log 2026-11-16 10:43，物理行）：1786 行 plan 14 步＝…10 幽灵铠甲 / 11 敏捷药水 / 12 防御；1788 行 trace 步 10 `t=3 b=10`、步 11 `t=3 b=10 mhp=60`、步 12 防御 with b=17 / without b=15；最终 with loss=17、without loss=19 ⇒ +2 敏只落在第 12 步防御上，先喝可让幽灵铠甲多挡 2 点。1779 行 B174 `replayOk=false`、1778 行 replay 在 step 12 报「重锤+ [Bludgeon] -- not-settled（DEATH 屏）」⇒ 打印顺序疑点，已列为 T1 必答。
+- 根因：叶子只给「已花药水」扣分（`Solver.java:4474-4487` 的 `n2 = startPotionHp - choice.potionHp`，一瓶 potionHp=9 ⇒ 18000 分），不给「仍持有药水」记资产 ⇒ 喝药那层瞬降、先喝分支被 `sortDeferred`（`:3418`，上限 `:48` 的 2000、每轮 `:60` 的 60 条）与 beam 双重淘汰；次因是喝 0/1/2 瓶共用一条一维前沿（`portfolioProfiles`）。
+- user m00300 追加决定：本轮**不写门禁**，实现完由他自己实测（判据改为 PLAN-P7 §5 的 6 条观察项）；并要求把本条目的计划编号写清。
+- 方案（未实施）：A 对称记账 `+ choice.potionHp * POINTS_PER_HP`；B 0→K 瓶分档（档内 `maxPotionUses` 剪枝、预算 40%+60% 按 2^(K-i) 归一、档内仍 35/25/25/15，0 瓶档 provenOptimal 即停，合并时净扣血并列少喝优先）；**每档 beam `ceil(base×(1+0.25×tier))`**（仍过 `effectiveBeam`，堆守卫可压到 48）并同比放大停车场 `max(2000,32×beam)` 与回放名额 `max(60,beam/2)`；B174 探针改用 0 瓶档基线。
+- 任务表 T1–T8 合计 3.25d（T1 钉 planText 顺序 0.25d、T2 对称记账 0.5d、T3 档位+剪枝+键 0.5d、T4 beam 加宽 0.5d、T5 预算切分+合并 0.5d、T6 探针 0.25d、T7 端到端自测+三路径 0.5d、T8 文档 0.25d）；验收＝**用户自测**（user m00300「不要门禁，我自己可以测试」）：原 S258–S263 六条门禁取消，改为 PLAN-P7 §5 的 6 条面板/日志观察项。
+- settings 新键：`search.potionTiers`（默认 on，回滚开关）、`search.potionBeam`（on）、`search.potionBeamStep`（25）。
+- 代价/风险/影响：档数 ≤ 6、每档一次 Session 构造；对称记账每节点一次整数乘加；总时长不增（预算切分），内存峰值≈最宽档；风险＝选线口径边界移动、`PotionBook` 战略价≠真实价值、三条收尾路径须同步接线（防 B120 重演）；影响面板 plan/预计损失、自动出牌顺序、solver.log 新增 `potion tier:` 行、settings.txt 三键；与其它 mod 无交互。
+- 文档落点：新建 `docs/PLAN-P7.md`（§1 证据 / §2 根因 / §3 方案含 beam 加宽 / §4 任务表 / §5 门禁 / §6 settings / §7 代价风险影响 / §8 边界 / §9 疑点）；`docs/PLAN.md` 板块表 P7 行 + 在跟条目 B188 行；`docs/PLAN-BUGS.md` B188 段（B187 之后）。
+- **本轮未跑构建、未跑 `tools/run.ps1`、未改任何产品代码**（user m00732 自行实测；本条目等实现后再验收）。
+
+## 2026-11-16 B188 / P7 实施（T1–T6/T8 落地，T7 待用户实测）
+
+- 触发：user m00001 要求完成 P7（PLAN.md 板块表第 98 行）；实现按 `docs/PLAN-P7.md` 的 T1–T8 走，仍遵守 user m00300「不写门禁、用户自测」。
+- **T1（定性，无代码改动）**：`Solver.planText()`（`Solver.java:3240-3249`）按 `this.plan` 下标拼 `Step.action.label`，不重排；`Result.plan` 是 `Solver.replay`（`Solver.java:2069`）返回的 `List<Step>`，replay 逐个执行传入的 action 并立刻 `new Step(action, …)` ⇒ 打印顺序 == 回放顺序。1778 行「打印防御、回放重锤+」属 (b)：回放走到第 12 步时前序药水/格挡已改变手牌与能量，且该步开着 DEATH 屏 ⇒ `not-settled`。B174 的 `replayOk=false` 由此解释，不是比较对象错位。
+- **T2（实现口径更正）**：计划原式 `+choice.potionHp*POINTS_PER_HP` 经推导是错的：`n2=S-H` 是已花，原式等于把叶子药水项记成 `2H-S`，喝一瓶会再掉 `2v`（9 HP ⇒ 36000 分），比原 18000 更糟。实现改为 **档内叶子不计药水价**（`Solver.java:4581` `int n2Score = this.deferPotionCost ? 0 : n2;`），药水价只在档间合并由 `netHpLoss`/`compareRoutes` 收一次；`provenOptimal` 仍要求真实 `n2==0`，`netHpLoss` 仍含 `n2`。
+- **T3（档位）**：新文件 `sts1-engine-solver/src/main/java/sts1solver/search/PotionTieredSession.java`（`public final class` :43）—— `limits` :54 = 0..K（K=min(根可用药水,5)，最多 6 档），`tierBeam` :110，`startTier` :137，`tierDone` :247，`finishAll` :228，`advance` :271。档内剪枝：`Solver.java:4498-4500` 在 `candidates` 之后、`defer` 之前 `currentActs = Solver.withoutPotions(currentActs)`。新 helper：`potionCountUsable` :2901、`potionUses` :2922、`withoutPotions` :2932（install/finally uninstall，异常返回 0）。`Limits.java` 三键：`search.potionTiers`/`search.potionBeam`/`search.potionBeamStep`（默认 on/on/25，0..100 夹取），私有 `yes()` 接受 off/no/false/0/ban/关/禁用。
+- **T4（beam 与名额）**：`tierBeam(base,tier) = tier<=0||!potionBeam ? base : min(Limits.beam(), base+ceil(base*step*tier/100))`，仍过 `effectiveBeam`（堆守卫可压到 48）；`tier>0` 时 `Session#setCaps(max(Limits.deferred(),2000,32*beams[0]), max(60,beams[0]/2))`（`defer` 新增 4 参带 cap 重载，`promoteOne` 读 `promoteFloor`）。
+- **T5（预算与合并）**：份额 0 瓶档 40%，其余 60% 按 `2^(K-i)` 归一；每档 `b=max(300,min(share*budget,剩余))`，`deadlines = Solver.rungDeadlines(beams.length,b)`，`new Session(root,beams[0],layers,b,firstNodes,0) + planWidening`；跨档收尾：`stopRequested→stopped`、`win && (provenOptimal || netOf<=0) → proven`、末档 `tiers`、时间不足 `time`；合并 `PotionTieredSession.better` :214（净扣血优先，平局少喝）。
+- **三处接线**：`Solver.solvePortfolioInternal` 改走 `PotionTieredSession`；`PortfolioSession`（文件末尾）整体改为纯委托壳（`advance` 首次建 `PotionTieredSession`，其余访问器/测试钩子转调）；`QuickSession` 的 `narrowDeep` 分支阶梯 = `NARROW_BEAM(10)` + `widenBeams()` 去重升序，改走 `PotionTieredSession`，`passes()` 委托。**阻塞式 `Solver.solve` 不接档位**（boss 房或怪 maxHealth≥200，`Gameplay.java:2332`），已记 PLAN-P7 §8 边界。
+- **T6（探针）**：`Session#markTiered()` 只在 `limits.length>1` 时调用；`finish()` 里 B174 回放 `if (!this.tiered)` 才跑，档位模式由 `PotionTieredSession` 打 `potion tier: baseline tier=0 loss=…`；单档（无药或回滚开关）保留旧探针与旧计价。
+- 设计偏差已回填 `docs/PLAN-P7.md`：§3.1 公式更正与推导、§3.2 结构/收尾/合并日志、§3.3 `base+ceil(...)` 与「仅 tier>0 放大」、§8 边界、§9 T1 结论、§4 状态列、§11 实现记录（文件/行号/偏差/构建/回滚）。
+- 构建/安装：`tools/build.ps1`（JDK 21.0.11，`--release 8`，141 源文件，555 entries）BUILD OK；`tools/install.ps1` → `D:\Steam\steamapps\common\SlayTheSpire\mods\sts1-engine-solver.jar`，jar **1,293,146 B**，sha256 **9C8E9CA5A8E39686BC240D34C91E0658BB7DC6B1B91D84FD73F2BB4DA200AEC4**，INSTALL OK。
+- 代价：每档一次 Session 构造（几十 ms，≤6 档）；档内叶子少一次药水价乘加；宽档节点随 beam 线性涨但预算切分 ⇒ 总时长不增；内存峰值≈最宽档（受 `effectiveBeam` 堆守卫）。
+- 风险：档内不计药水价 ⇒ 中间层喝药边界移动（终局净扣血口径不变）；`PotionBook` 战略价≠真实边际价值，留 Boss 的药可能提前喝；`Solver.solve` 未接档位是已知边界；回滚＝`search.potionTiers=off`（单档、旧计价、旧 B174 探针）。
+- 影响：面板 plan 与预计损失（药水会更早出现）；自动出牌顺序；`solver.log` 新增 `potion tier:`/`potion tiers:` 行与 `beams=` 实值；`settings.txt` 三键；不改镜像、不动 static 还原、与其它 mod 无交互。
+- 未跑 `tools/run.ps1`/游戏内自测（user m00300/m00732）；T7 端到端由用户实测：主诉场景要求药水步号 < 幽灵铠甲步号、预计损失 17→15。
+
+## 2026-11-16 B188 后续改造计划（rung 外层迭代 + 药水档提示；计划段，同日已实施见下段）
+
+- 触发：user m00331「面板模仿 STS2 mod 加提示，现在在计算用几瓶药的世界线」＋「计算顺序改成先第一档 beam 的 0→n 瓶、再第二档 beam 的 0→n 瓶」＋「以上全部先给我计划不要动手」。
+- 计划全文：`docs/PLAN-P7.md` §12（12.1 要求 / 12.2 现状行号 / 12.3 cell 循环 / 12.4 提示 / 12.5 任务表 P7b-1..5 合计 1.35d / 12.6 验收 6 条 / 12.7 代价风险影响 / 12.8 落点）。
+- 核心改动：执行单元从「药水档」改为 cell=(rung, 药水档)，顺序 rung 外层；每个 cell 一个独立 `Solver.Session`（单档、`planWidening(null)`），预算与节点按 rung 份额×药水份额双权重切分；`K==0` 或 `search.potionTiers=off` 仍走单 Session 跑完整 ladder（B177 复用保留）；新增回滚键 `search.potionOrder=beam|tier`。
+- 提示：`PotionTieredSession.hint()` + `QuickSession.potionHint()`，接到 `Gameplay` 状态行 :729/:732 与进度行 :1854；不改 `worldlineText`（probe/门禁引用）。
+- 状态：**只出计划，未改代码、未构建**（本段为当时的记录）。同日已按此计划实施并构建安装，见下一段。
+- 说明：本段第 3 条「`search.potionTiers=off` 仍走单 Session 跑完整 ladder」在实施中保持；另补充「K==0（身上无可用药水）时 `cellMode=false`，同样走单 Session + 完整 ladder」，因此无 cell 日志、无提示。
+
+## 2026-11-16 B188 / P7b 实施（cell 顺序 + 药水档提示，已构建安装，待用户实测）
+
+- 触发：user m00001「完成sts1-engine-solverP7 后续改造计划」。计划原文＝`docs/PLAN-P7.md` §12（user m00331 出）；本轮按 P7b-1..P7b-5 全部落地。
+- 顺序（P7b-1）：`PotionTieredSession` 执行单元改为 **cell=(rung r, 药水档 t)**，严格 rung 外层（r=0: t=0..K → r=1: …）。每 cell 一个独立 `Solver.Session`：`planWidening(null)`（单 beam，不在内部加宽）、`limitPotionUses(limits[t])`、`deferPotionCost(true)`、`markTiered()`；t>0 时 `setCaps(max(2000,32*beam), max(60,beam/2))`。旧 tier 路径（`startTier`/`tierDone`/`logTier`）整段保留。
+- 顺序回滚（P7b-1）：`Limits.potionOrderBeam()`（`Limits.java:269`）读新键 `search.potionOrder`，默认 `beam`；`tier`/`tiers`/`档位`/`tier*` 回旧顺序。
+- 预算/节点/早停（P7b-2）：rung 份额＝`PORTFOLIO_SHARES` 按实际 ladder 长度归一（4 档时仍是 35/25/25/15；QuickSession 去重成 3 档时归一为 35/85、25/85、25/85，不白留预算）× 药水份额（tier0=0.40，其余 0.60×2^(K-i)/Σ）。`cellBudget=max(300,min(B*rungShare*potionShare,剩余))`，剩余 ≤300ms ⇒ `finishAll("time")`；`cellNodes=max(200,maxNodes*rungShare*potionShare)`。早停：任一 cell `win && (provenOptimal || netOf<=0)` ⇒ `finishAll("proven")`。baseline＝已完成 t==0 cell 里最优。
+- 提示（P7b-3）：`PotionTieredSession.hint()`（`:645`）文本 `药水 ≤1 瓶（2/3）· beam 28（2/4 档）· 0 瓶基线 净损 15`；`phase()`（`:625`）cell 模式＝hint + `· beam=… layers=…`；`QuickSession.potionHint()`（`:296`），`phase()` 在 cellMode 直接返回 `session.phase()`（不再误报「加宽搜第 N 档」）；`Gameplay.java:728-737` 状态行两条分支追加 ` · potionHint`；`PortfolioSession.hint()`（`Solver.java:5102`）供深度搜索面板。`worldlineText()` 与 `lines()` :1854 未改（hint 已随 phase 进面板，避免重复）。
+- 日志（P7b-4）：`potion cell: start rung=r/R tier=t/K limit=… beam=… budgetMs=… nodes=…`、`potion cell: done … win/net/potions/nodes/ms/reason/proven`、`potion tier: baseline tier=0 loss=… cells=i/N`、收尾 `potion tiers: cells=… ran=… bestCell=r/t why=… baselineNet=… bestNet=… bestPotions=…`；`PortfolioSession` 启动日志追加 `cellMode=… cells=…`。
+- 构建安装（P7b-5）：`tools/build.ps1` BUILD OK（JDK 21.0.11、`--release 8`、555 entries）；`mod\sts1-engine-solver.jar` **1,295,185 B**，sha256 **D6D9D262DD586CBB27C0018ABC1E4EE5A7029210913D345F6599FC5B62A24A6F**，已复制到 `D:\Steam\steamapps\common\SlayTheSpire\mods\sts1-engine-solver.jar`（同 hash）。**未跑 `tools/run.ps1`、未启动游戏**（user m00300/m00732）。
+- 偏差：① 提示措辞用「净损 15」而非「净-15」；② 计划里“可选的面板独立一行”未做，hint 并入 phase；③ 日志 rung/tier 用 1-based；④ rungShare 改为按 ladder 实际长度归一（4 档等价）；⑤ `search.potionOrder` 只切顺序，`potionTiers=off` 仍是总回滚。完整清单见 `PLAN-P7` §13.2。
+- 代价：cell 数 (K+1)×R（K=2、R=4 ⇒ 12 个 Session，改造前 3 个），每 cell 从 root 重建；同预算节点/耗时预计 +5~15%，每档略浅；总时长仍由预算封顶；内存峰值＝最宽单个 cell。
+- 风险：0 瓶宽档被推到最后（预算不足时最终线可能变差）；早停更难触发 ⇒ 用时更贴上限；面板/状态行文案变化可能撞整行断言；每 cell 一次 `World.install/uninstall`（最多 12 次、每次几十 ms）；`potionOrder=tier` 分支无门禁覆盖。
+- 影响：面板/状态行多出药水档提示；自动出牌顺序与预计损失仍取合并结果（净扣血优先、并列少喝）；`solver.log` 新日志行；`settings.txt` 新键 `search.potionOrder`；不改镜像/static 还原，与其它 mod 无交互。
+- 回滚：`search.potionOrder=tier`（只回顺序）／`search.potionTiers=off`（总回滚，无 cell 无提示）。
+- 文档：`PLAN-P7` §12 状态 + §13 实现记录；`PLAN.md` P7 行与安装行；本段；`PLAN-BUGS` B188「P7b 后续改造」。
+
+## 2026-11-16 B188 / P7c 药水档上限改读游戏数据
+
+- 触发：user m00172「1.药水并不是上限只有3，改成读取游戏内的数据」。
+- 现状：唯一写死上限是 `PotionTieredSession.java:53` `MAX_TIERS=6` + 构造器 `:100` `min(Solver.potionCountUsable(world), MAX_TIERS-1)`；实机日志（11:42:41，19 mod）`potionTiers=3` 对应可用药水 2 瓶 ⇒ K=2，说明「3」由当前瓶数决定，不是常数。
+- 游戏数据：`javap` 确认 `AbstractPlayer` 有 `public int potionSlots;` 与 `public ArrayList<AbstractPotion> potions;`；槽位会被 Potion Belt/mod 改写，是本局真实容量。
+- 改动：删 `MAX_TIERS`，新增字段 `usablePotions`/`beltSlots`（:52-58）；`Solver.potionSlots(World)` 读 `AbstractDungeon.player.potionSlots`（≤0 回退 `potions.size()`，异常 0，install/finally uninstall）；`PotionTieredSession.tierCount(usable, slots, budgetMs, rungs)`：usable≤0⇒0（单档旧路径），否则 `min(max(usable,slots), max(1,(budgetMs/300)/max(1,rungs))-1)`；hint 追加「，槽 N」；构造日志 `potion tiers: usable=… slots=… K=… tiers=…`；`portfolio ladder` 行追加 `potionSlots=/usablePotions=`（访问器 `slotsForTest()/usablePotionsForTest()`，不额外 install）；订正 `potionCountUsable` javadoc（「高档只重复低档」在会产药的战斗里不成立）。
+- 构建安装：`tools/build.ps1` BUILD OK（JDK 21.0.11、`--release 8`、555 entries）；jar **1,295,693 B**，sha256 **4A155B622BF12691603A3D6ED4A5A7DBCE92A07FAA989070F6D8E5435077B644**，已复制到 `D:\Steam\steamapps\common\SlayTheSpire\mods\sts1-engine-solver.jar`（同 hash）。**未跑 `tools/run.ps1`、未启动游戏**（user m00300/m00732）。
+- 代价：作业构造多一次 `World.install/uninstall`（几十 ms）；cell 数 `(K+1)×R`，K 由槽位决定（槽 3/持有 2 ⇒ 4 档×4 rung=16，比 P7b 的 12 多 4 个），同预算每 cell 更浅，总时长仍由预算封顶；内存峰值＝最宽单个 cell。
+- 风险：槽多药少时高档可能得出与低档相同的结论，浪费其份额（几何衰减，最坏 10~15%）；`potionSlots` 异常值（0/负/超大）——0/负走回退，超大被预算地板摊薄；提示/日志文字新增「槽 N」/`slots=`，整行断言会红；`potionTiers=off` 时两字段为 0，不显示槽位。
+- 影响：面板状态行/进度行显示「（i/K，槽 N）」，K 随本局槽位；自动出牌与预计损失口径不变；`solver.log` 新增 `potion tiers: usable=…` 与 `portfolio ladder … potionSlots=… usablePotions=…`；无新 settings 键；不改镜像、不动 static 还原、只读 `AbstractPlayer` 公有字段。
+- 回滚：`search.potionTiers=off`（总回滚）／`search.potionOrder=tier`（只回顺序）／代码把构造器的 `tierCount(...)` 换回 `Math.min(Solver.potionCountUsable(world), 5)`。
+- 文档：`PLAN-P7` §14；`PLAN.md` P7 行 + 安装行；本段；`PLAN-BUGS` B188「P7c」。
+
+## 2026-11-16 B188 / P7d 顺序改回档外层 + 重复计算审查（已构建安装，待用户实测）
+
+- 触发：user m00561「1.还是改回先计算0药水的1到4档再计算到n药水的0到4档。现在这样太慢了。2.检查是否有重复计算，比如药水1第一档和药水2第一档会不会重复计算」。
+- 顺序（P7d-1）：`Limits.potionOrderBeam()`（`Limits.java:273`）默认 `beam` → **`tier`**；默认走 `PotionTieredSession.startTier()`（`:232`）——档外层，档内 `planWidening`/`widenToNextRung` 在同一棵树上 10→28→64→128 原地加宽。cell 布局（每 (rung,tier) 一个独立 Session）保留但改为 `search.potionOrder=beam` 显式开启。
+- 提示（P7d-2）：`PotionTieredSession.hint()`（`:683`）只在一档（`limits.length<=1`）时返回空，tier 布局也显示；beam 后跟「（加宽 r/R 档）」。`PotionTieredSession.phase()`（`:656`）与 `QuickSession.phase()`（`QuickSession.java:271`）都把 hint 前置。
+- 重复计算审查（P7d-3，结论写入 PLAN-P7 §15.3）：① 同一档内相邻 beam 在 tier 布局**不重复**（树复用），在 cell 布局**重复**（每 cell 从 root 重建、`planWidening(null)`），同档 4 个 beam 各展开一次再乘 (K+1) 档——这就是“太慢”的主因；② 药水 1 档 vs 2 档**不是同一搜索**：`limitPotionUses`、起始 beam `tierBeam(base,t)=base+ceil(base*25%*t)`、t>0 的 `setCaps(2000+, beam/2)` 三个参数至少一个不同，结果不可互替；③ 档间“不含药水”的根前缀确实被重搜 K+1 次（结构性重复）；彻底消除要在同一 Session 上逐档放宽 `maxPotionUses` 并复用前沿，等于改 `Solver.java:4526` 的剪枝与停车场结算，本轮不做，记为已知边界。
+- 构建安装：`tools/build.ps1` BUILD OK（JDK 21.0.11、`--release 8`、555 entries）；jar **1,295,807 B**，sha256 **05D00831DD59261954FB63E659204680F8C32DED5095B740BA2587FF4067D973**，已复制到 `D:\Steam\steamapps\common\SlayTheSpire\mods\sts1-engine-solver.jar`。**未跑 `tools/run.ps1`、未启动游戏**（user m00300/m00732）。
+- 代价：Session 数 16 → 4（默认 K=3），同预算每档更深、无档内重复展开；总预算/节点上限公式不变；内存峰值仍为最宽一档的树。
+- 风险：P7b 观察点（rung 外层、`potion cell:` 行）默认消失，需 `search.potionOrder=beam`；tier 布局早停按档（proven/净损≤0），无逐 cell 早停；档间前缀仍重复；状态行多出「加宽 r/R 档」，整行断言会红。
+- 影响：面板/状态行继续显示药水档提示（覆盖 tier 布局）；预计损失与自动出牌口径不变；`solver.log` 默认 `potion tier:` 行、`potion tiers:` 走 `tiers=` 分支，`potion cell:` 仅 opt-in；settings 键不变；不改镜像、不动 static 还原。
+- 回滚：`search.potionOrder=beam`（回 cell 顺序）／`search.potionTiers=off`（总回滚）／代码把 `potionOrderBeam()` 默认改回 `beam`。
+- 文档：`PLAN-P7` §15（含 §15.3 重复计算结论表）；`PLAN.md` P7 行 + B188 行 + 安装行；本段；`PLAN-BUGS` B188「P7d」。
+
+## 2026-11-16 发布 1.0.2（GitHub ＋ 创意工坊）
+
+- 触发：user m00678「那就不要做了，上传github和创意工坊」——P7e（单遍按瓶数分配 beam 名额）与「K 收窄到可用瓶数+1」两个提速方案**均不做**，直接按现状发版。
+- 版本号：`resources/ModTheSpire.json` 1.0.1 → **1.0.2**；`docs/WORKSHOP-DESCRIPTION.md`「当前版本」与「药水策略」条目同步更新（加「按可用药水数分档搜索（0 瓶到 n 瓶各一条世界线，净扣血优先、同样损失少喝一条），面板实时提示当前正在计算哪一档」）。
+- 构建：`tools/build.ps1` BUILD OK（JDK 21.0.11、`--release 8`、141 源文件、555 entries）→ `mod\sts1-engine-solver.jar` **1,295,807 B**，sha256 **BD3FFAE6DABF3D6232D857FBE6A0BEB7AE28B2833EDF4402889D35C4EF7DB021**（与 P7d 的 jar 同尺寸：版本号 3 个字符等长替换）。
+- 分发：复制到 `D:\Steam\steamapps\common\SlayTheSpire\mods\sts1-engine-solver.jar` 与 `D:\mods-workshop\sts1-engine-solver\content\sts1-engine-solver.jar`，三处 sha 均为 BD3FFAE6…。
+- 工坊工作区：`D:\mods-workshop\sts1-engine-solver\config.json`（GBK/936、无 BOM、4,691 B；备份 `config.json.bak-20261116b`）。description 的「当前版本」改 1.0.2、「药水策略」条目同上，`changeNote` 改为「1.0.2 版本：药水搜索改为按可用药水数分档（0 瓶到 n 瓶各一条世界线，净扣血优先、同样损失少喝），面板实时提示当前计算的药水档；搜索顺序为同一 beam 档跑完 0→n 瓶再进下一档。」
+- 上传：Steam 客户端运行中，在游戏根目录执行 `D:\Steam\steamapps\common\SlayTheSpire\jre\bin\java.exe -jar mod-uploader.jar upload -w D:\mods-workshop\sts1-engine-solver`。2026-11-16 18:52:10 输出 `ACCOUNT ID: 1088547740` / `Submitting workshop item update` / `UploadingContent` / `Successfully updated workshop item!` ⇒ 条目 **3839053516** 已更新（visibility 仍为 `private`，公开由作者在工作坊页面决定）。
+  - 坑：上传器在非控制台启动时用 cmd 重新拉起自身，父进程立刻退出，`$LASTEXITCODE` 可能是 1 且拿不到输出；**不能拿退出码判断成败**，要看 `Successfully updated workshop item!`（下次可加 `| Out-String` 直接看输出）。
+- GitHub：`git push origin master`（本次 github.com:443 直连可用，未使用 `_tmp/ghproxy.py` 隧道）。
+- 代价/风险/影响：**只改版本号与工坊文案，产品代码与 1.0.2 前完全一致**；无性能/内存变化。风险＝工坊条目仍是 private（需手动公开）、上传器依赖 Steam 运行时；对本 mod 的实际影响＝面板/ModTheSpire 列表显示 1.0.2，行为与 P7d 构建相同。回滚＝重新上传 1.0.1 的 jar 与 `config.json.bak-20261116`（变更集不涉及代码）。
