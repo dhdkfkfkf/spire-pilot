@@ -13,7 +13,7 @@
 - `spire-pilot-1.0.0.jar`
 - 依赖：ModTheSpire 3.30.0+、BaseMod
 - 适配游戏版本：12-18-2022（最终版）
-- SHA-256：`13b63dc8a6ee15524b1bbae4cb2a267306a84b0150292c4f72066cdc909c318b`
+- SHA-256：`dd3dc6cc3cae2cbf141223eead14197ff57305d2395dd49f4ccc2fee0a338034`
 
 ## 这一版做了什么
 
