@@ -2772,7 +2772,7 @@ public final class Probe {
                         mid.get(0).pills.get(0) + " | " + mid.get(0).stats);
                 // (e) Header lines: bookkeeping never survives a narrow panel.
                 java.util.List<String> lines = new java.util.ArrayList<String>();
-                lines.add("STS1 Engine Solver");
+                lines.add("Spire Pilot");
                 lines.add("\u5df2\u6267\u884c 3 \u6b65: \u6253\u51fb | \u9632\u5fa1");
                 lines.add("\u836f\u6c34\u6389\u843d\u9884\u671f: 40%");
                 lines.add("\u53ef\u8d62\uff08\u9884\u7b97\u5185\u6700\u597d\uff1a\u6389\u8840 2\uff09");
@@ -3058,19 +3058,16 @@ public final class Probe {
             public void run() {
                 // m13385 (P2-12): the player asked for "no limit by default, I can wait as long as
                 // the worldline counter keeps moving", with the panel still able to pick a number.
-                Probe.check(sts1solver.ui.DeepBudget.budgetMs(0L, false)
-                                == sts1solver.ui.DeepBudget.UNLIMITED
-                        && sts1solver.ui.DeepBudget.budgetMs(0L, true)
+                Probe.check(sts1solver.ui.DeepBudget.budgetMs(0L)
                                 == sts1solver.ui.DeepBudget.UNLIMITED,
-                        "0 seconds means no time limit, and the boss factor keeps it unlimited",
-                        sts1solver.ui.DeepBudget.budgetMs(0L, false) + "/"
-                                + sts1solver.ui.DeepBudget.budgetMs(0L, true));
-                Probe.check(sts1solver.ui.DeepBudget.budgetMs(300L, false) == 300000L,
+                        "0 seconds means no time limit",
+                        String.valueOf(sts1solver.ui.DeepBudget.budgetMs(0L)));
+                Probe.check(sts1solver.ui.DeepBudget.budgetMs(300L) == 300000L,
                         "a concrete number still means exactly that many seconds",
-                        String.valueOf(sts1solver.ui.DeepBudget.budgetMs(300L, false)));
-                Probe.check(sts1solver.ui.DeepBudget.nodes(0, true) == 0,
+                        String.valueOf(sts1solver.ui.DeepBudget.budgetMs(300L)));
+                Probe.check(sts1solver.ui.DeepBudget.nodes(0) == 0,
                         "0 nodes means no node cap either",
-                        String.valueOf(sts1solver.ui.DeepBudget.nodes(0, true)));
+                        String.valueOf(sts1solver.ui.DeepBudget.nodes(0)));
                 Probe.check("\u4e0d\u9650".equals(sts1solver.ui.Budget.secondsLabel(0))
                         && "\u4e0d\u9650".equals(sts1solver.ui.Budget.nodesLabel(0))
                         && "300s".equals(sts1solver.ui.Budget.secondsLabel(300))
@@ -4298,22 +4295,22 @@ Probe.step("S47 a dead-end search says so, and a boss room doubles the budget (B
                 Probe.check(cap.contains("\u6df1\u5ea6\u4e0a\u9650"),
                         "hitting the depth cap is not reported as a proof of death", cap);
 
-                // 2. Boss rooms double the budget, and the ceilings still hold
-                long plain = sts1solver.ui.DeepBudget.budgetMs(60, false);
-                long bossMs = sts1solver.ui.DeepBudget.budgetMs(60, true);
-                Probe.check(plain == 60000L && bossMs == 120000L,
-                        "a boss room doubles the configured seconds", plain + "/" + bossMs);
-                Probe.check(sts1solver.ui.DeepBudget.budgetMs(600, true) == 600000L
-                                && sts1solver.ui.DeepBudget.budgetMs(5, false) == 10000L
+                // 2. the number the player picked is the budget; only 自动 scales with the room
+                long six = sts1solver.ui.DeepBudget.budgetMs(6);
+                long sixty = sts1solver.ui.DeepBudget.budgetMs(60);
+                Probe.check(six == 6000L && sixty == 60000L,
+                        "a configured number is used verbatim, with no floor or boss factor on top",
+                        six + "/" + sixty);
+                Probe.check(sts1solver.ui.DeepBudget.budgetMs(600) == 600000L
+                                && sts1solver.ui.DeepBudget.budgetMs(2) == 6000L
                                 && sts1solver.ui.DeepBudget.unlimited(
-                                        sts1solver.ui.DeepBudget.budgetMs(0, true)),
-                        "the boss factor respects the 600s ceiling and the 10s floor",
-                        sts1solver.ui.DeepBudget.budgetMs(600, true) + "/"
-                                + sts1solver.ui.DeepBudget.budgetMs(5, false));
-                Probe.check(sts1solver.ui.DeepBudget.nodes(120000, false) == 120000
-                                && sts1solver.ui.DeepBudget.nodes(120000, true) == 240000
-                                && sts1solver.ui.DeepBudget.nodes(1000000, true) == 1000000,
-                        "a boss room doubles the node cap, capped at 1M", "");
+                                        sts1solver.ui.DeepBudget.budgetMs(0)),
+                        "the 600s ceiling holds, the floor is the 6s tier, and 0 stays unlimited",
+                        sts1solver.ui.DeepBudget.budgetMs(600) + "/"
+                                + sts1solver.ui.DeepBudget.budgetMs(2));
+                Probe.check(sts1solver.ui.DeepBudget.nodes(120000) == 120000
+                                && sts1solver.ui.DeepBudget.nodes(1000000) == 1000000,
+                        "the node cap is used as configured", "");
 
                 // 3. only a real boss room counts, and the panel budget goes through it
                 Probe.check(sts1solver.ui.DeepBudget.isBossRoom(
@@ -4324,7 +4321,6 @@ Probe.step("S47 a dead-end search says so, and a boss room doubles the budget (B
                         "the boss predicate is the room type, nothing else", "");
                 boolean boss = sts1solver.ui.DeepBudget.inBossRoom();
                 long effective = sts1solver.Gameplay.effectiveDeepBudgetMs();
-                long expected = sts1solver.ui.DeepBudget.budgetMs(60, boss);
                 // settings.txt may hold another value; compare against a read of the same file
                 long configured = 60L;
                 try {
@@ -4341,11 +4337,13 @@ Probe.step("S47 a dead-end search says so, and a boss room doubles the budget (B
                 } catch (Throwable ignored) {
                     // a missing/broken settings file must not fail the gate
                 }
-                expected = sts1solver.ui.DeepBudget.budgetMs(configured, boss);
+                long expected = configured > 0L ? sts1solver.ui.DeepBudget.budgetMs(configured)
+                        : configured == 0L ? sts1solver.ui.DeepBudget.UNLIMITED
+                        : effective;
                 Log.info("  S47 budget: bossRoom=" + boss + " configured=" + configured
                         + "s effective=" + (effective / 1000) + "s expected=" + (expected / 1000) + "s");
                 Probe.check(effective == expected,
-                        "the live deep search budget is the doubled setting in a boss room",
+                        "the live deep search budget is the configured seconds",
                         effective + " vs " + expected);
 
                 // 4. the plan row for a real result says it in one line

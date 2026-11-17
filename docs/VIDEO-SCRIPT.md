@@ -274,7 +274,7 @@
 | 遗物分诊表 | `evidence/m4/t313-exhaustive-optimal/T380-relics/relic-disposition.tsv` | 154 格方阵动画的数据源 |
 | 第二版报告 | 同目录 `REPORT.md` ×2 | 物证特写 |
 | 门禁脚本 | 同目录 `T382MinimalDeckCheck.java`、`T388PlayOrderDrawCheck.java` | 物证特写 |
-| bug 证据 91 份 | `sts1-engine-solver/evidence/` | 快速闪过的画面墙 |
+| bug 证据 91 份 | `spire-pilot/evidence/` | 快速闪过的画面墙 |
 | 计划文档 | `docs/PLAN-BUGS.md`(516KB)、`PLAN-WORKLOG.md`(275KB) | 滚动特写，量感 |
 | 数据 | `_tmp/sessions-extract.json`、usage-ledger | 柱状图、时间轴、计数器 |
 | 对比项目 | `C:\Users\YOKI\Desktop\CombatSolver-main` | 分屏左侧 |

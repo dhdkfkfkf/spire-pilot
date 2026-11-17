@@ -6,7 +6,7 @@
 
 | 项目 | 现状 |
 |---|---|
-| 文件 | `%USERPROFILE%\sts1-engine-solver\solver.log` = **当前会话**；上一会话在 `logs\solver-<时间>.log`（B39 起）。worker 进程按 `-Dsts1solver.instance=w1` 加后缀 → `solver-w1.log` |
+| 文件 | `%USERPROFILE%\spire-pilot\solver.log` = **当前会话**；上一会话在 `logs\solver-<时间>.log`（B39 起）。worker 进程按 `-Dsts1solver.instance=w1` 加后缀 → `solver-w1.log` |
 | 写入 | `util\Log`：`PrintWriter(new OutputStreamWriter(new FileOutputStream(path, true), UTF_8), true)`，每行 `println` 后**立即 `flush`**，方法上 `synchronized` |
 | 格式 | `HH:mm:ss.SSS LEVEL message`；级别 `INFO/WARN/ERROR/PASS/FAIL` |
 | 不进控制台 | 故意不 `System.out`：ModTheSpire 的控制台是 Swing `JTextArea`，每次 flush 在调用线程整块重排（P1-2d 实测把一场战斗一半时间花在那）。solver.log 是唯一通道 |
@@ -70,7 +70,7 @@ PREDICTION DRIFT at step 4: 打击 → 持盾地精
 ## 4. 查日志的速查表（按关键词筛就够）
 
 ```powershell
-$p = "$env:USERPROFILE\sts1-engine-solver\solver.log"
+$p = "$env:USERPROFILE\spire-pilot\solver.log"
 # 最近 200 行
 Get-Content $p -Tail 200
 # 只看结论与漂移
@@ -163,9 +163,9 @@ Select-String -Path $p -Pattern "ERROR|expand failed|engine update threw|replay 
 
 ```
 # 当前会话
-Get-Content "$env:USERPROFILE\sts1-engine-solver\solver.log"
+Get-Content "$env:USERPROFILE\spire-pilot\solver.log"
 # 上一会话 / 更早（文件名=归档时刻）
-Get-ChildItem "$env:USERPROFILE\sts1-engine-solver\logs" | Sort-Object LastWriteTime -Descending | Select-Object -First 5
+Get-ChildItem "$env:USERPROFILE\spire-pilot\logs" | Sort-Object LastWriteTime -Descending | Select-Object -First 5
 ```
 
 想清空：删 `logs\` 里的文件即可。合计上限约 200 MB + 16 MB，正常使用到不了。

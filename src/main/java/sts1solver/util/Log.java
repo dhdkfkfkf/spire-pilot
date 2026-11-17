@@ -14,7 +14,7 @@ import java.util.Date;
  * (the game rotates SlayTheSpire.log per launch, and grep-ing a 5 MB log for our lines is slower
  * than reading our own file).
  *
- * <p>The file lives in {@code %USERPROFILE%/sts1-engine-solver/solver.log}. A run of the automated
+ * <p>The file lives in {@code %USERPROFILE%/spire-pilot/solver.log}. A run of the automated
  * harness is identified by its {@link #runId()} marker lines, so tools/run-selftest.ps1 can find the
  * end of THIS run in a file that accumulates across runs.
  *
@@ -49,7 +49,7 @@ public final class Log {
     }
 
     public static synchronized String dir() {
-        return System.getProperty("user.home") + File.separator + "sts1-engine-solver";
+        return System.getProperty("user.home") + File.separator + "spire-pilot";
     }
 
     /** Instance tag for worker processes: "" for the main game, "w1" etc. for a worker. */

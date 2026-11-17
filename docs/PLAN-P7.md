@@ -1,6 +1,6 @@
 # PLAN-P7 — 药水分档搜索：让「先喝药再上格挡」进得了前沿（2026-11-16 开）
 
-> 触发（user m00001，原话）：「sts1-engine-solver自己看日志为什么打地精大块头敏捷药水没有第一时间喝？先喝敏捷药水再打出幽灵铠甲能少扣2血」
+> 触发（user m00001，原话）：「spire-pilot自己看日志为什么打地精大块头敏捷药水没有第一时间喝？先喝敏捷药水再打出幽灵铠甲能少扣2血」
 >
 > 追加要求（user m00149）：同瓶数下先喝药 HP 更多，分数理应更高。
 > 参考实现（user m00167）：`C:\Users\YOKI\Desktop\CombatSolver-main`（STS2 的 C# 求解器）按瓶数分档——先搜不喝，再逐步搜喝 1 瓶直到全部；要求先出计划不动手。
@@ -139,7 +139,7 @@ T1 先把顺序钉死（离线核对，不写门禁）之后再下结论；在�
 
 ## 10. 文档落点
 
-- 本文件：`sts1-engine-solver/docs/PLAN-P7.md`
+- 本文件：`spire-pilot/docs/PLAN-P7.md`
 - 板块行：`docs/PLAN.md` 板块表末尾（P2-60 之后）+「在跟的条目」新增 B188
 - bug 细节：`docs/PLAN-BUGS.md` 追加 B188（B187 之后）
 - 工作记录：`docs/PLAN-WORKLOG.md` 追加 `## 2026-11-16` 小节
@@ -150,10 +150,10 @@ T1 先把顺序钉死（离线核对，不写门禁）之后再下结论；在�
 
 | 文件 | 内容 |
 | --- | --- |
-| `sts1-engine-solver/src/main/java/sts1solver/search/PotionTieredSession.java`（新，`public final class` :43） | 档循环壳：`startTier()` :137、`advance(long)` :271、`tierDone(Result)` :247、`finishAll(String)` :228；`tierBeam` :110、`better` :218；`limits` :54；`tierBeam`、`shares`、`baseline`、`bestTier`、`nodesDone/expansionsDone` |
-| `sts1-engine-solver/src/main/java/sts1solver/search/Solver.java` | `potionCountUsable(World)` :2901、`potionUses(List<Action>)` :2922、`withoutPotions(List<Action>)` :2932；`Session` 新字段 `maxPotionUses` :4042、`deferPotionCost` :4043，方法 :4054/:4058/:4063/:4069；候选剪枝 :4498-4500；叶子 `int n2Score = this.deferPotionCost ? 0 : n2;` :4581；`promoteOne` 的 `promoteFloor`；`finish()` 里 `if (!tiered)` 才跑 B174 回放；`PORTFOLIO_SHARES` 去 `private`、`rungDeadlines` 改 `static`；`solvePortfolioInternal` 改走 `PotionTieredSession`；文件末尾的 `PortfolioSession` 改为纯委托壳（`advance` 首次建 `PotionTieredSession`，其余访问器全部转调） |
-| `sts1-engine-solver/src/main/java/sts1solver/search/QuickSession.java` | `narrowDeep` 分支改用 `PotionTieredSession`（阶梯 = 10 + `widenBeams()` 去重升序）；`passes()` 委托 |
-| `sts1-engine-solver/src/main/java/sts1solver/search/Limits.java` | `search.potionTiers` / `search.potionBeam` / `search.potionBeamStep` 三键 + `yes()` 解析器 |
+| `spire-pilot/src/main/java/sts1solver/search/PotionTieredSession.java`（新，`public final class` :43） | 档循环壳：`startTier()` :137、`advance(long)` :271、`tierDone(Result)` :247、`finishAll(String)` :228；`tierBeam` :110、`better` :218；`limits` :54；`tierBeam`、`shares`、`baseline`、`bestTier`、`nodesDone/expansionsDone` |
+| `spire-pilot/src/main/java/sts1solver/search/Solver.java` | `potionCountUsable(World)` :2901、`potionUses(List<Action>)` :2922、`withoutPotions(List<Action>)` :2932；`Session` 新字段 `maxPotionUses` :4042、`deferPotionCost` :4043，方法 :4054/:4058/:4063/:4069；候选剪枝 :4498-4500；叶子 `int n2Score = this.deferPotionCost ? 0 : n2;` :4581；`promoteOne` 的 `promoteFloor`；`finish()` 里 `if (!tiered)` 才跑 B174 回放；`PORTFOLIO_SHARES` 去 `private`、`rungDeadlines` 改 `static`；`solvePortfolioInternal` 改走 `PotionTieredSession`；文件末尾的 `PortfolioSession` 改为纯委托壳（`advance` 首次建 `PotionTieredSession`，其余访问器全部转调） |
+| `spire-pilot/src/main/java/sts1solver/search/QuickSession.java` | `narrowDeep` 分支改用 `PotionTieredSession`（阶梯 = 10 + `widenBeams()` 去重升序）；`passes()` 委托 |
+| `spire-pilot/src/main/java/sts1solver/search/Limits.java` | `search.potionTiers` / `search.potionBeam` / `search.potionBeamStep` 三键 + `yes()` 解析器 |
 
 ### 11.2 与计划原文的偏差（都已在上文更正）
 
@@ -167,7 +167,7 @@ T1 先把顺序钉死（离线核对，不写门禁）之后再下结论；在�
 ### 11.3 构建与安装（可测版本）
 
 - `tools\build.ps1`：JDK 21（`F:\Stata\utilities\java\windows-x64\zulu-jdk21.0.11`），`--release 8`，141 个源文件，Jar 555 条目，BUILD OK。
-- `tools\install.ps1`：`mod\sts1-engine-solver.jar` 1,293,146 B → `D:\Steam\steamapps\common\SlayTheSpire\mods\sts1-engine-solver.jar`，sha256 `9C8E9CA5A8E39686BC240D34C91E0658BB7DC6B1B91D84FD73F2BB4DA200AEC4`，INSTALL OK（含「单档回滚时保留 B174 回放」的 `markTiered()` 条件化修正）。
+- `tools\install.ps1`：`mod\spire-pilot.jar` 1,293,146 B → `D:\Steam\steamapps\common\SlayTheSpire\mods\spire-pilot.jar`，sha256 `9C8E9CA5A8E39686BC240D34C91E0658BB7DC6B1B91D84FD73F2BB4DA200AEC4`，INSTALL OK（含「单档回滚时保留 B174 回放」的 `markTiered()` 条件化修正）。
 - 未跑门禁/游戏自测（user m00300）。
 
 ### 11.4 回滚
@@ -276,7 +276,7 @@ T1 先把顺序钉死（离线核对，不写门禁）之后再下结论；在�
 ### 13.3 构建与安装
 
 - `tools/build.ps1`：JDK 21.0.11、`--release 8`、555 entries，`BUILD OK`。
-- `mod\sts1-engine-solver.jar`：1,295,185 B，sha256 `D6D9D262DD586CBB27C0018ABC1E4EE5A7029210913D345F6599FC5B62A24A6F`；已复制到 `D:\Steam\steamapps\common\SlayTheSpire\mods\sts1-engine-solver.jar`（同尺寸同 hash）。
+- `mod\spire-pilot.jar`：1,295,185 B，sha256 `D6D9D262DD586CBB27C0018ABC1E4EE5A7029210913D345F6599FC5B62A24A6F`；已复制到 `D:\Steam\steamapps\common\SlayTheSpire\mods\spire-pilot.jar`（同尺寸同 hash）。
 - **未跑 `tools/run.ps1`、未启动游戏**（user m00300 / m00732：用户自行实测）。
 
 ### 13.4 回滚
@@ -297,11 +297,11 @@ T1 先把顺序钉死（离线核对，不写门禁）之后再下结论；在�
 - 用户（m00172）：“1.药水并不是上限只有3，改成读取游戏内的数据”。
 - 改造前唯一的写死上限：`PotionTieredSession.java:53` `private static final int MAX_TIERS = 6;`，构造器 `:100` `int k = Math.min(Solver.potionCountUsable(world), MAX_TIERS - 1);`。
 - 游戏侧数据（`javap -classpath desktop-1.0.jar com.megacrit.cardcrawl.characters.AbstractPlayer` 确认）：`public int potionSlots;`、`public ArrayList<AbstractPotion> potions;`。`potionSlots` 会被 Potion Belt 与 mod 改写，是“本局真实容量”，而 `potions` 只是当前持有。
-- 实机日志（`C:\Users\YOKI\sts1-engine-solver\solver.log`，11:42:41，19 个 workshop mod）：`portfolio ladder (B179): beams=[10, 28, 64, 128] potionTiers=3 cellMode=true cells=12 nodes=0`、`potion cell: start rung=1/4 tier=1/3 limit=0`、`potion tiers: cells=12 ran=1 bestCell=1/1 why=proven`。当时的 3 档 = 可用药水 2 瓶 ⇒ K=2，说明“3”不是硬编码，而是被“当前可用瓶数”决定的。
+- 实机日志（`C:\Users\YOKI\spire-pilot\solver.log`，11:42:41，19 个 workshop mod）：`portfolio ladder (B179): beams=[10, 28, 64, 128] potionTiers=3 cellMode=true cells=12 nodes=0`、`potion cell: start rung=1/4 tier=1/3 limit=0`、`potion tiers: cells=12 ran=1 bestCell=1/1 why=proven`。当时的 3 档 = 可用药水 2 瓶 ⇒ K=2，说明“3”不是硬编码，而是被“当前可用瓶数”决定的。
 
 ### 14.2 改动（落点，行号为当前源码）
 
-1. **删常数**：`sts1-engine-solver/src/main/java/sts1solver/search/PotionTieredSession.java` 删除 `MAX_TIERS`；新增字段 `usablePotions`/`beltSlots`（:52-58 区）。
+1. **删常数**：`spire-pilot/src/main/java/sts1solver/search/PotionTieredSession.java` 删除 `MAX_TIERS`；新增字段 `usablePotions`/`beltSlots`（:52-58 区）。
 2. **新读法**：`Solver.java` 新增 `static int potionSlots(World)`（`potionCountUsable` 之后）：`world.install()` 后读 `AbstractDungeon.player.potionSlots`，`<=0` 时回退 `potions.size()`，异常返回 0。
 3. **新算法**：`PotionTieredSession.tierCount(int usablePotions, int potionSlots, long budgetMs, int rungs)`：
    - `usablePotions <= 0` ⇒ 返回 0（身上没有可喝的药水 ⇒ 仍走单档旧路径，无 cell、无日志、无提示，行为与 P7b 前一致）；
@@ -321,7 +321,7 @@ T1 先把顺序钉死（离线核对，不写门禁）之后再下结论；在�
 ### 14.4 构建与安装
 
 - `tools/build.ps1`：JDK 21.0.11、`--release 8`、555 entries，BUILD OK。
-- `mod\sts1-engine-solver.jar`：1,295,693 B，sha256 `4A155B622BF12691603A3D6ED4A5A7DBCE92A07FAA989070F6D8E5435077B644`；已复制到 `D:\Steam\steamapps\common\SlayTheSpire\mods\sts1-engine-solver.jar`（同尺寸同 hash）。
+- `mod\spire-pilot.jar`：1,295,693 B，sha256 `4A155B622BF12691603A3D6ED4A5A7DBCE92A07FAA989070F6D8E5435077B644`；已复制到 `D:\Steam\steamapps\common\SlayTheSpire\mods\spire-pilot.jar`（同尺寸同 hash）。
 - **未跑 `tools/run.ps1`、未启动游戏**（user m00300 / m00732）。
 
 ### 14.5 回滚
@@ -369,7 +369,7 @@ T1 先把顺序钉死（离线核对，不写门禁）之后再下结论；在�
 ### 15.4 构建与安装
 
 - `tools/build.ps1`：JDK 21.0.11、`--release 8`、555 entries，`BUILD OK`。
-- `mod\sts1-engine-solver.jar`：1,295,807 B，sha256 `05D00831DD59261954FB63E659204680F8C32DED5095B740BA2587FF4067D973`；已复制到 `D:\Steam\steamapps\common\SlayTheSpire\mods\sts1-engine-solver.jar`。
+- `mod\spire-pilot.jar`：1,295,807 B，sha256 `05D00831DD59261954FB63E659204680F8C32DED5095B740BA2587FF4067D973`；已复制到 `D:\Steam\steamapps\common\SlayTheSpire\mods\spire-pilot.jar`。
 - **未跑 `tools/run.ps1`、未启动游戏**（user m00300 / m00732）。
 
 ### 15.5 回滚

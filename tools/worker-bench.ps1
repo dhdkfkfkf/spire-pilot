@@ -14,7 +14,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$homeDir = Join-Path $env:USERPROFILE 'sts1-engine-solver'
+$homeDir = Join-Path $env:USERPROFILE 'spire-pilot'
 $prefDir = Join-Path $GameDir 'preferences'
 $prefRoot = Join-Path $homeDir 'prefs-backup'
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -53,7 +53,7 @@ Remove-Item $result -Force -ErrorAction SilentlyContinue
 Snapshot-Preferences
 $java = Join-Path $GameDir 'jre\bin\java.exe'
 $mts = Join-Path $WorkshopDir '1605060445\ModTheSpire.jar'
-$launchArgs = @('-Dsts1solver.instance=wbench', '-jar', $mts, '--skip-launcher', '--mods', 'sts1-engine-solver,basemod', '--skip-intro')
+$launchArgs = @('-Dsts1solver.instance=wbench', '-jar', $mts, '--skip-launcher', '--mods', 'spire-pilot,basemod', '--skip-intro')
 Write-Host ("worker    : " + ($launchArgs -join ' '))
 $wall = Get-Date
 $proc = Start-Process -FilePath $java -ArgumentList $launchArgs -WorkingDirectory $GameDir -PassThru

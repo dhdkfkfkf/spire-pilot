@@ -54,7 +54,7 @@ public final class SolverMod implements PostInitializeSubscriber, PostUpdateSubs
     }
 
     public static String dir() {
-        return System.getProperty("user.home") + File.separator + "sts1-engine-solver";
+        return System.getProperty("user.home") + File.separator + "spire-pilot";
     }
 
     /** True when the author's debug marker exists; the bug-report bundle records it. */
@@ -115,7 +115,7 @@ public final class SolverMod implements PostInitializeSubscriber, PostUpdateSubs
     @Override
     public void receivePostInitialize() {
         Log.open();
-        Log.info("=== sts1-engine-solver loaded (mod dir " + dir() + ") ===");
+        Log.info("=== spire-pilot loaded (mod dir " + dir() + ") ===");
         logGuardPatches();
         sts1solver.ui.Budget.migrateToUnlimitedBudget();
         debugSurface = new File(dir(), DEBUG_MARKER).exists();

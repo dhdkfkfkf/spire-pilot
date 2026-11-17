@@ -22,7 +22,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$homeDir = Join-Path $env:USERPROFILE 'sts1-engine-solver'
+$homeDir = Join-Path $env:USERPROFILE 'spire-pilot'
 $prefDir = Join-Path $GameDir 'preferences'
 $prefRoot = Join-Path $homeDir 'prefs-backup'
 $pool = Join-Path $homeDir 'pool'
@@ -115,7 +115,7 @@ $cold = @{}
 $wall = Get-Date
 try {
 for ($i = 1; $i -le $Workers; $i++) {
-    $launchArgs = @(('-Dsts1solver.instance=wp' + $i), '-jar', $mts, '--skip-launcher', '--mods', 'sts1-engine-solver,basemod', '--skip-intro')
+    $launchArgs = @(('-Dsts1solver.instance=wp' + $i), '-jar', $mts, '--skip-launcher', '--mods', 'spire-pilot,basemod', '--skip-intro')
     Write-Host ('worker    : wp' + $i + ' ' + ($launchArgs -join ' '))
     $procs += Start-Process -FilePath $java -ArgumentList $launchArgs -WorkingDirectory $GameDir -PassThru
 }

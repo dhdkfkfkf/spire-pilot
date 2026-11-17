@@ -5,7 +5,7 @@ import sts1solver.util.Log;
 /**
  * Deep-search budget, changeable in game (P1-4e).
  *
- * <p>The budget lives in {@code %USERPROFILE%\sts1-engine-solver\settings.txt} and is re-read on every
+ * <p>The budget lives in {@code %USERPROFILE%\spire-pilot\settings.txt} and is re-read on every
  * deep search, so writing the file is enough -- no restart, no reload hook. This class is the writer
  * and the profile cycle; the reader stays in {@link sts1solver.Gameplay} because the file is the
  * contract between them.

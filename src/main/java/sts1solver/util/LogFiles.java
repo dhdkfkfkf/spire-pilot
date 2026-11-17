@@ -19,7 +19,7 @@ import java.util.List;
  *
  * <ul>
  *   <li><b>solver.log must stay the live file.</b> docs/TESTING.md and docs/LOGGING.md tell the
- *       player to grep {@code %USERPROFILE%/sts1-engine-solver/solver.log}, and the harness waits
+ *       player to grep {@code %USERPROFILE%/spire-pilot/solver.log}, and the harness waits
  *       for AUTOTEST markers there. So rotation never renames the live file away for good: the
  *       previous content moves into {@code logs/} and the live name is recreated empty.</li>
  *   <li><b>Nothing here may throw into the game.</b> Every caller wraps these calls: a broken log

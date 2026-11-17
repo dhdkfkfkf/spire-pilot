@@ -1,7 +1,7 @@
 @echo off
 setlocal
 set GAME=D:\Steam\steamapps\common\SlayTheSpire
-set OUT=C:\Users\YOKI\sts1-engine-solver\gc
+set OUT=C:\Users\YOKI\spire-pilot\gc
 set MTS=D:\Steam\steamapps\workshop\content\646570\1605060445\ModTheSpire.jar
 set GC_OPTS=-Xmx10g -Xloggc:%OUT%\gc-%%p.log
 if not "%~1"=="g1" goto keepgc

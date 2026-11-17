@@ -8,7 +8,7 @@ import sts1solver.util.Log;
  *
  * <p>The factor is a multiplier on top of the game's UI scale, so a player on a 4K screen who
  * already runs the game scaled can still make the plan bigger or smaller. It is stored in
- * {@code %USERPROFILE%\sts1-engine-solver\settings.txt} as {@code panelScale=}, next to the search
+ * {@code %USERPROFILE%\spire-pilot\settings.txt} as {@code panelScale=}, next to the search
  * budget: the panel stays part of the same small settings contract and needs no reload.
  */
 public final class RouteSize {

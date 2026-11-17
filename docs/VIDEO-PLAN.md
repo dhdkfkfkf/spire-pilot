@@ -111,7 +111,7 @@
 
 | 素材 | 位置 | 用法 |
 |---|---|---|
-| 第三版证据日志 146 份（B13–B89、AUTOTEST 等） | `sts1-engine-solver/evidence/` | 档案墙、日志滚动、bug 编号计数 |
+| 第三版证据日志 146 份（B13–B89、AUTOTEST 等） | `spire-pilot/evidence/` | 档案墙、日志滚动、bug 编号计数 |
 | 第二版物证：REPORT.md ×2、`relic-disposition.tsv`（187 行）、`eng-relics.json.dump`、两个门禁 .java | `default-workspace/evidence/m4/t313-exhaustive-optimal/` | 第二幕核心画面（唯一的真实失败物证） |
 | bug 总表 516KB | `docs/PLAN-BUGS.md` | 快速滚动做"工作量"视觉 |
 | 代码 135 文件 / 57,851 行 | `src/` | IDE 里滚动、diff、跳转，做"规模感" |

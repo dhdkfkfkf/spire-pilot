@@ -166,4 +166,4 @@
   以注释保留，装了 mod 再放回去。
 - 复跑：`-Mode modchar`（2 mod）`characters=6 mod-characters=2`，ninja `live=match=14/14`、菜农 `live=match=12/12`；
   `-Gates "S147,S148,S149"` → `passed=11 failed=0`（S149 仍 4 条规则；S148 报 `2 character(s) exercised`）。
-- 覆盖率 / 长跑一律显式 `-Mods "sts1-engine-solver,basemod,stslib,ninja,CaiNongMod"`。
+- 覆盖率 / 长跑一律显式 `-Mods "spire-pilot,basemod,stslib,ninja,CaiNongMod"`。

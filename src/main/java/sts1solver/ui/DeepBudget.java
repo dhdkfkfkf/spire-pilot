@@ -3,23 +3,19 @@ package sts1solver.ui;
 /**
  * Effective deep-search budget (B16-followup).
  *
- * <p>Boss fights are the one place where a 60 second search is simply not enough: the Slime Boss
+ * <p>Boss fights are the one place where a 60 second search can be too little: the Slime Boss
  * splits, the health pool is far larger, and the search has to model several turns past the kill.
- * A20 Slime Boss on a starting deck measured 38 splits and a 33-step deepest line, so the plan
- * stopped mid-fight at the default budget. Doubling seconds and nodes for boss rooms only keeps
- * normal fights fast -- the setting in settings.txt stays the user's number, this is applied on top
- * of it, and the panel/log say so.
+ * That is handled by {@link #autoBudgetMs} ("自动"), which is the only mode that scales with the
+ * room. A number the player picked is used verbatim -- see {@link #budgetMs}.
  *
  * <p>Kept free of game types except for the one predicate, so the arithmetic is gate-testable.
  */
 public final class DeepBudget {
 
-    /** Boss rooms get twice the configured seconds. */
+    /** Boss rooms get twice the 自动 seconds. */
     public static final int BOSS_SECONDS_FACTOR = 2;
-    /** Boss rooms get twice the configured node cap. */
-    public static final int BOSS_NODES_FACTOR = 2;
-    /** Never search less than this, whatever settings.txt says. */
-    public static final long MIN_SECONDS = 10L;
+    /** Never search less than this, whatever settings.txt says: the smallest tier is 6s. */
+    public static final long MIN_SECONDS = 6L;
     /** Hard ceiling on seconds, even after the Boss factor. */
     public static final long MAX_SECONDS = 600L;
     /** Hard ceiling on nodes, even after the Boss factor. */
@@ -46,30 +42,26 @@ public final class DeepBudget {
     }
 
     /**
-     * Budget in ms for the given configured seconds in a room of this kind.
+     * Budget in ms for the seconds the player picked.
      *
-     * <p>{@code settingsSeconds <= 0} means unlimited: the panel's 秒数 button starts at 不限 and the
-     * player can still step it to a concrete value. Unlimited ignores the Boss factor, because
-     * doubling "no limit" is still "no limit".
+     * <p>1.0.15 (user report), the number is the number. A 6s tier used to be lifted to a legacy 10s
+     * floor and then doubled in a boss room, so picking 6/12/18/30/60 ran as 20/24/36/60/120. Scene
+     * scaling belongs to {@link #autoBudgetMs} only: a fixed tier is a promise, "自动" is the mode
+     * that may size itself from the board.
+     *
+     * <p>{@code settingsSeconds <= 0} means unlimited.
      */
-    public static long budgetMs(long settingsSeconds, boolean boss) {
+    public static long budgetMs(long settingsSeconds) {
         if (settingsSeconds <= 0L) {
             return UNLIMITED;
         }
         long seconds = Math.max(MIN_SECONDS, Math.min(MAX_SECONDS, settingsSeconds));
-        if (boss) {
-            seconds = Math.min(MAX_SECONDS, seconds * BOSS_SECONDS_FACTOR);
-        }
         return seconds * 1000L;
     }
 
-    /** Node cap for the given configured cap in a room of this kind. */
-    public static int nodes(int settingsNodes, boolean boss) {
-        int nodes = Math.max(0, Math.min(MAX_NODES, settingsNodes));
-        if (boss) {
-            nodes = (int) Math.min((long) MAX_NODES, (long) nodes * BOSS_NODES_FACTOR);
-        }
-        return nodes;
+    /** Node cap in the number the player picked; 0 means no cap. */
+    public static int nodes(int settingsNodes) {
+        return Math.max(0, Math.min(MAX_NODES, settingsNodes));
     }
 
     /**

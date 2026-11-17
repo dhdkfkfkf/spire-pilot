@@ -10,7 +10,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $Game = 'D:\Steam\steamapps\common\SlayTheSpire'
 $Mts  = 'D:\Steam\steamapps\workshop\content\646570\1605060445\ModTheSpire.jar'
-$Out  = 'C:\Users\YOKI\sts1-engine-solver\gc'
+$Out  = 'C:\Users\YOKI\spire-pilot\gc'
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 $Console = Join-Path $Out ('ab-' + $Tag + '-console.log')
 $GcLog   = Join-Path $Out ('ab-' + $Tag + '-gc.log')

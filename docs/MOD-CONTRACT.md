@@ -52,7 +52,7 @@
 
 ## profile 文件：从权限表降级为显示名
 
-`<游戏目录>\mods\sts1-engine-solver-content\profiles.txt` 与 `%USERPROFILE%\sts1-engine-solver\content\profiles.txt`
+`<游戏目录>\mods\spire-pilot-content\profiles.txt` 与 `%USERPROFILE%\spire-pilot\content\profiles.txt`
 仍然会读，但只用于把 `CAI_NONG.card.Foo` 显示成「CaiNong」。第四列 `trust` 仍被解析（旧文件照常加载），
 但**没有任何代码路径拿它当门槛**。删掉 profile 也能正常跑。
 

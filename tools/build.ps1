@@ -25,7 +25,7 @@ $srcDir = Join-Path $root 'src\main\java'
 $resDir = Join-Path $root 'resources'
 $buildDir = Join-Path $root 'build'
 $modDir = Join-Path $root 'mod'
-$jarName = 'sts1-engine-solver.jar'
+$jarName = 'spire-pilot.jar'
 
 # Each build gets its own directory. javac does not delete the .class of a deleted source, so a
 # reused classes directory ships code whose source no longer exists; a per-run directory cannot.
@@ -118,7 +118,7 @@ try {
     # returns whichever jar the classloader reaches first -- the 1.0.0 report bundle printed another
     # mod's "5.56.0" for exactly that reason.
     $mtsVersion = (Get-Content (Join-Path $resDir 'ModTheSpire.json') -Raw | ConvertFrom-Json).version
-    Set-Content -Path (Join-Path $classesDir 'sts1-engine-solver.version') -Value $mtsVersion -Encoding ascii -NoNewline
+    Set-Content -Path (Join-Path $classesDir 'spire-pilot.version') -Value $mtsVersion -Encoding ascii -NoNewline
 
     # ZipArchive writes the entries ourselves: CreateFromDirectory on Windows PowerShell stores
     # backslashes, which the JVM does not treat as a package separator, and the mod then "does not

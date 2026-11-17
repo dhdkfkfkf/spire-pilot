@@ -31,7 +31,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$homeDir = Join-Path $env:USERPROFILE 'sts1-engine-solver'
+$homeDir = Join-Path $env:USERPROFILE 'spire-pilot'
 $logPath = Join-Path $homeDir 'solver.log'
 $request = Join-Path $homeDir 'autotest.request'
 New-Item -ItemType Directory -Force -Path $homeDir | Out-Null
@@ -251,10 +251,10 @@ if ($modFilter.Length -eq 0 -and $AllMods) {
 # wasted runs). The solver and BaseMod are always loaded, whatever else is asked for.
 if ($Mods.Trim().Length -gt 0) {
     $ids = @($Mods -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_.Length -gt 0 })
-    if (-not ($ids -contains 'sts1-engine-solver')) { $ids = @('sts1-engine-solver') + $ids }
+    if (-not ($ids -contains 'spire-pilot')) { $ids = @('spire-pilot') + $ids }
     if (-not ($ids -contains 'basemod')) { $ids = @('basemod') + $ids }
     $modFilter = (@($ids | Select-Object -Unique) -join ',')
-    Write-Host ("mods      : -Mods always keeps sts1-engine-solver + basemod -> " + $modFilter)
+    Write-Host ("mods      : -Mods always keeps spire-pilot + basemod -> " + $modFilter)
 }
 # JVM flags come from -JavaArgs or, when the caller mangles leading dashes, the environment.
 $extraJava = $JavaArgs
@@ -264,7 +264,7 @@ $launchArgs = @()
 # protect. A normal run is core-gates-only; -Full brings the rest back when a change touches them.
 if ($extraJava.Trim().Length -gt 0) { $launchArgs += ($extraJava.Trim() -split '\s+') }
 $launchArgs += @('-jar', $mts, '--skip-launcher')
-if ($modFilter.Length -eq 0) { $modFilter = 'sts1-engine-solver,basemod' }
+if ($modFilter.Length -eq 0) { $modFilter = 'spire-pilot,basemod' }
 $launchArgs += @('--mods', $modFilter)
 $launchArgs += '--skip-intro'
 # Startup timing. Two runs were lost to a silent gap between "launching" and the first log line

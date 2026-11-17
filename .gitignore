@@ -5,6 +5,8 @@ mod/*.jar
 *.class
 
 # 发布包走 GitHub Release / 创意工坊附件，不进仓库
+/spire-pilot-*.jar
+# 改名前的旧包（sts1-engine-solver-<版本>.jar）同样不入库
 /sts1-engine-solver-*.jar
 
 # 本地运行数据与证据（体积大、含本机路径）

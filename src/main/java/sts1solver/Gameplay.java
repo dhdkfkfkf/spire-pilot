@@ -1347,7 +1347,7 @@ public final class Gameplay {
             // a bad settings file must never block the search
         }
         int clamped = Math.max(0, Math.min(sts1solver.ui.DeepBudget.MAX_NODES, nodes));
-        return sts1solver.ui.DeepBudget.nodes(clamped, sts1solver.ui.DeepBudget.inBossRoom());
+        return sts1solver.ui.DeepBudget.nodes(clamped);
     }
 
     /** Deep-search budget: settings.txt (deepSeconds); 0 (the default) means AUTO (1.0.8 C4). */
@@ -1379,7 +1379,9 @@ public final class Gameplay {
         sts1solver.search.Limits.setAutoBudgetMode(false);
         // 1.0.8 (C6, user): 0 means 无限. The panel offers 自动 自动(6/12/18/30/60s) 无限, so the wait
         // is the number the player picked instead of a formula they cannot see.
-        return sts1solver.ui.DeepBudget.budgetMs(seconds, sts1solver.ui.DeepBudget.inBossRoom());
+        // 1.0.15 (user report): verbatim -- 6s used to become 20s (a 10s floor, then the boss
+        // factor). Scene scaling is 自动's job; a tier the player picked is a promise.
+        return sts1solver.ui.DeepBudget.budgetMs(seconds);
     }
 
     /**
@@ -1933,14 +1935,14 @@ public final class Gameplay {
         // the panel must never look like.
         if (paused && (quick != null || deep != null)) {
             ArrayList<String> held = new ArrayList<String>();
-            held.add("STS1 Engine Solver  [计算已暂停]");
+            held.add("Spire Pilot  [计算已暂停]");
             held.add("游戏暂停中：计算和自动出牌一起停住，恢复游戏后接着算（暂停时间不计入预算）");
             return held;
         }
         if (deep != null) {
             ArrayList<String> progress = new ArrayList<String>();
             long elapsed = now() - deepStartedAt;
-            progress.add("STS1 Engine Solver  [深度搜索中]");
+            progress.add("Spire Pilot  [深度搜索中]");
             progress.add("已用 " + (elapsed / 1000) + "s / " + budgetText(deepBudgetMs) + "   节点 "
                     + deep.nodes() + "   最优 " + deep.bestActions() + " 步");
             progress.add(deep.phase());
@@ -1957,7 +1959,7 @@ public final class Gameplay {
             if (sts1solver.ui.DeepBudget.unlimited(cap)) {
                 // Unlimited: no percentage bar, because there is nothing to be a percentage of.
                 // The worldline line below is the progress indicator (P2-12).
-                progress.add("STS1 Engine Solver  [计算中]");
+                progress.add("Spire Pilot  [计算中]");
                 progress.add("已用 " + (elapsed / 1000) + "s（不限，一直算到分叉跑完或再点「计算」）");
             } else {
                 int pct = (int)Math.min(95L, elapsed * 100L / cap);
@@ -1966,7 +1968,7 @@ public final class Gameplay {
                 for (int i = 0; i < 20; i++) {
                     bar.append(i < filled ? '\u2588' : '\u2591');
                 }
-                progress.add("STS1 Engine Solver  [计算中 " + pct + "%]");
+                progress.add("Spire Pilot  [计算中 " + pct + "%]");
                 progress.add(bar + " " + pct + "%   已用 " + (elapsed / 1000) + "s / " + (cap / 1000) + "s");
             }
             progress.add(worldlineText(quick)
@@ -1996,7 +1998,7 @@ public final class Gameplay {
         // m19237: the player does not want the internal bookkeeping on screen. "渲染已修复 6" and
         // "UI状态已还原" were already written to solver.log (where they belong); showing them here only
         // raised the question of what they meant.
-        rows.add("STS1 Engine Solver" + (plan == null && !status.isEmpty() ? "  [" + status + "]" : "")
+        rows.add("Spire Pilot" + (plan == null && !status.isEmpty() ? "  [" + status + "]" : "")
                 + (Hud.failures() > 0 ? "   HUD ERRORS: " + Hud.failures() : ""));
         if (!Solver.expandFailures().isEmpty()) {
             rows.add("引擎异常（搜索分支被丢弃）: " + Solver.expandFailures());

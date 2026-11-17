@@ -1,12 +1,19 @@
-# STS1 Engine Solver
+# Spire Pilot
 
-<p align="center"><img src="docs/assets/logo.png" width="220" alt="STS1 Engine Solver"></p>
+<p align="center"><img src="docs/assets/logo.png" width="220" alt="Spire Pilot"></p>
 
 A combat solver for **Slay the Spire 1** (1.0 / 12-18-2022) that does not model the game.
 
 It **mirrors the real combat engine into an isolated copy**, lets the **game's own card, monster,
 power and relic code run on that copy**, and searches the **states that really came out** of it. The
 search result is a line, and executing a line is audited against the states the search predicted.
+
+> **Upstream.** This repository is a derivative of
+> [STS1 Engine Solver](https://github.com/zck070718/sts1-engine-solver) by 闪珖灵感菇 (MIT). It continues
+> from that project's 1.0.3 and rolls its later 1.0.4–1.0.15 work into this 1.0.0 release. The panel
+> layout, the sandbox mirror and the search pipeline come from there; the texture guard, the 3-turn
+> horizon, the time-budget tiers and the turn-level ranking are this repository's changes. Full
+> attribution and license texts: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 The architecture follows the reference project [CombatSolver (STS2)](https://github.com/Torch1230/CombatSolver):
 capture a root state, simulate in the background without touching the live fight, print the route,
@@ -75,9 +82,9 @@ as a wrong optimal line.
 | **药水** | 允许或禁用求解过程中使用药水 |
 | **局外收益** | 是否把局外收益（金币、最大生命、永久伤害、升级、药水）计入评分 |
 | **收起 / 隐藏** | 收起面板为一条标题，或隐藏整个覆盖层；隐藏后点屏幕边缘的恢复标签即可回来 |
-| **导出报告**（标题行右侧小按钮） | 把日志尾部、设置、版本与当前路线打包成一个 zip，写到 `%USERPROFILE%\sts1-engine-solver\reports\`，并在资源管理器中定位；用户目录会被替换成 `%USERPROFILE%`，不含存档 |
+| **导出报告**（标题行右侧小按钮） | 把日志尾部、设置、版本与当前路线打包成一个 zip，写到 `%USERPROFILE%\spire-pilot\reports\`，并在资源管理器中定位；用户目录会被替换成 `%USERPROFILE%`，不含存档 |
 
-> 1.0.0 起，F5–F12 的按键分支已从代码中删除（m03455）：唯一的操作方式是上面的面板按钮，按键不可能启动搜索、改预算或触发自检。方向键只负责滚动路线区。残留的 `autotest.request` 也不会在玩家机器上跑自检——那需要一个 `%USERPROFILE%\sts1-engine-solver\debug.keys` 标记，只有作者的 `tools/run.ps1` 会创建它。
+> 1.0.0 起，F5–F12 的按键分支已从代码中删除（m03455）：唯一的操作方式是上面的面板按钮，按键不可能启动搜索、改预算或触发自检。方向键只负责滚动路线区。残留的 `autotest.request` 也不会在玩家机器上跑自检——那需要一个 `%USERPROFILE%\spire-pilot\debug.keys` 标记，只有作者的 `tools/run.ps1` 会创建它。
 
 The overlay follows the STS2 solver's route-row model (read from its `SolverRouteRow`, not guessed):
 one row per TURN, one line per action, **every action names its card and its target**, the turn row
@@ -86,7 +93,7 @@ The current step is marked `▶`, and anything the solver refused to expand is N
 ("未展开（会打开选择提示）: …").
 
 ```
-STS1 Engine Solver  [win line found]
+Spire Pilot  [win line found]
 可赢 · 预计掉血 10 · 3 回合 · 778 节点 · 1.2s
 第 1 回合            HP 74  能量 0
 ▶1. 燃烧
@@ -109,6 +116,9 @@ draws a fixed banner, which separates "the panel cannot draw" from "there is no 
 ---
 
 ## 更新日志
+
+> 下面的 1.0.4–1.0.15 是上游项目 STS1 Engine Solver 的版本号，本仓库把它们合并为 1.0.0 一次发布；
+> 版本号保留原样，是为了让从上游过来的玩家能对上自己记忆里的改动。
 
 搜索这一侧的目标很朴素：**牌多、怪多、怪血厚的时候，也要在你能接受的等待里给出一个能用的答案**。下面按版本拆开写，每个版本只做一件事。
 
@@ -151,7 +161,7 @@ draws a fixed banner, which separates "the panel cannot draw" from "there is no 
 ### 1.0.11 — 秒数档位与自动预算
 
 - 「秒数」按钮从"0 或 300s"改成一条档位：`自动` → `自动(6s)` → `自动(12s)` → `自动(18s)` → `自动(30s)` → `自动(60s)` → `无限`。
-- `自动` 按眼前的场面算：`4 + 2×活怪数 + Σ(血量+护盾)/40` 秒，夹 6–90 秒，BOSS 房翻倍。单只史莱姆约 7 秒，四只合计 300 有效生命约 20 秒。
+- `自动` 按眼前的场面算：`4 + 2×活怪数 + Σ(血量+护盾)/40` 秒，夹 6–90 秒，BOSS 房翻倍。单只史莱姆约 7 秒，四只合计 300 有效生命约 20 秒。数字档（6/12/18/30/60）按你选的原样执行，BOSS 不翻倍、也不抬到别的下限。
 - `无限` 同时取消回合上限（没有等待要限制时，回合上限只会砍掉答案），改由"连续 6 层最优分不动"收尾。
 
 ### 1.0.12 — 按时间分阶段降级
@@ -183,7 +193,7 @@ draws a fixed banner, which separates "the panel cannot draw" from "there is no 
 
 ## Automated evidence
 
-The mod has a harness mode: if `%USERPROFILE%\sts1-engine-solver\autotest.request` exists at
+The mod has a harness mode: if `%USERPROFILE%\spire-pilot\autotest.request` exists at
 startup, it builds real combats **inside the running game**, runs the suite at the main menu, writes
 the verdict to `solver.log` and halts the process. That makes "build → launch → verdict" one command
 and lets every change be re-validated.

@@ -18,7 +18,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$jarName = 'sts1-engine-solver.jar'
+$jarName = 'spire-pilot.jar'
 
 if (-not $SkipBuild) {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'tools\build.ps1') 2>&1 | Write-Host

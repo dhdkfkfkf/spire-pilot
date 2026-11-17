@@ -1,7 +1,7 @@
 # Save / preferences snapshot for the STS1 engine solver.
 # The mod never touches the run save, but a test run can be ruined by the game itself, so every
 # change gets a restore point: this script copies the run autosave and the preference files into
-# %USERPROFILE%\sts1-engine-solver\save-backups\<timestamp>\ before a jar is replaced.
+# %USERPROFILE%\spire-pilot\save-backups\<timestamp>\ before a jar is replaced.
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools\save-backup.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools\save-backup.ps1 -Restore <folder>
@@ -10,7 +10,7 @@ param(
     [string]$Game = "D:\Steam\steamapps\common\SlayTheSpire"
 )
 $ErrorActionPreference = "Stop"
-$root = Join-Path $env:USERPROFILE "sts1-engine-solver\save-backups"
+$root = Join-Path $env:USERPROFILE "spire-pilot\save-backups"
 $saves = Join-Path $Game "saves"
 $prefs = Join-Path $Game "preferences"
 

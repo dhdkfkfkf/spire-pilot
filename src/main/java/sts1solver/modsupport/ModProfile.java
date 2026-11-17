@@ -30,8 +30,8 @@ import java.util.List;
  * screen). Keeping it data means a new mod does not require a rebuild, and a wrong profile is visible
  * in the file rather than buried in a branch.
  *
- * <p>Lookup order: {@code <game>/mods/sts1-engine-solver-content/profiles.txt}, then
- * {@code <user.home>/sts1-engine-solver/content/profiles.txt}. A missing file simply means "no mod is
+ * <p>Lookup order: {@code <game>/mods/spire-pilot-content/profiles.txt}, then
+ * {@code <user.home>/spire-pilot/content/profiles.txt}. A missing file simply means "no mod is
  * integrated", which is the vanilla-only default.
  */
 public final class ModProfile {
@@ -199,10 +199,10 @@ public final class ModProfile {
     private static List<String> candidatePaths() {
         List<String> out = new ArrayList<String>();
         String gameMods = System.getProperty("user.dir", ".") + File.separator + "mods"
-                + File.separator + "sts1-engine-solver-content" + File.separator + "profiles.txt";
+                + File.separator + "spire-pilot-content" + File.separator + "profiles.txt";
         out.add(gameMods);
         String home = System.getProperty("user.home", ".");
-        out.add(home + File.separator + "sts1-engine-solver" + File.separator + "content"
+        out.add(home + File.separator + "spire-pilot" + File.separator + "content"
                 + File.separator + "profiles.txt");
         return out;
     }

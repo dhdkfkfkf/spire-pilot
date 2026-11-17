@@ -589,7 +589,7 @@ public final class Hud implements PostRenderSubscriber {
 
     private static List<String> demoLines() {
         List<String> out = new ArrayList<String>();
-        out.add("STS1 Engine Solver — overlay demo (F12 to hide)");
+        out.add("Spire Pilot — overlay demo (F12 to hide)");
         out.add("if you can read this, the panel works");
         out.add("If this is visible but no plan was, the solver produced no plan.");
         return out;

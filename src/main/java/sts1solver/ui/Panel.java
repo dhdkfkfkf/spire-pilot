@@ -363,7 +363,7 @@ public final class Panel {
                     font.setColor(0.85f, 0.92f, 1.0f, 1.0f);
                     // Title and status live in the header band; the grid starts below it, so the
                     // two can never collide (reported: 求解器和面板上下太挤).
-                    font.draw(sb, "STS1 求解器", x + 12.0f * scale, top - 18.0f * scale);
+                    font.draw(sb, "尖塔领航", x + 12.0f * scale, top - 18.0f * scale);
                     float[] rr = PanelLayout.reportRect(Settings.WIDTH, Settings.HEIGHT, scale);
                     drawButton(sb, font, rr[0], rr[1], rr[2], rr[3],
                             sts1solver.diag.BugReport.label(), reportHover);

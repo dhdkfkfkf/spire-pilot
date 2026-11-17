@@ -288,7 +288,7 @@ LLM 可以采信也可以不采信，但必须写理由。
   「同 seed 两跑一致」这条验收改成**「决策可重放」**（重放命中的是缓存里的原决定）；
 - 决策层不碰战斗判定：`docs/JUDGMENT.md` R10 仍然只有一份判定实现（真引擎）。
 
-**接口**：mod 不内嵌 api key；`%USERPROFILE%\sts1-engine-solver\llm.json` 放 endpoint/model/key（或读环境变量），
+**接口**：mod 不内嵌 api key；`%USERPROFILE%\spire-pilot\llm.json` 放 endpoint/model/key（或读环境变量），
 请求走 HTTP；一次决策 1–5s，面板显示「正在权衡（LLM）」。
 
 **免费方案（用户 m10623 第 1 条）**：三条路，按「零成本 + 离线」优先；实现上都是一个 `LlmClient` 接口，`provider` 不同而已。
@@ -339,7 +339,7 @@ D 作为后续可选（先看有多少人真的用）。这样「订阅就能用
 
 1. **机制卡 mechsheet（一次性、可缓存）**：对卡库里每张卡（先只做非原版卡）建一个干净战斗（99 能量、手牌只有这一张、场上一个高血量假怪），
    真打出去，前后 diff 状态 → 记录 id/中文名/类型/费用/目标/观测效果（伤害/格挡/抽牌/能量/增益层数）/触发时机/原文。
-   - 成本：171 张 mod 卡 × 约 0.2 s ≈ **35 秒**，一次生成，存 %USERPROFILE%\sts1-engine-solver\mechsheet\<mod指纹>.json；
+   - 成本：171 张 mod 卡 × 约 0.2 s ≈ **35 秒**，一次生成，存 %USERPROFILE%\spire-pilot\mechsheet\<mod指纹>.json；
    - 缓存键 = mod 文件指纹（版本变了才重算）；
    - 不确定性处理：一次试跑只能看到「无条件效果」；条件效果（若…则…）靠 rawDescription 关键词解析给出提示，再抽 5% 复跑核验；
    - 副产物：**这套试跑同时就是 mod 钩子的观测器**——哪个 BaseMod 订阅在何时被调，就是 MOD-CONTRACT.md 三道门槛里第一条的认证证据。

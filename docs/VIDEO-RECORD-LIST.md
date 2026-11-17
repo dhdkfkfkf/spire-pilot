@@ -42,7 +42,7 @@
 
 ## R7 · 第二版物证（可选，15 秒）
 
-- **画面**：`sts1-engine-solver\evidence\m4\t313-exhaustive-optimal\REPORT.md` 和 `T380-relics\relic-disposition.tsv`
+- **画面**：`spire-pilot\evidence\m4\t313-exhaustive-optimal\REPORT.md` 和 `T380-relics\relic-disposition.tsv`
 - **动作**：REPORT.md 打开后慢滚 8 秒（能看到 195 / 154 / 115 这些数字），再切到 tsv 滚 5 秒
 - **用在**：3:05「我放弃之前留了一张表：一百九十五个遗物」——现有片段只有 6.7 秒，太短
 

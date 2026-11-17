@@ -180,7 +180,7 @@ StaticWatch 比较相等、不写）。快照已关闭时 end() 写 null，Stati
 - `mirror/StaticWatch.java`：新增 `snapshotValueForTest(Field)`（返回该字段被采样的实机值，未采样返回字符串 `"not sampled"`），供 S255 钉住「快照的是实机 clip，不是替身」。
 - `probe/Probe.java`：S255 换新契约（**37 条断言**，5 个窗口 A–E：替身契约/play 早退/替身返回值/StaticWatch 顺序/窗口自建 Clip 被 close/覆写还原/释放还原（B169 推翻）/快照已死写 null/liveStop 检出/stale 清理 + 原雨爱可读性断言）；新增 **S257**（**2 条断言**：真实 `AudioSystem.getLine` 开 8kHz/8bit/mono 400 字节静音 → `loop(1)` → `stop()` 后仍 open、`close()` 后不 open；无设备时只 `Log.warn("S257 SKIP: …")`，**0 条通过**）。
 
-**构建/安装**：`tools/install.ps1` → javac 21 `--release 8`，140 个源文件，jar **1,287,415 B**、sha256 `E85332F8C3B26B6B44C8CAF00CF04D9F2E3E1421013692557C38BB8E51E4A08D`，已装到 `D:\Steam\steamapps\common\SlayTheSpire\mods\sts1-engine-solver.jar`（安装需要写工作区外路径，用了 danger-full-access 一次性授权）。
+**构建/安装**：`tools/install.ps1` → javac 21 `--release 8`，140 个源文件，jar **1,287,415 B**、sha256 `E85332F8C3B26B6B44C8CAF00CF04D9F2E3E1421013692557C38BB8E51E4A08D`，已装到 `D:\Steam\steamapps\common\SlayTheSpire\mods\spire-pilot.jar`（安装需要写工作区外路径，用了 danger-full-access 一次性授权）。
 
 **与原计划的偏差（都是实现时被编译器/语义推翻的）**
 

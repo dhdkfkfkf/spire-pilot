@@ -254,7 +254,7 @@ A3  音效（键盘声、数字滚动声、静音点）
 
 | 文件 | 作用 |
 |---|---|
-| `sts1-engine-solver\docs\VIDEO-SCRIPT-V3.md` | 唯一权威脚本（8 段结构、立意、硬规定） |
+| `spire-pilot\docs\VIDEO-SCRIPT-V3.md` | 唯一权威脚本（8 段结构、立意、硬规定） |
 | `_tmp\film.py` | 全部绘制 + 时间线（TXT 45 句旁白 / SHOTS 39 镜头 / cues 时间轴） |
 | `_tmp\vo_film\n*.mp3` | 45 句配音缓存（云扬 +20% / -10Hz），改文案只需重生成那一条 |
 | `_tmp\video-samples\_film_vo.wav` | 配音按 cues 叠加后的整轨（44.1k 单声道，峰值归一 0.89） |

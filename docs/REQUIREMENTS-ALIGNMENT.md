@@ -42,7 +42,7 @@
 STS2 的 `SolverRouteRow` 是"回合 + 动作 pill + 右侧结果列"。STS1 这边是单字体文本面板，等价信息：
 
 ```
-STS1 Engine Solver  [win line found]
+Spire Pilot  [win line found]
 可赢 · 预计掉血 10 · 3 回合 · 778 节点 · 1.2s
 第 1 回合            HP 74  能量 0
 ▶1. 燃烧
