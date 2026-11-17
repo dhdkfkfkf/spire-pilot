@@ -306,6 +306,31 @@ public final class QuickSession {
         return this.session == null ? "" : this.session.hint();
     }
 
+    /*
+     * 1.0.0 (user m01050): the turn promise of the running search, so the panel can say which
+     * "N-turn best line under this budget" it is chasing instead of only printing a beam size.
+     */
+    public int horizonTurns() {
+        if (this.portfolio != null) {
+            return this.portfolio.horizonTurns();
+        }
+        return this.session == null ? 0 : this.session.horizonTurns();
+    }
+
+    public int horizonLimit() {
+        if (this.portfolio != null) {
+            return this.portfolio.horizonLimit();
+        }
+        return this.session == null ? 0 : this.session.horizonLimit();
+    }
+
+    public int turnsFinished() {
+        if (this.portfolio != null) {
+            return this.portfolio.turnsFinished();
+        }
+        return this.session == null ? 0 : this.session.turnsFinished();
+    }
+
     /**
      * Advance the job by at most {@code sliceMs}. Returns true when the whole job is finished.
      */

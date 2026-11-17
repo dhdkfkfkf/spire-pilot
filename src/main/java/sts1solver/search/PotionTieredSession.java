@@ -653,6 +653,21 @@ public final class PotionTieredSession {
         }
     }
 
+    /** 1.0.0 (user m01050): the turn promise the running cell was built with (0 = plan to the end). */
+    public int horizonTurns() {
+        return this.current == null ? 0 : this.current.horizonTurns();
+    }
+
+    /** The promise the running cell started with, so the panel can say it was lowered. */
+    public int horizonLimit() {
+        return this.current == null ? 0 : this.current.horizonLimit();
+    }
+
+    /** Whole turns the running cell has finished past its root. */
+    public int turnsFinished() {
+        return this.current == null ? 0 : this.current.turnsFinished();
+    }
+
     public String phase() {
         if (this.finished) {
             return "done";

@@ -4483,6 +4483,29 @@ public final class Solver {
         }
 
         /**
+         * 1.0.0 (user m01050): the horizon the panel has to talk about. The promise in force right
+         * now -- it starts at {@link #horizonLimit} and only ever shrinks -- or 0 when the search is
+         * walking to the end of the fight and there is no turn budget to report.
+         */
+        public int horizonTurns() {
+            return this.horizonTurns;
+        }
+
+        /** The promise the search started with, so the panel can say "lowered from N turns". */
+        public int horizonLimit() {
+            return this.horizonLimit;
+        }
+
+        /** Whole turns the search has actually finished past the root, 0 when none yet. */
+        public int turnsFinished() {
+            if (this.maxTurnSeen == Integer.MIN_VALUE) {
+                return 0;
+            }
+            int t = this.maxTurnSeen - this.horizonRootTurn;
+            return t < 0 ? 0 : t;
+        }
+
+        /**
          * B115 (m00748): the best line the search holds right now, as a copy of its actions.
          *
          * <p>The panel used to show a route only after {@code finish()} had replayed it, so a
@@ -5609,6 +5632,19 @@ public final class Solver {
         /** B173 (user m21300): the same held line's cost on the shared ruler. */
         public int previewNetHpLoss() {
             return this.current == null ? -1 : this.current.previewNetHpLoss();
+        }
+
+        /** 1.0.0 (user m01050): the turn promise of the running cell, for the panel's progress row. */
+        public int horizonTurns() {
+            return this.current == null ? 0 : this.current.horizonTurns();
+        }
+
+        public int horizonLimit() {
+            return this.current == null ? 0 : this.current.horizonLimit();
+        }
+
+        public int turnsFinished() {
+            return this.current == null ? 0 : this.current.turnsFinished();
         }
 
         public String phase() {

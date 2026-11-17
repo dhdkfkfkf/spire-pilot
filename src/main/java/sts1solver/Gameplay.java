@@ -195,6 +195,11 @@ public final class Gameplay {
     private static boolean quickRestartRequested;
     private static boolean quickIsReplan;
     private static String quickReason;
+    // 1.0.0 (user m01050): the turn promise of the running search, remembered per slice so the
+    // finished plan can still say which "N-turn best line under this budget" it came from (the
+    // sessions report 0 once they are torn down).
+    private static String quickHorizonText = "";
+    private static String lastHorizonText = "";
     // ---- B115 (m00748): show the line the search is holding before it is done --------------------
     // The panel used to publish a route only after finishQuick() had replayed and verified the line,
     // so a long budget showed only a progress bar for its whole duration -- the player had no way to
@@ -774,14 +779,16 @@ public final class Gameplay {
             // status line as well as the panel, so the player sees the tier move without opening it.
             String hint = quick.potionHint();
             hint = hint.isEmpty() ? "" : " \u00b7 " + hint;
+            quickHorizonText = horizonText(quick);
             if (sts1solver.ui.DeepBudget.unlimited(cap)) {
                 // No percentage without a denominator (P2-12): the moving worldline count is the
                 // "it is still working" signal the player asked for.
-                status = "计算中 · " + worldlineText(quick) + hint
+                status = "计算中 · " + statusHorizon(quick) + worldlineText(quick) + hint
                         + " · 已用 " + (elapsed / 1000) + "s（不限）";
             } else {
                 int pct = (int)Math.min(95L, elapsed * 100L / cap);
-                status = "计算中 " + pct + "% · " + worldlineText(quick) + hint;
+                status = "计算中 " + pct + "%（未求解 " + (100 - pct) + "%） · "
+                        + statusHorizon(quick) + worldlineText(quick) + hint;
             }
             String timing = Gameplay.timingSuffix();
             if (!timing.isEmpty()) {
@@ -1046,6 +1053,82 @@ public final class Gameplay {
         return b.toString();
     }
 
+    /*
+     * 1.0.0 (user m01050): the panel used to print only "beam=10 layers=4", which says nothing about
+     * what the search is actually buying. Say the promise instead: how many turns ahead the search is
+     * allowed to look, whether that promise had to be lowered to fit the budget, and how many whole
+     * turns it has finished so far.
+     */
+    public static String horizonText(sts1solver.search.QuickSession job) {
+        if (job == null) {
+            return "";
+        }
+        return horizonText(job.horizonTurns(), job.horizonLimit(), job.turnsFinished());
+    }
+
+    /** True when there is a turn promise worth printing (the session has started one). */
+    private static boolean hasHorizon(int turns, int limit, int finished) {
+        return turns > 0 || limit > 0 || finished > 0;
+    }
+
+    /** The same wording for the deep search (a portfolio session instead of a quick one). */
+    public static String horizonText(sts1solver.search.Solver.PortfolioSession job) {
+        if (job == null) {
+            return "";
+        }
+        return horizonText(job.horizonTurns(), job.horizonLimit(), job.turnsFinished());
+    }
+
+    /** 20-cell bar, one wording for every progress row (was inline in two places). */
+    public static String progressBar(int pct) {
+        int filled = Math.max(0, Math.min(20, pct / 5));
+        StringBuilder bar = new StringBuilder();
+        for (int i = 0; i < 20; i++) {
+            bar.append(i < filled ? '\u2588' : '\u2591');
+        }
+        return bar.toString();
+    }
+
+    /** The one-glance version of {@link #horizonText} for the HUD status line. */
+    public static String horizonShortText(sts1solver.search.QuickSession job) {
+        if (job == null) {
+            return "";
+        }
+        int turns = job.horizonTurns();
+        if (!hasHorizon(turns, job.horizonLimit(), job.turnsFinished())) {
+            return "";
+        }
+        if (turns <= 0) {
+            return "推到战斗结束";
+        }
+        return job.horizonLimit() > turns
+                ? "追求 " + turns + " 回合最优（已降档）"
+                : "追求 " + turns + " 回合最优";
+    }
+
+    /** {@link #horizonShortText} plus its own separator, or nothing at all. */
+    private static String statusHorizon(sts1solver.search.QuickSession job) {
+        String t = horizonShortText(job);
+        return t.isEmpty() ? "" : t + " · ";
+    }
+
+    private static String horizonText(int turns, int limit, int finished) {
+        if (!hasHorizon(turns, limit, finished)) {
+            return "";
+        }
+        if (turns <= 0) {
+            return "推到战斗结束（已走完 " + finished + " 回合）";
+        }
+        StringBuilder b = new StringBuilder();
+        b.append("追求 ").append(turns).append(" 回合内预算最优解");
+        if (limit > 0 && turns < limit) {
+            b.append("（预算不够，从 ").append(limit).append(" 回合降到 ").append(turns).append(" 回合）");
+        } else if (finished > 0) {
+            b.append("（已走完 ").append(finished).append(" 回合）");
+        }
+        return b.toString();
+    }
+
     /** B115: gate hook -- how long a search runs before the preview row appears (default 3s). */
     public static void setPreviewAfterMsForTest(int ms) {
         previewAfterMs = ms;
@@ -1166,6 +1249,8 @@ public final class Gameplay {
         String skelBefore = quickSkelBefore;
         ViewState viewBefore = quickView;
         String key = quickCacheKey;
+        lastHorizonText = quickHorizonText;
+        quickHorizonText = "";
         quick = null;
         quickBefore = null;
         quickRenderBefore = null;
@@ -1942,10 +2027,23 @@ public final class Gameplay {
         if (deep != null) {
             ArrayList<String> progress = new ArrayList<String>();
             long elapsed = now() - deepStartedAt;
-            progress.add("Spire Pilot  [深度搜索中]");
-            progress.add("已用 " + (elapsed / 1000) + "s / " + budgetText(deepBudgetMs) + "   节点 "
-                    + deep.nodes() + "   最优 " + deep.bestActions() + " 步");
-            progress.add(deep.phase());
+            long cap = Math.max(1L, deepBudgetMs);
+            int pct = sts1solver.ui.DeepBudget.unlimited(cap)
+                    ? -1 : (int)Math.min(95L, elapsed * 100L / cap);
+            progress.add(pct < 0
+                    ? "Spire Pilot  [深度搜索中 · 不限时]"
+                    : "Spire Pilot  [深度搜索中 " + pct + "% · 未求解 " + (100 - pct) + "%]");
+            if (pct < 0) {
+                progress.add("已用 " + (elapsed / 1000) + "s（不限）   节点 " + deep.nodes()
+                        + "   最优 " + deep.bestActions() + " 步");
+            } else {
+                long left = Math.max(0L, cap - elapsed);
+                progress.add(progressBar(pct) + " " + pct + "%   已用 " + (elapsed / 1000) + "s / "
+                        + budgetText(cap) + "   剩 " + (left / 1000) + "s   节点 " + deep.nodes()
+                        + "   最优 " + deep.bestActions() + " 步");
+            }
+            String deepHorizon = horizonText(deep);
+            progress.add(deepHorizon.isEmpty() ? deep.phase() : deepHorizon + "   " + deep.phase());
             if (!expandFailures.isEmpty()) {
                 progress.add("引擎异常: " + expandFailures);
             }
@@ -1959,17 +2057,18 @@ public final class Gameplay {
             if (sts1solver.ui.DeepBudget.unlimited(cap)) {
                 // Unlimited: no percentage bar, because there is nothing to be a percentage of.
                 // The worldline line below is the progress indicator (P2-12).
-                progress.add("Spire Pilot  [计算中]");
+                progress.add("Spire Pilot  [计算中 · 不限时]");
                 progress.add("已用 " + (elapsed / 1000) + "s（不限，一直算到分叉跑完或再点「计算」）");
             } else {
                 int pct = (int)Math.min(95L, elapsed * 100L / cap);
-                StringBuilder bar = new StringBuilder();
-                int filled = Math.max(0, Math.min(20, pct / 5));
-                for (int i = 0; i < 20; i++) {
-                    bar.append(i < filled ? '\u2588' : '\u2591');
-                }
-                progress.add("Spire Pilot  [计算中 " + pct + "%]");
-                progress.add(bar + " " + pct + "%   已用 " + (elapsed / 1000) + "s / " + (cap / 1000) + "s");
+                long left = Math.max(0L, cap - elapsed);
+                progress.add("Spire Pilot  [计算中 " + pct + "% · 未求解 " + (100 - pct) + "%]");
+                progress.add(progressBar(pct) + " " + pct + "%   已用 " + (elapsed / 1000) + "s / "
+                        + (cap / 1000) + "s   剩 " + (left / 1000) + "s");
+            }
+            String horizon = horizonText(quick);
+            if (!horizon.isEmpty()) {
+                progress.add(horizon);
             }
             progress.add(worldlineText(quick)
                     + "   最优 " + quick.bestActions() + " 步（未证明）   " + quick.phase());
@@ -2011,6 +2110,7 @@ public final class Gameplay {
             // without a plan, so a path that never reaches lines() cannot resurrect one either.
             route.clear();
             rowSteps.clear();
+            lastHorizonText = "";
             rows.add("点「计算」求解本场（真实引擎镜像 + beam 搜索）");
             return rows;
         }
@@ -2051,6 +2151,7 @@ public final class Gameplay {
         // m17808: it stays OUT of the panel -- the value is an input to the choice, not a readout the
         // player acts on; the plan's log line carries it ("loot : ...") when someone needs the numbers.
         rows.add(sts1solver.search.PlanText.headline(Gameplay.plan)
+                + (lastHorizonText.isEmpty() ? "" : " \u00b7 " + lastHorizonText)
                 + (modContent ? "（含 mod 内容：按真实引擎模拟）" : "")
                 // m19237: "预计掉血 N" repeated what the headline and the turn rows already say, and
                 // "N 回合" was the plan's total turn count, so on turn 2 it still read "1 回合".

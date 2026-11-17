@@ -134,7 +134,7 @@ public final class BugReport {
     }
 
     private static String readme() {
-        return "尖塔领航 / Spire Pilot - 问题反馈包\n"
+        return "尖塔求解器 / Spire Pilot - 问题反馈包\n"
                 + "=========================================\n\n"
                 + "这个压缩包用于定位问题，请连同下面两件事一起发出：\n"
                 + "  1. 当时在做什么（第几层、哪个角色、点了哪个按钮）\n"
