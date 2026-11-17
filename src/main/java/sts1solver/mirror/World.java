@@ -79,6 +79,7 @@ public final class World {
                     break;
             }
         }
+        Cloner.observe(cloner.objects());
         return w;
     }
 
@@ -153,6 +154,8 @@ public final class World {
                     break;
             }
         }
+        // 1.0.6 (C3): the next fork starts its identity map at this size instead of rehashing.
+        Cloner.observe(cloner.objects());
         w.digest = digest;
         return w;
     }

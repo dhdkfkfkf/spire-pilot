@@ -4,6 +4,9 @@ dist/
 mod/*.jar
 *.class
 
+# 发布包走 GitHub Release / 创意工坊附件，不进仓库
+/sts1-engine-solver-*.jar
+
 # 本地运行数据与证据（体积大、含本机路径）
 _tmp/
 evidence/

@@ -158,6 +158,12 @@ public final class Gameplay {
 
     // ---- deep search (P1-4a): a slice-able portfolio, one ~40ms chunk per frame ----
     private static Solver.PortfolioSession deep;
+    /**
+     * A manual 「计算」 press must be able to recompute. The plan cache answers by digest, so every
+     * repeat press on the same board used to be a "缓存命中" of the very answer the player had just
+     * rejected. Replans and 自动出牌 still read the cache; only the press bypasses it, once.
+     */
+    private static boolean ignoreCacheOnce;
     private static String deepBefore;
     private static RenderState.Snap deepRenderBefore;
     private static ViewState deepView;
@@ -486,6 +492,8 @@ public final class Gameplay {
      * the autopilot start path need an answer in the same call; gate S62 keeps the two verdicts equal.
      */
     public static void startQuickSolve() {
+        // mnow (user): 「计算」 must be able to recompute. Once per press, bypass the digest cache.
+        ignoreCacheOnce = true;
         startQuickSolve(false);
     }
 
@@ -564,6 +572,13 @@ public final class Gameplay {
         ViewState view = ViewState.capture();
         String cacheKey = PlanCache.key(digest, AbstractDungeon.ascensionLevel, EscapePolicy.mode().label, origin == null ? "?" : origin.describe());
         Solver.Result cached = PlanCache.get(cacheKey);
+        if (ignoreCacheOnce) {
+            ignoreCacheOnce = false;
+            if (cached != null) {
+                Log.info("solve: plan cache bypassed (manual press wants a new answer)");
+            }
+            cached = null;
+        }
         if (cached != null && !Gameplay.cacheFits(cached)) {
             Log.warn("plan cache: hit rejected, does not fit the live hand | digest=" + digest);
             cached = null;
@@ -687,6 +702,30 @@ public final class Gameplay {
     static long lastPreviewUs;
     static long lastHudUs;
     static long lastTickUs;
+    /** 1.0.5 (B7): cached timing line, refreshed at most once a second (panel.timing=on). */
+    private static String timingText = "";
+    private static long timingAtMs;
+
+    /**
+     * 1.0.5 (B7): the per-phase cost of the last search frame, for the status line.
+     *
+     * <p>Refreshed at most once a second: the numbers change every 40 ms slice, and rewriting the
+     * panel text that often is exactly the kind of jitter the player reads as "it flickers".
+     */
+    private static String timingSuffix() {
+        if (!sts1solver.search.Limits.panelTiming()) {
+            return "";
+        }
+        long now = System.currentTimeMillis();
+        if (now - timingAtMs >= 1000L) {
+            timingAtMs = now;
+            timingText = String.format(java.util.Locale.ROOT,
+                    " \u00b7 adv %.1f/repair %.1f/preview %.1f/hud %.1f/tick %.1f ms",
+                    lastAdvanceUs / 1000.0, lastRepairUs / 1000.0,
+                    lastPreviewUs / 1000.0, lastHudUs / 1000.0, lastTickUs / 1000.0);
+        }
+        return timingText;
+    }
 
     private static void tickQuick() {
         tickQuick(QUICK_SLICE_MS);
@@ -743,6 +782,10 @@ public final class Gameplay {
             } else {
                 int pct = (int)Math.min(95L, elapsed * 100L / cap);
                 status = "计算中 " + pct + "% · " + worldlineText(quick) + hint;
+            }
+            String timing = Gameplay.timingSuffix();
+            if (!timing.isEmpty()) {
+                status = status + timing;
             }
             phaseStart = System.nanoTime();
             Hud.set(lines());
@@ -1307,7 +1350,7 @@ public final class Gameplay {
         return sts1solver.ui.DeepBudget.nodes(clamped, sts1solver.ui.DeepBudget.inBossRoom());
     }
 
-    /** Deep-search budget: settings.txt (deepSeconds); 0 (the default) means unlimited (P2-12). */
+    /** Deep-search budget: settings.txt (deepSeconds); 0 (the default) means AUTO (1.0.8 C4). */
     private static long deepBudgetMs() {
         long seconds = 0L;
         try {
@@ -1325,7 +1368,69 @@ public final class Gameplay {
         } catch (Throwable ignored) {
             // a bad settings file must never block the search
         }
+        if (seconds < 0L) {
+            // 1.0.15 (user): 自动 also fires the dynamic half: only this mode may extend its own
+            // wait when the sandbox draws past the starting hand (see Session#noteHand).
+            sts1solver.search.Limits.setAutoBudgetMode(true);
+            // 1.0.8 (C7, user): 自动 -- size the wait from what is actually in front of the player,
+            // not from the card count alone: every monster, every point of HP and every point of block.
+            return autoBudgetMs();
+        }
+        sts1solver.search.Limits.setAutoBudgetMode(false);
+        // 1.0.8 (C6, user): 0 means 无限. The panel offers 自动 自动(6/12/18/30/60s) 无限, so the wait
+        // is the number the player picked instead of a formula they cannot see.
         return sts1solver.ui.DeepBudget.budgetMs(seconds, sts1solver.ui.DeepBudget.inBossRoom());
+    }
+
+    /**
+     * 1.0.8 (C7, user): the 自动 budget in ms.
+     *
+     * <p>4s + 2s per living monster + 1s per 40 points of remaining HP+block, clamped to 6..90s and
+     * doubled in a boss room. HP and block are what actually makes a turn expensive -- a 4-monster
+     * board with 300 effective HP gets several times the budget of a single 30 HP slime -- while the
+     * card count barely moves the cost of one fork.
+     */
+    private static long autoBudgetMs() {
+        int monsters = 1;
+        int effectiveHp = 0;
+        try {
+            com.megacrit.cardcrawl.monsters.MonsterGroup group =
+                    com.megacrit.cardcrawl.dungeons.AbstractDungeon.getMonsters();
+            if (group != null && group.monsters != null) {
+                monsters = Math.max(1, group.monsters.size());
+                for (int i = 0; i < group.monsters.size(); i++) {
+                    com.megacrit.cardcrawl.monsters.AbstractMonster m = group.monsters.get(i);
+                    if (m == null || m.isDeadOrEscaped()) {
+                        continue;
+                    }
+                    effectiveHp += Math.max(0, m.currentHealth) + Math.max(0, m.currentBlock);
+                }
+            }
+        } catch (Throwable ignored) {
+            // the panel must never fail because a board could not be measured
+        }
+        long seconds = 4L + 2L * monsters + (effectiveHp + 39L) / 40L;
+        // 1.0.15 (user): the actions a turn can hold are a cost too -- each one more fork at every
+        // layer. Actions, not hand size: a "draw one when you play one" character keeps a hand of 5
+        // while a turn chains through a dozen cards. 0.5s per action above five, capped at +6s.
+        int actions = 5;
+        try {
+            com.megacrit.cardcrawl.characters.AbstractPlayer p =
+                    com.megacrit.cardcrawl.dungeons.AbstractDungeon.player;
+            if (p != null && p.hand != null) {
+                actions = p.hand.size() + Math.max(0, p.cardsPlayedThisTurn);
+            }
+        } catch (Throwable ignored) {
+            // the panel must never fail because a board could not be measured
+        }
+        if (actions > 5) {
+            seconds += Math.min(6L, (actions - 5) / 2);
+        }
+        seconds = Math.max(6L, Math.min(96L, seconds));
+        if (sts1solver.ui.DeepBudget.inBossRoom()) {
+            seconds = Math.min(180L, seconds * sts1solver.ui.DeepBudget.BOSS_SECONDS_FACTOR);
+        }
+        return seconds * 1000L;
     }
 
     /** "300s" or "不限" for a resolved time budget -- one wording for panel and log (P2-12). */

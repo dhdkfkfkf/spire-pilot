@@ -62,6 +62,28 @@ public final class SolverMod implements PostInitializeSubscriber, PostUpdateSubs
         return debugSurface;
     }
 
+    // ---- built-in texture guard (1.0.5) ------------------------------------------------------
+    /**
+     * The texture guard patches are applied by ModTheSpire when it scans this jar, not by us: this
+     * only proves each patch class actually loaded, so "the game crashed on an orb again" can be
+     * told apart from "the patch never made it into the jar".
+     */
+    private static void logGuardPatches() {
+        String[] names = {
+                "sts1solver.guard.patches.SpriteBatchSwitchPatch"
+        };
+        int ok = 0;
+        for (int i = 0; i < names.length; i++) {
+            try {
+                Class.forName(names[i]);
+                ++ok;
+            } catch (Throwable t) {
+                Log.warn("guard: " + names[i] + " did not load: " + t);
+            }
+        }
+        Log.info("guard: loaded " + ok + "/" + names.length + " texture patches (global switchTexture)");
+    }
+
     /**
      * Logs the content surface once at startup: mod combat hooks and known mod profiles.
      *
@@ -94,6 +116,7 @@ public final class SolverMod implements PostInitializeSubscriber, PostUpdateSubs
     public void receivePostInitialize() {
         Log.open();
         Log.info("=== sts1-engine-solver loaded (mod dir " + dir() + ") ===");
+        logGuardPatches();
         sts1solver.ui.Budget.migrateToUnlimitedBudget();
         debugSurface = new File(dir(), DEBUG_MARKER).exists();
         Log.info("debug surface: " + (debugSurface ? "ON (" + DEBUG_MARKER + " present)" : "off"));

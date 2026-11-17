@@ -129,6 +129,13 @@ public final class Solver {
     public static String lastReplayFailure() {
         return REPLAY_FAILURE.get();
     }
+
+    /** 1.0.5 (B4): put back the verdict of a replay whose result is being reused. */
+    static void restoreReplayFailure(int at, String on, String why) {
+        REPLAY_FAILED_AT.set(Integer.valueOf(at));
+        REPLAY_FAILED_ON.set(on == null ? "" : on);
+        REPLAY_FAILURE.set(why == null ? "" : why);
+    }
     /** A3 switch, for the gate that has to show the difference between parking and dropping. */
     private static boolean deferredEnabled = true;
 
@@ -502,6 +509,17 @@ public final class Solver {
         rebuildPoison.clear();
         rebuildPoisonList.clear();
         promotedSkippedPoisoned = 0;
+        equivMerged = 0;
+        TurnPlan.reset();
+        TargetFocus.reset();
+    }
+
+    /** Candidate actions collapsed by {@link #canonicalCandidates(List)} in the last search. */
+    private static int equivMerged;
+
+    /** Harness/log hook: how many duplicate candidate actions the last search skipped. */
+    public static int lastEquivalentMerged() {
+        return equivMerged;
     }
 
     /*
@@ -1726,6 +1744,7 @@ public final class Solver {
                             int saves2 = DeathSaves.used(fairies0, choice2.fairies, choice2.lizardTail);
                             int n22 = Solver.score(n20s, n21, choice2.win, choice2.dead, n5 + 1, choice2.mhp, choice2.block, choice2.alive, saves2, choice2.gold - startGold) + (choice2.win ? Solver.lootPoints(choice2.loot) : 0) + (choice2.win ? Solver.healPoints(choice2.postHeal) : 0) + (choice2.win ? GrowthCredit.valueOf(arrayList3) : 0);
                             Node node4 = new Node(choice2.child, arrayList3, n22, Solver.rankOf(n22, choice2.block, choice2.energy, choice2.powers), n20, GameActionManager.turn, choice2.win, choice2.dead, choice2.monsters, saves2, choice2.digest);
+                            node4.actKind = action.actionClass;
                             node4.postHeal = choice2.postHeal;
                             node4.loot = choice2.loot;
                             node4.netHpLoss = Solver.netHpLoss(n20, growthHp, choice2.postHeal, n21);
@@ -1795,9 +1814,9 @@ public final class Solver {
                 if (Solver.rolloutEnabled()) {
                     Solver.rerankByRollout(arrayList4, Math.max(beam, beam * Solver.ROLLOUT_REFINE_FACTOR));
                 }
-                for (int i = n19 = Math.min(n3, arrayList4.size()); i < arrayList4.size() && arrayList2.size() < beam; ++i) {
-                    arrayList2.add((Node)arrayList4.get(i));
-                }
+                n19 = Math.min(n3, arrayList4.size());
+                // 1.0.6 (C1): the same diversity cut as the panel's sliced session.
+                arrayList2 = Solver.trimBeam(arrayList4, beam, n19);
                 // A3: everything the beam could not keep is parked, not dropped. Beam position now
                 // decides the order in which lines are tried, not whether they are ever tried.
                 if (Solver.deferredEnabled()) {
@@ -2312,7 +2331,52 @@ public final class Solver {
      * transient action-manager fields are stripped ({@link Digest#stable}); a mid-flight sample
      * keeps its raw digest, because a queue that has not run yet is a different position, not a
      * presentation difference.
+     *
+     * <p>1.0.5 (B2): {@link #blockView(String)} reuses this format to isolate the player's block.
      */
+    /**
+     * 1.0.5 (B2): a position key with the player's block value blanked, plus that value.
+     *
+     * <p>Only used by the opt-in dominance prune: two boards that are otherwise identical and
+     * differ in block are not the same node, but the one with more block is weakly better in every
+     * continuation, so the weaker one is dropped instead of consuming beam slots.
+     */
+    static final class BlockView {
+        final String key;
+        final int block;
+
+        BlockView(String key, int block) {
+            this.key = key;
+            this.block = block;
+        }
+    }
+
+    static BlockView blockView(String positionKey) {
+        if (positionKey == null) {
+            return null;
+        }
+        int p = positionKey.indexOf("| P hp=");
+        if (p < 0) {
+            return null;
+        }
+        int b = positionKey.indexOf(" b=", p);
+        if (b < 0) {
+            return null;
+        }
+        int v = b + 3;
+        int end = positionKey.indexOf(' ', v);
+        if (end < 0) {
+            return null;
+        }
+        int block;
+        try {
+            block = Integer.parseInt(positionKey.substring(v, end));
+        } catch (Throwable t) {
+            return null;
+        }
+        return new BlockView(positionKey.substring(0, v) + positionKey.substring(end), block);
+    }
+
     /** Harness hook (B176): the visited key a digest would get at the given settle state. */
     public static String positionKeyForTest(String digest, boolean settled) {
         return Solver.positionKey(digest, settled);
@@ -3030,13 +3094,123 @@ public final class Solver {
             // "答选牌（选：…）" first instead of a plan that starts one click too late.
             List<Action> waiting = Legal.selectionActions();
             if (!waiting.isEmpty()) {
+                TurnPlan.classify(waiting);
                 return waiting;
             }
             List<Action> list = Legal.actions();
-            return list;
+            // 1.0.5 (B6): opt-in. Signatures are read while the sandbox is installed, so they are
+            // consistent with the very list the actions were built from.
+            List<Action> out = Solver.canonicalCandidates(list,
+                    Limits.symmetricTargets() ? Solver.monsterSignatures() : null);
+            // 1.0.8 (C2): the per-monster siblings of one card play are collapsed to the targets
+            // that can change the turn, before anything forks them.
+            out = TargetFocus.apply(out);
+            // 1.0.6 (C1): this turn's bound only re-orders; the branch set is unchanged.
+            TurnPlan.annotate(out);
+            String planNotice = TurnPlan.takeNotice();
+            if (planNotice != null) {
+                Log.info(planNotice);
+            }
+            return out;
         }
         finally {
             world.uninstall();
+        }
+    }
+
+    /**
+     * Two hand cards the GAME cannot tell apart are one candidate, not two.
+     *
+     * <p>{@link sts1solver.mirror.CardPrint} is the engine's own notion of "the same card": id,
+     * upgrade, cost/costForTurn, misc, the base numbers and every scalar field the card's own class
+     * adds, with uuid and the drawing state deliberately left out -- its contract is "the game cannot
+     * tell them apart either". A hand holding two Strikes therefore has ONE play decision, but the
+     * candidate list used to carry one action per physical card, so every expansion of that hand paid
+     * the engine twice for the same outcome (and the second one only died in the visited set).
+     *
+     * <p>Only CARD plays are merged, and only onto the SAME target index: two monsters are never
+     * assumed interchangeable, because equal names and HP still do not imply equal powers or intent.
+     * {@code energyOnUse} stays part of the key -- it is the input of the play, not a property of the
+     * card (see {@link sts1solver.mirror.CardPrint}).
+     */
+    private static List<Action> canonicalCandidates(List<Action> in) {
+        return canonicalCandidates(in, null);
+    }
+
+    /**
+     * 1.0.5 (B6): {@code targets[i]} is a signature of monster slot i, or null when that slot must
+     * not be merged (dead/escaped, unreadable, feature off). Two targets with the SAME signature are
+     * interchangeable for candidate-merging purposes; different signatures never merge.
+     */
+    private static List<Action> canonicalCandidates(List<Action> in, String[] targets) {
+        if (in == null || in.size() < 2) {
+            return in;
+        }
+        java.util.LinkedHashMap<String, Action> uniq =
+                new java.util.LinkedHashMap<String, Action>(in.size());
+        for (int i = 0; i < in.size(); i++) {
+            Action a = in.get(i);
+            if (a == null) {
+                continue;
+            }
+            String key = null;
+            if (a.isCard() && a.cardPrint != null && !a.cardPrint.isEmpty()) {
+                String target = "|t" + a.targetIndex;
+                if (targets != null && a.targetIndex >= 0 && a.targetIndex < targets.length
+                        && targets[a.targetIndex] != null) {
+                    target = "|m" + targets[a.targetIndex];
+                }
+                key = a.cardPrint + target + "|e" + a.energyOnUse;
+            }
+            if (key == null) {
+                uniq.put("\u0000" + i, a);
+            } else if (!uniq.containsKey(key)) {
+                uniq.put(key, a);
+            }
+        }
+        if (uniq.size() == in.size()) {
+            return in;
+        }
+        equivMerged += in.size() - uniq.size();
+        return new ArrayList<Action>(uniq.values());
+    }
+
+    /**
+     * 1.0.5 (B6): what a monster looks like to the model. Only fields the search itself reads are
+     * included; anything else (move history, mod-private counters) could differ between two
+     * monsters that look identical, which is why the merge stays opt-in.
+     */
+    private static String[] monsterSignatures() {
+        try {
+            if (AbstractDungeon.getMonsters() == null
+                    || AbstractDungeon.getMonsters().monsters == null) {
+                return null;
+            }
+            List<AbstractMonster> ms = AbstractDungeon.getMonsters().monsters;
+            String[] out = new String[ms.size()];
+            for (int i = 0; i < ms.size(); i++) {
+                AbstractMonster m = ms.get(i);
+                if (m == null || m.isDeadOrEscaped()) {
+                    out[i] = null;
+                    continue;
+                }
+                StringBuilder sb = new StringBuilder(56);
+                sb.append(m.id).append('|').append(m.currentHealth).append('/').append(m.maxHealth)
+                        .append('|').append(m.currentBlock).append('|').append(m.intent);
+                if (m.powers != null) {
+                    for (int p = 0; p < m.powers.size(); p++) {
+                        com.megacrit.cardcrawl.powers.AbstractPower pow = m.powers.get(p);
+                        if (pow == null) {
+                            continue;
+                        }
+                        sb.append('|').append(pow.ID).append(':').append(pow.amount);
+                    }
+                }
+                out[i] = sb.toString();
+            }
+            return out;
+        } catch (Throwable t) {
+            return null;
         }
     }
 
@@ -3057,7 +3231,7 @@ public final class Solver {
 
         String line() {
             long l = this.fork + this.install + this.apply + this.readBack + this.digest + this.uninstall;
-            return "profile: nodes=" + this.nodes + "/" + this.nodeBudget + " transposed=" + this.transpositions + " skipped=" + this.skipped + " fork=" + Profile.ms(this.fork) + "(clone=" + Profile.ms(World.tClone) + ",container=" + Profile.ms(World.tContainer) + ",color=" + Profile.ms(World.tColor) + ") cloneTop=" + World.cloneCostReport() + " install=" + Profile.ms(this.install) + " apply=" + Profile.ms(this.apply) + " readBack=" + Profile.ms(this.readBack) + " digest=" + Profile.ms(this.digest) + " uninstall=" + Profile.ms(this.uninstall) + " total=" + Profile.ms(l);
+            return "profile: nodes=" + this.nodes + "/" + this.nodeBudget + " keys=128bit transposed=" + this.transpositions + " skipped=" + this.skipped + " equivMerged=" + Solver.equivMerged + " fork=" + Profile.ms(this.fork) + "(clone=" + Profile.ms(World.tClone) + ",container=" + Profile.ms(World.tContainer) + ",color=" + Profile.ms(World.tColor) + ") cloneTop=" + World.cloneCostReport() + " install=" + Profile.ms(this.install) + " apply=" + Profile.ms(this.apply) + " readBack=" + Profile.ms(this.readBack) + " digest=" + Profile.ms(this.digest) + " uninstall=" + Profile.ms(this.uninstall) + " total=" + Profile.ms(l);
         }
 
         private static String ms(long l) {
@@ -3409,7 +3583,8 @@ public final class Solver {
     }
 
     private static final class Node {
-        final World world;
+        /** 1.0.5 (B5): not final -- released once every action of this node was expanded. */
+        World world;
         final List<Action> path;
         final int score;
         final int rank;
@@ -3422,6 +3597,11 @@ public final class Solver {
         final String digest;
         /** B176: the canonical visited key (see {@link Solver#positionKey}); null means raw digest. */
         String positionKey;
+        /**
+         * 1.0.6 (C1): the class of the action that produced this node ("attack"/"skill"/...) so the
+         * beam cut can keep one line of every kind instead of filling up with one card type.
+         */
+        String actKind;
         /** m22600: post-combat heal this node's board would get; see {@link Choice#postHeal}. */
         int postHeal;
         /** L1: the reward screen this node's win would earn; see {@link Choice#loot}. */
@@ -3432,6 +3612,11 @@ public final class Solver {
          * subtracted, the potions it drinks are added back. -1 until {@code expandAndRecord} fills it.
          */
         int netHpLoss = -1;
+        /**
+         * 1.0.8 (C3): the turn this node stands on, measured by the sandbox ({@link Action#turnAfter})
+         * rather than read from the live game after the walk. -1 means "not measured".
+         */
+        int turnAt = -1;
 
         Node(World world, List<Action> list, int n, int n2, int n3, int n4, boolean bl, boolean bl2, int n5, int n6, String string) {
             this.world = world;
@@ -3462,8 +3647,14 @@ public final class Solver {
         final String digest;
         /** B176: the canonical visited key recorded with the parked node; null means raw digest. */
         final String positionKey;
+        /** 1.0.6 (C1): same tag as {@link Node#actKind}, so a promoted line keeps its class. */
+        final String actKind;
 
         Deferred(List<Action> path, int score, int rank, int hpLoss, int layer, int deathSaves, String digest, String positionKey) {
+            this(path, score, rank, hpLoss, layer, deathSaves, digest, positionKey, null);
+        }
+
+        Deferred(List<Action> path, int score, int rank, int hpLoss, int layer, int deathSaves, String digest, String positionKey, String actKind) {
             this.path = path;
             this.score = score;
             this.rank = rank;
@@ -3472,6 +3663,7 @@ public final class Solver {
             this.deathSaves = deathSaves;
             this.digest = digest;
             this.positionKey = positionKey;
+            this.actKind = actKind;
         }
     }
 
@@ -3487,7 +3679,7 @@ public final class Solver {
         }
         int limit = cap > 0 ? Math.max(Limits.deferred(), cap) : Limits.deferred();
         if (deferred.size() < limit) {
-            deferred.add(new Deferred(node.path, node.score, node.rank, node.hpLoss, layer, node.deathSaves, node.digest, node.positionKey));
+            deferred.add(new Deferred(node.path, node.score, node.rank, node.hpLoss, layer, node.deathSaves, node.digest, node.positionKey, node.actKind));
             return;
         }
         int worst = 0;
@@ -3502,7 +3694,7 @@ public final class Solver {
         if (node.rank < w.rank || (node.rank == w.rank && node.score <= w.score)) {
             return;
         }
-        deferred.set(worst, new Deferred(node.path, node.score, node.rank, node.hpLoss, layer, node.deathSaves, node.digest, node.positionKey));
+        deferred.set(worst, new Deferred(node.path, node.score, node.rank, node.hpLoss, layer, node.deathSaves, node.digest, node.positionKey, node.actKind));
     }
 
     private static void sortDeferred(List<Deferred> deferred) {
@@ -3518,6 +3710,48 @@ public final class Solver {
                 return a.digest.compareTo(b.digest);
             }
         });
+    }
+
+    /**
+     * 1.0.6 (C1): cut one sorted layer down to the beam.
+     *
+     * <p>The score sort answers "which line looks best", but a layer of one card type produces
+     * nodes that all LOOK the same: six attack lines with no defensive one, so the branch that
+     * survives the turn is the branch the cut threw away. The first pass keeps the best node of
+     * every action class (attack / skill / power / potion / end) inside a window of twice the beam,
+     * the second fills the rest by score. When the switch is off this is the old prefix cut.
+     */
+    static ArrayList<Node> trimBeam(List<Node> sorted, int beam, int offset) {
+        ArrayList<Node> out = new ArrayList<Node>();
+        if (sorted == null || beam <= 0 || offset >= sorted.size()) {
+            return out;
+        }
+        int end = sorted.size();
+        if (!Limits.diversity()) {
+            for (int i = offset; i < end && out.size() < beam; ++i) {
+                out.add(sorted.get(i));
+            }
+            return out;
+        }
+        int window = Math.min(end, offset + Math.max(beam, 24) * 2);
+        java.util.Set<String> kinds = new java.util.HashSet<String>();
+        java.util.Set<Node> taken = java.util.Collections.newSetFromMap(
+                new java.util.IdentityHashMap<Node, Boolean>());
+        for (int i = offset; i < window && out.size() < beam; ++i) {
+            Node node = sorted.get(i);
+            String k = node.actKind == null || node.actKind.isEmpty() ? "other" : node.actKind;
+            if (kinds.add(k)) {
+                out.add(node);
+                taken.add(node);
+            }
+        }
+        for (int i = offset; i < end && out.size() < beam; ++i) {
+            Node node = sorted.get(i);
+            if (taken.add(node)) {
+                out.add(node);
+            }
+        }
+        return out;
     }
 
     private static int promotionDepth() {
@@ -3942,7 +4176,7 @@ public final class Solver {
         private String startDigest;
         private Node best;
         private List<Node> frontier = new ArrayList<Node>();
-        private Map<String, Node> next;
+        private Map<StateKey, Node> next;
         private int nodeIndex;
         private int actionIndex;
         private List<Action> currentActs;
@@ -3964,10 +4198,68 @@ public final class Solver {
         private int layersAfterFirstWin;
         private boolean provenOptimal;
         private boolean frontierDead;
+        /**
+         * 1.0.8 (C3): plan the next few turns, not the whole fight.
+         *
+         * <p>A fight with many cards or high-HP monsters makes the beam walk to the end of the fight
+         * before the panel can show anything. The horizon stops EXPANSION at
+         * {@code search.horizonTurns} turns past the root and lets the already reached boards compete
+         * by score: the player gets a good line for the next few turns at once, plays it step by step
+         * (each step re-searches), and the search never has to prove the end of a fight it cannot
+         * finish inside the budget. 0 restores the old "walk to the end" behaviour exactly.
+         */
+        private final int horizonLimit;
+        /**
+         * 1.0.8 (C5): the horizon actually in force. It starts at {@link #horizonLimit} and only
+         * ever SHRINKS: at 45% / 75% of the wall-clock budget the search checks how many turns it
+         * has really finished and, if it is behind, lowers the promise to 3 -> 2 -> 1 turn. That is
+         * the staged behaviour the player asked for: a fight that is too expensive to plan three
+         * turns of comes back with a whole-turn plan one or two turns deep instead of stopping in
+         * the middle of a turn.
+         */
+        private int horizonTurns;
+        private int maxTurnSeen = Integer.MIN_VALUE;
+        /** 1.0.8 (C6, user): the best line that actually finished a turn, never a half-turn one. */
+        private Node bestTurnComplete;
+        /**
+         * 1.0.15 (user): the actions available in one turn at the root, the peak the sandbox saw, and
+         * the wait the peak bought. Actions -- hand size plus cards already played this turn -- not
+         * hand size: a character that draws one card per card played keeps a hand of 5 while a turn
+         * chains through a dozen cards, and the hand alone would miss every one of them.
+         */
+        private int actionsAtRoot = -1;
+        private int maxActionsSeen = -1;
+        private long handAllowanceMs;
+        /** Beyond this many actions in one turn a half-turn answer is acceptable: a full turn costs too much. */
+        private static final int HALF_TURN_ACTIONS = 20;
+        private static final long HAND_MS_PER_CARD = 400L;
+        private static final long HAND_EXTRA_MS = 6000L;
+        private int horizonRootTurn;
+        private boolean horizonStopped;
+        /**
+         * 1.0.8 (C4): layers that produced no better `best` before the search declares itself
+         * converged. Six is past a full turn's worth of actions, so a local shuffle inside one turn
+         * cannot stop a search that is about to find the next turn's line.
+         */
+        private static final int CONVERGED_LAYERS = 6;
+        private int lastBestScore = Integer.MIN_VALUE;
+        private int staleLayers;
         private boolean done;
         private boolean finished;
         private Result result;
-        private final Set<String> seen = new HashSet<String>();
+        /**
+         * 1.0.5 (B3): the visited table now remembers the BEST score each canonical key reached,
+         * not merely that the key was seen. A later arrival with a strictly higher score is
+         * expanded again -- the plain set silently dropped it, even though a different route to the
+         * same board can have earned growth or drunk fewer potions.
+         */
+        private final Map<StateKey, Integer> seenBest = new HashMap<StateKey, Integer>();
+        /** B3: how many times a revisited board was expanded because it arrived with a better score. */
+        private int revisitedBetter;
+        /** B2: canonical key (player block blanked) -> strongest block seen for it, per layer. */
+        private final Map<String, Integer> dominantBlock = new HashMap<String, Integer>();
+        /** B2: nodes skipped because an identical board with at least as much block was kept. */
+        private int dominated;
         /** B177: not final -- reset per rung (see {@link #widenToNextRung}). */
         private int nodeBudget;
         private int expansionsThisLayer;
@@ -4114,6 +4406,15 @@ public final class Solver {
             this.beamWidth = n;
             this.maxLayer = n2;
             this.budgetMs = l;
+            // 1.0.8 (C6): an unlimited budget also means "plan the whole fight". A horizon exists to
+            // bound a wait; with no wait to bound it would only cut the answer short. Probes keep the
+            // old exact behaviour (horizon 0).
+            this.horizonLimit = (sts1solver.util.SilentInstance.isArmed() || l <= 0L
+                    || l >= Long.MAX_VALUE / 4L || Limits.horizonTurns() <= 0)
+                    ? 0 : Limits.horizonTurns();
+            this.horizonTurns = this.horizonLimit;
+            this.actionsAtRoot = liveActions();
+            this.maxActionsSeen = this.actionsAtRoot;
             this.maxNodes = n3;
             this.nodeBudget = n3;
             this.bandOffset = n4;
@@ -4131,6 +4432,9 @@ public final class Solver {
                 this.startBlock = Solver.block();
                 this.startAlive = Solver.aliveCount();
                 this.startFairies = DeathSaves.fairiesInBar();
+                // 1.0.8 (C3): the horizon counts turns from here, read inside the sandbox so the
+                // number belongs to the board the search is standing on.
+                this.horizonRootTurn = GameActionManager.turn;
             }
             finally {
                 world.uninstall();
@@ -4294,11 +4598,53 @@ public final class Solver {
          * is the session's single budget, exactly as before.
          */
         private long budgetNow() {
+            long base;
             if (this.rungDeadlines == null) {
-                return this.budgetMs;
+                base = this.budgetMs;
+            } else {
+                int at = Math.min(this.rung, this.rungDeadlines.length - 1);
+                base = this.rungDeadlines[at] > 0L ? this.rungDeadlines[at] : this.budgetMs;
             }
-            int at = Math.min(this.rung, this.rungDeadlines.length - 1);
-            return this.rungDeadlines[at] > 0L ? this.rungDeadlines[at] : this.budgetMs;
+            // 1.0.15 (user): a turn that chains through many actions makes every fork more expensive,
+            // and the chain length only shows up while searching. The allowance is the peak the
+            // sandbox actually reached, capped at 6s, so an ordinary board never waits that long.
+            return base >= Long.MAX_VALUE / 4L ? base : base + this.handAllowanceMs;
+        }
+
+        /** 1.0.15 (user): extend the wait by how far one turn actually chained, never past 6s. */
+        private void noteActions(int actions) {
+            if (actions <= 0 || this.actionsAtRoot < 0 || actions <= this.maxActionsSeen) {
+                return;
+            }
+            this.maxActionsSeen = actions;
+            int extra = actions - this.actionsAtRoot;
+            if (extra <= 0) {
+                return;
+            }
+            long allowance = Math.min(HAND_EXTRA_MS, HAND_MS_PER_CARD * extra);
+            if (allowance > this.handAllowanceMs && this.horizonLimit > 0
+                    && Limits.autoBudgetMode()) {
+                this.handAllowanceMs = allowance;
+                Log.info("budget: a turn chained through " + actions + " action(s) in the sandbox,"
+                        + " wait extended by " + (allowance / 1000.0) + "s");
+            }
+        }
+
+        /**
+         * Actions available in the installed world's current turn: cards in hand plus cards already
+         * played. -1 when it cannot be read.
+         */
+        private static int liveActions() {
+            try {
+                com.megacrit.cardcrawl.characters.AbstractPlayer p =
+                        com.megacrit.cardcrawl.dungeons.AbstractDungeon.player;
+                if (p == null || p.hand == null) {
+                    return -1;
+                }
+                return p.hand.size() + Math.max(0, p.cardsPlayedThisTurn);
+            } catch (Throwable t) {
+                return -1;
+            }
         }
 
         /** B177: how many rungs this session plans to run (1 when no ladder was given). */
@@ -4420,7 +4766,7 @@ public final class Solver {
                 return;
             }
             if (this.next == null) {
-                this.next = new HashMap<String, Node>();
+                this.next = new HashMap<StateKey, Node>();
                 this.nodeIndex = 0;
                 this.actionIndex = 0;
                 this.currentActs = null;
@@ -4444,7 +4790,8 @@ public final class Solver {
                     // made the panel say "预算内最好" and report the parked beam overflow as if it
                     // were still computable work -- both wrong once the search has converged.
                     if (!"win".equals(this.reason)) {
-                        this.reason = "no-live-branches";
+                        // 1.0.8 (C3): a horizon cut is not "every route dies" -- say which one it was.
+                        this.reason = this.horizonStopped ? "horizon" : "no-live-branches";
                     }
                     this.frontierDead = true;
                     this.done = true;
@@ -4476,9 +4823,8 @@ public final class Solver {
                     this.guardLogged = true;
                     Log.info("memory guard: beam " + this.beamWidth + " -> " + beam + " (heap " + Solver.heapUsedMb() + "MB over limit " + Solver.effectiveHeapLimitMb() + "MB)");
                 }
-                for (int i = n = Math.min(this.bandOffset, arrayList.size()); i < arrayList.size() && arrayList2.size() < beam; ++i) {
-                    arrayList2.add((Node)arrayList.get(i));
-                }
+                // 1.0.6 (C1): keep one line per action class before filling the beam by score.
+                arrayList2 = Solver.trimBeam(arrayList, beam, Math.min(this.bandOffset, arrayList.size()));
                 if (Solver.deferredEnabled()) {
                     java.util.Set<Node> kept = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Node, Boolean>());
                     kept.addAll(arrayList2);
@@ -4492,6 +4838,48 @@ public final class Solver {
                 this.frontier = arrayList2;
                 this.next = null;
                 ++this.layer;
+                // 1.0.8 (C5): staged horizon. A fight that cannot afford three turns of planning
+                // must not hand back half a turn: at 45% and 75% of the clock, compare the turns
+                // actually finished with the plan and lower the promise to what fits. 45% allows
+                // two turns, 75% allows one; a search that is on schedule is never touched.
+                if (this.horizonLimit > 0 && this.horizonTurns > 0) {
+                    int achieved = this.maxTurnSeen == Integer.MIN_VALUE
+                            ? 0 : this.maxTurnSeen - this.horizonRootTurn;
+                    long elapsed = System.currentTimeMillis() - this.startedAt;
+                    long budget = this.budgetNow();
+                    long pct = budget > 0L && budget < Long.MAX_VALUE / 200L
+                            ? elapsed * 100L / budget : 0L;
+                    // Only a stage that has actually run out may lower the promise. Reading `achieved`
+                    // before 45% was a bug: at the first layer no turn has finished yet, so the
+                    // promise collapsed to one turn and every search stopped almost at once.
+                    if (pct >= 45L) {
+                        int allowed = pct < 75L ? Math.min(2, this.horizonLimit) : 1;
+                        int target = Math.min(allowed, Math.max(1, achieved));
+                        if (target < this.horizonTurns) {
+                            this.horizonTurns = target;
+                            Log.info("stage: " + (elapsed / 1000L) + "s of " + (budget / 1000L)
+                                    + "s used, " + achieved + " turn(s) finished; promise lowered to "
+                                    + target + " turn(s)");
+                        }
+                    }
+                }
+                // 1.0.8 (C4): stop spending budget on a ranking that has stopped moving. Once the
+                // best line has crossed a turn boundary and six layers in a row found nothing
+                // better, more layers change the inputs the player never sees, not the advice.
+                // Player-only (horizon 0 in a probe instance keeps the gates' exact behaviour).
+                if (this.horizonTurns > 0 && this.best != null) {
+                    if (this.best.score > this.lastBestScore) {
+                        this.lastBestScore = this.best.score;
+                        this.staleLayers = 0;
+                    } else if (++this.staleLayers >= CONVERGED_LAYERS
+                            && this.best.turnAt > this.horizonRootTurn) {
+                        this.reason = "converged";
+                        this.done = true;
+                        Log.info("converged: best score stayed " + this.best.score + " for "
+                                + this.staleLayers + " layer(s) after a turn boundary (layer "
+                                + this.layer + ", " + this.nodes + " node(s)); stopped early");
+                    }
+                }
                 // A0 evidence: this layer only exists because the search kept going after a win.
                 if (this.bestWinLayer >= 0) {
                     ++this.layersAfterFirstWin;
@@ -4499,9 +4887,27 @@ public final class Solver {
                 return;
             }
             Node node = this.frontier.get(this.nodeIndex);
+            // 1.0.8 (C3): a board that already stands horizonTurns past the root is a leaf. Its score
+            // still competes for `best` (it was ranked when it was created), it just does not fork.
+            if (this.horizonTurns > 0 && node.turnAt >= 0
+                    && node.turnAt - this.horizonRootTurn >= this.horizonTurns) {
+                if (!this.horizonStopped) {
+                    this.horizonStopped = true;
+                    Log.info("horizon: planning " + this.horizonTurns + " turn(s) ahead only; stopped"
+                            + " expanding at layer " + this.layer + " (" + this.nodes + " node(s),"
+                            + " best score " + this.best.score + "); search.horizonTurns=0 plans to the end");
+                }
+                node.world = null;
+                ++this.nodeIndex;
+                this.actionIndex = 0;
+                this.currentActs = null;
+                return;
+            }
             if (this.currentActs == null) {
                 String visitKey = node.positionKey == null ? node.digest : node.positionKey;
-                if (!this.seen.add(visitKey)) {
+                StateKey seenKey = StateKey.of(visitKey);
+                Integer bestSeen = this.seenBest.get(seenKey);
+                if (bestSeen != null && node.score <= bestSeen.intValue()) {
                     if (!visitKey.equals(node.digest)) {
                         ++this.mergedByPhase;
                     }
@@ -4513,11 +4919,16 @@ public final class Solver {
                     // used to sit here wrote ~12.7k lines (96% of a 13k-line log) on the render thread,
                     // through Log.write() which is synchronized and flushes every line. Counters only;
                     // the one summary is logged by finish().
+                    node.world = null;
                     ++this.nodeIndex;
                     this.actionIndex = 0;
                     this.currentActs = null;
                     return;
                 }
+                if (bestSeen != null) {
+                    ++this.revisitedBetter;
+                }
+                this.seenBest.put(seenKey, Integer.valueOf(node.score));
                 long candStart = System.nanoTime();
                 this.currentActs = Solver.candidates(node.world);
                 long candUs = (System.nanoTime() - candStart) / 1000L;
@@ -4541,6 +4952,10 @@ public final class Solver {
                 }
             }
             if (this.actionIndex >= this.currentActs.size()) {
+                // 1.0.5 (B5): every action of this node is expanded, so its deep clone is dead
+                // weight -- dropping the reference here lets a whole subtree's worth of copies be
+                // collected while the layer is still running.
+                node.world = null;
                 ++this.nodeIndex;
                 this.actionIndex = 0;
                 this.currentActs = null;
@@ -4617,9 +5032,25 @@ public final class Solver {
                 int n3 = Solver.score(n2s, n2Score, choice.win, choice.dead, this.layer + 1, choice.mhp, choice.block, choice.alive, saves, choice.gold - this.startGold) + (choice.win ? Solver.lootPoints(choice.loot) : 0) + (choice.win ? Solver.healPoints(choice.postHeal) : 0) + (choice.win ? GrowthCredit.valueOf(arrayList) : 0);
                 Node node3 = new Node(choice.child, arrayList, n3, Solver.rankOf(n3, choice.block, choice.energy, choice.powers), n, GameActionManager.turn, choice.win, choice.dead, choice.monsters, saves, choice.digest);
                 node3.positionKey = choice.positionKey;
+                node3.actKind = action.actionClass;
                 node3.postHeal = choice.postHeal;
                 node3.loot = choice.loot;
                 node3.netHpLoss = Solver.netHpLoss(n, growthHp, choice.postHeal, n2);
+                // 1.0.8 (C3): the turn the sandbox measured after this action, not the live game's.
+                node3.turnAt = action == null ? -1 : action.turnAfter;
+                // 1.0.8 (C5): how far any line has actually got, for the staged horizon below.
+                if (node3.turnAt > this.maxTurnSeen) {
+                    this.maxTurnSeen = node3.turnAt;
+                }
+                // 1.0.8 (C6, user): keep the best line that has really finished a turn. A plan cut in
+                // the middle of a turn reads like random play, so this is the line to fall back on.
+                if (node3.turnAt > this.horizonRootTurn
+                        && (this.bestTurnComplete == null
+                        || node3.score > this.bestTurnComplete.score)) {
+                    this.bestTurnComplete = node3;
+                }
+                // 1.0.15 (user): the sandbox is installed here, so this is what the line can play.
+                this.noteActions(liveActions());
                 // B173 (user m21300): the in-rung best is still picked by the raw score -- the net
                 // number is only what the panel prints and what the cross-rung merge compares. Trying
                 // to rank by it dropped the board terms and picked zero-damage zero-turn stubs.
@@ -4645,13 +5076,24 @@ public final class Solver {
                     }
                 }
                 String layerKey = choice.positionKey == null ? choice.digest : choice.positionKey;
-                if ((node2 = this.next.get(layerKey)) != null && n3 <= node2.score) {
+                if ((node2 = this.next.get(StateKey.of(layerKey))) != null && n3 <= node2.score) {
                     if (!layerKey.equals(choice.digest)) {
                         ++this.mergedByPhase;
                     }
                     continue;
                 }
-                this.next.put(layerKey, node3);
+                if (Limits.dominance()) {
+                    BlockView view = Solver.blockView(layerKey);
+                    if (view != null) {
+                        Integer bestBlock = this.dominantBlock.get(view.key);
+                        if (bestBlock != null && bestBlock.intValue() >= view.block) {
+                            ++this.dominated;
+                            continue;
+                        }
+                        this.dominantBlock.put(view.key, Integer.valueOf(view.block));
+                    }
+                }
+                this.next.put(StateKey.of(layerKey), node3);
             }
         }
 
@@ -4780,6 +5222,7 @@ public final class Solver {
                 Node node = new Node(seed, new ArrayList<Action>(entry.path), entry.score, entry.rank,
                         entry.hpLoss, GameActionManager.turn, false, false, count, entry.deathSaves, entry.digest);
                 node.positionKey = entry.positionKey;
+                node.actKind = entry.actKind;
                 this.frontier = new ArrayList<Node>();
                 this.frontier.add(node);
                 this.nodeIndex = 0;
@@ -4898,9 +5341,33 @@ public final class Solver {
             if (this.finished) {
                 return;
             }
+            // 1.0.8 (C6, user): never deliver half a turn. When the winning line stopped inside the
+            // current turn but a line that actually finished one exists, hand back that line: its
+            // actions cover a whole turn, which is the minimum the player asked to see.
+            // 1.0.15 (user): past 20 actions a whole turn costs more than it is worth, and half a turn
+            // is the honest answer -- so the substitution is skipped on purpose.
+            boolean halfTurnAllowed = this.maxActionsSeen >= HALF_TURN_ACTIONS;
+            if (!halfTurnAllowed && this.horizonLimit > 0 && this.best != null && !this.best.win
+                    && this.bestTurnComplete != null && this.horizonRootTurn >= 0
+                    && this.best.turnAt <= this.horizonRootTurn) {
+                Log.info("plan: best line stopped mid-turn; delivering the best line that finishes a turn");
+                this.best = this.bestTurnComplete;
+            } else if (halfTurnAllowed && this.best != null && this.horizonRootTurn >= 0
+                    && this.best.turnAt <= this.horizonRootTurn) {
+                Log.info("plan: half a turn delivered on purpose (" + this.maxActionsSeen
+                        + " actions in one turn)");
+            }
             boolean bl = false;
             List<Action> list = this.best.path;
             int n = this.best.hpLoss;
+            // 1.0.5 (B4): remember the deepest-line replay so the final pass does not walk the same
+            // line a second time. finishLine() may extend the line, and a replay of a different line
+            // must overwrite these, so the reuse is conditioned on the exact list reference below.
+            List<Action> replayedPath = null;
+            List<Step> replayedSteps = null;
+            int deepFailedAt = -1;
+            String deepFailedOn = "";
+            String deepFailure = "";
             if (!this.best.win && !"win".equals(this.reason) && this.deepestPath != null
                     && this.deepestPath.size() > this.best.path.size()) {
                 List<Step> list2;
@@ -4911,6 +5378,11 @@ public final class Solver {
                     list = this.deepestPath;
                     n = n3;
                     bl = true;
+                    replayedPath = this.deepestPath;
+                    replayedSteps = list2;
+                    deepFailedAt = Solver.lastReplayFailedAt();
+                    deepFailedOn = Solver.lastReplayFailedOn();
+                    deepFailure = Solver.lastReplayFailure();
                 } else {
                     Log.info("route: the deepest line was not usable (steps=" + this.deepestPath.size()
                             + " hpLoss=" + n3 + " bestSteps=" + this.best.path.size()
@@ -4920,14 +5392,26 @@ public final class Solver {
             // B44: a losing line has to reach the end of the battle here too (m13104). Without this
             // the sliced path (F8 on a boss) handed back a line that stopped mid-fight.
             boolean lineFinished = false;
-            if (!this.best.win && list != null && !list.isEmpty()) {
+            // 1.0.8 (C5): with a horizon in force the promise is "the next few turns". Extending a
+            // losing line to the end of the battle here would undo that promise and spend exactly the
+            // time the horizon exists to save, so the extension stays a no-horizon behaviour.
+            if (!this.best.win && this.horizonLimit == 0 && list != null && !list.isEmpty()) {
                 java.util.List<Action> longer = Solver.finishLine(this.root, list, 8);
                 if (longer != null && longer.size() > list.size()) {
                     list = longer;
                     lineFinished = Boolean.TRUE.equals(LINE_FINISHED.get());
                 }
             }
-            List<Step> list4 = Solver.replay(this.root, list);
+            List<Step> list4;
+            if (replayedSteps != null && list == replayedPath) {
+                // 1.0.5 (B4): the line was not extended, so this IS the final line -- reuse the replay
+                // instead of paying for the whole walk again (which on a long boss fight is the most
+                // expensive single step left in finish()).
+                list4 = replayedSteps;
+                Solver.restoreReplayFailure(deepFailedAt, deepFailedOn, deepFailure);
+            } else {
+                list4 = Solver.replay(this.root, list);
+            }
             int failedAt = Solver.lastReplayFailedAt();
             boolean verified = failedAt < 0 && list4 != null && list4.size() == list.size();
             String failedOn = Solver.lastReplayFailedOn();
@@ -4935,7 +5419,8 @@ public final class Solver {
             profile.nodeBudget = this.nodeBudget;
             // B178 (user m23534): ONE summary per pass instead of one line per duplicate node.
             Log.info("position keys (B176): nodes=" + this.nodes + " unsettled=" + this.unsettledNodes
-                    + " mergedByPhase=" + this.mergedByPhase + " skipped=" + this.skipped);
+                    + " mergedByPhase=" + this.mergedByPhase + " skipped=" + this.skipped
+                    + " dominated=" + this.dominated + " revisitedBetter=" + this.revisitedBetter);
             profile.skipped = this.skipped;
             profile.transpositions = this.transpositions;
             // B184: the sliced path never printed the split, so the one place a player actually

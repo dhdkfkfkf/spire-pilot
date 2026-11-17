@@ -444,7 +444,9 @@ public final class Panel {
             }
         }
         if (PanelLayout.IDS[i].equals("seconds")) {
-            return "秒数 " + Budget.seconds();
+            // 1.0.8 (C6, user): the ladder is 自动(6s) 自动(12s) 自动(18s) 自动(30s) 自动(60s) 无限,
+            // so the label is the budget itself -- no second wording can contradict the progress line.
+            return "秒数 " + Budget.secondsLabel(Budget.seconds());
         }
         if (PanelLayout.IDS[i].equals("nodes")) {
             return "节点 " + (Budget.nodes() / 1000) + "k";

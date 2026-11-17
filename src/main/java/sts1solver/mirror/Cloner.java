@@ -49,7 +49,38 @@ public final class Cloner {
     /** Deeper than any real card/power graph; a guard against a pathological mod, not a design limit. */
     static final int MAX_DEPTH = 24;
 
-    private final IdentityHashMap<Object, Object> map = new IdentityHashMap<Object, Object>();
+    /**
+     * 1.0.6 (C3): how many objects the last fork copied.
+     *
+     * <p>The identity map is the one structure every fork pays for: it starts at the default size
+     * and therefore rehashes (allocating a second, then a third array) two or three times per fork
+     * on a real combat graph. Sizing it from the previous fork's own count removes those copies
+     * without changing what is copied -- the map only decides how fast a lookup lands. The number is
+     * never used as a limit, so a graph that suddenly doubles simply rehashes once.
+     */
+    private static volatile int expectedObjects = 2048;
+
+    /** Record what one fork copied, so the next identity map starts big enough. */
+    public static void observe(int objects) {
+        if (objects >= 256) {
+            expectedObjects = Math.min(objects, 65536);
+        }
+    }
+
+    public static int expectedObjects() {
+        return expectedObjects;
+    }
+
+    private final IdentityHashMap<Object, Object> map;
+
+    public Cloner() {
+        this(expectedObjects);
+    }
+
+    public Cloner(int expected) {
+        this.map = new IdentityHashMap<Object, Object>(
+                Math.max(64, Math.min(65536, expected)));
+    }
     private int objects;
     private int shared;
     private int failures;

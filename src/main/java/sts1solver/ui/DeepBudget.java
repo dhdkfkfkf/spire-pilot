@@ -72,6 +72,21 @@ public final class DeepBudget {
         return nodes;
     }
 
+    /**
+     * 1.0.8 (C4): the budget for the "auto" setting (0 seconds chosen).
+     *
+     * <p>{@link #budgetMs} floors at {@link #MIN_SECONDS} because a player who explicitly asked for
+     * 10 seconds must get 10 seconds. "Auto" is the opposite promise: answer sooner on a big board.
+     * So this path allows a smaller floor and applies the Boss factor on top.
+     */
+    public static long autoBudgetMs(long autoSeconds, boolean boss) {
+        long seconds = Math.max(2L, Math.min(MAX_SECONDS, autoSeconds));
+        if (boss) {
+            seconds = Math.min(MAX_SECONDS, seconds * BOSS_SECONDS_FACTOR);
+        }
+        return seconds * 1000L;
+    }
+
     /** True when this room is a boss fight. */
     public static boolean isBossRoom(com.megacrit.cardcrawl.rooms.AbstractRoom room) {
         return room instanceof com.megacrit.cardcrawl.rooms.MonsterRoomBoss;

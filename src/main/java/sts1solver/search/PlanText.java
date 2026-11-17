@@ -70,6 +70,18 @@ public final class PlanText {
             }
             return w.toString();
         }
+        // 1.0.8 (C4): the ranking stopped moving before the budget ran out -- not a lost board.
+        if ("converged".equals(r.reason)) {
+            return "最近几回合的尽力线" + PlanText.costText(r.hpLoss, r.potionsUsed, r.potionHpSpent)
+                    + "（连续数层没有更好的线就提前停了，剩余预算不会改变建议）";
+        }
+        // 1.0.8 (C3): a horizon-limited search did not fail to find a win -- it did not look past the
+        // horizon. Saying "未找到胜线" there reads as "this position is lost", which is a claim the
+        // search never made; name the limit instead.
+        if ("horizon".equals(r.reason)) {
+            return "最近几回合的尽力线" + PlanText.costText(r.hpLoss, r.potionsUsed, r.potionHpSpent)
+                    + "（到回合上限就停，未推到战斗结束；search.horizonTurns 调大或设 0 可继续）";
+        }
         // P2-11b: the whole job searched more than this one pass did, and the panel shows that
         // total. Quoting only the last pass would read as a contradiction (panel: 20602, text: 256).
         return headline(r.win, r.escaped, r.reason, r.splitStates, r.plan.size(),

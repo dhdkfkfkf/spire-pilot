@@ -17,10 +17,15 @@ public final class Budget {
     // 0 = 不限 (P2-12, user m13385): the player asked for "no limit by default, I can wait as long as
     // the worldline counter keeps moving", and for the panel to still offer a concrete number. The
     // profiles below are only what the 秒数 / 节点 buttons step through; the file keeps the truth.
-    private static final int[] SECONDS = {0, 60, 120, 300, 600};
+    // 1.0.8 (C6/C7, user): the ladder the 秒数 button steps through -- 自动 自动(6s) 自动(12s)
+    // 自动(18s) 自动(30s) 自动(60s) 无限. -1 = 自动 (sized from the monsters in front of the player,
+    // their HP and their block), a positive number is a hard wall-clock stop (past it the search
+    // gives back the best line it has, degrading the planning depth 3 -> 2 -> 1 turn on the way),
+    // 0 = 无限.
+    private static final int[] SECONDS = {-1, 6, 12, 18, 30, 60, 0};
     private static final int[] NODES = {0, 100000, 200000, 400000, 1000000};
-    /** Unlimited by default (P2-12). Boss rooms double a concrete number, never "no limit". */
-    private static final int DEFAULT_SECONDS = 0;
+    /** Twelve seconds by default: long enough for a normal fight, short enough to read. */
+    private static final int DEFAULT_SECONDS = 12;
     private static final int DEFAULT_NODES = 0;
 
     /** The one-time upgrade target for an existing settings.txt: unlimited, with a marker. */
@@ -71,16 +76,19 @@ public final class Budget {
         cachedAt = now;
     }
 
-    /** Next budget profile: seconds up, wrapping. Returns the new value. */
+    /** Next budget profile: one step up the ladder, wrapping. Returns the new value. */
     public static int cycleSeconds() {
         int now = seconds();
-        int next = SECONDS[0];
+        int at = -1;
         for (int i = 0; i < SECONDS.length; i++) {
-            if (SECONDS[i] > now) {
-                next = SECONDS[i];
+            if (SECONDS[i] == now) {
+                at = i;
                 break;
             }
         }
+        // Index arithmetic, not "first value greater than now": 自动(-1) sits below every number and
+        // 无限(0) sits above them all, so a numeric scan would jump from 60s straight back to 自动.
+        int next = SECONDS[(at + 1) % SECONDS.length];
         write(next, nodes());
         return next;
     }
@@ -186,9 +194,12 @@ public final class Budget {
         }
     }
 
-    /** "不限" or "300s" -- the panel and the search progress share this wording. */
+    /** "自动", "自动(12s)" or "无限" -- the panel and the search progress share this wording. */
     public static String secondsLabel(int seconds) {
-        return seconds <= 0 ? "不限" : seconds + "s";
+        if (seconds < 0) {
+            return "自动";
+        }
+        return seconds == 0 ? "无限" : "自动(" + seconds + "s)";
     }
 
     /** "不限" or "400000" -- 0 nodes means no node cap at all. */

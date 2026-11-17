@@ -72,6 +72,15 @@ public final class Action {
     public final String choicePrints;
 
     /**
+     * 1.0.6 (C1): what this decision IS ("attack" / "skill" / "power" / "potion" / "end" / "sel" /
+     * "other"), filled by {@link TurnPlan} while the candidate list is built. The beam keeps the
+     * best node of every class before it fills the rest by score, and the turn plan uses the same
+     * tag to order the cards of a killing or a surviving turn. Empty when nothing classified it,
+     * which every reader treats as "other".
+     */
+    public String actionClass = "";
+
+    /**
      * B122 (user m02740): the turn the engine was in BEFORE this action ran, or -1 when unknown.
      *
      * <p>The panel has to show a turn the player never played. 昏睡 (TrancePower) ends the turn at

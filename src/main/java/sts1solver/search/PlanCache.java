@@ -46,6 +46,13 @@ public final class PlanCache {
     /**
      * Key for "this exact position under these exact settings".
      *
+     * <p>The combat digest covers the board (hand/draw/discard ORDER, HP/block/energy, powers,
+     * relics, orbs, monsters, intents and their move history), but not where the game's random
+     * streams stand: two fights with identical hands and piles still play differently the moment a
+     * card rolls (TangPower plays a random hand card every turn). {@link sts1solver.mirror.RngStamp}
+     * already existed for exactly this key -- its class comment says so -- and was never wired in
+     * here, so a plan computed at another random position could be answered from the cache.
+     *
      * @param stateDigest live combat digest
      * @param ascension   ascension level (A0 vs A20 are different games)
      * @param policy      escape policy label
@@ -57,7 +64,8 @@ public final class PlanCache {
         // differs only there. Keying on the raw digest made the reload a miss and searched the whole
         // plan again. Key on the stable projection instead (Digest.stable is idempotent).
         String stable = stateDigest == null ? "" : sts1solver.mirror.Digest.stable(stateDigest);
-        return "s1|" + stable + "|a" + ascension + "|" + policy + "|" + content;
+        return "s1|" + stable + "|a" + ascension + "|" + policy + "|" + content
+                + "|rng=" + sts1solver.mirror.RngStamp.of();
     }
 
     public static synchronized Solver.Result get(String key) {

@@ -308,6 +308,113 @@ public final class Limits {
                 || v.equals("ban") || v.equals("\u5173") || v.equals("\u7981\u7528"));
     }
 
+    /**
+     * 1.0.5 (A2): drop a board that is identical to another board in the same layer except for the
+     * player's block, when the other one has at least as much block.
+     *
+     * <p>Off by default: it is the search's second reason to DISCARD a real candidate (the first is
+     * the parking-lot ceiling), and dropping candidates must be proven on a device before it is
+     * allowed to change an answer. {@code search.dominance=on} enables it.
+     */
+    public static boolean dominance() {
+        return yes("search.dominance", false);
+    }
+
+    /**
+     * 1.0.5: merge two card-play candidates whose targets are interchangeable according to the
+     * monsters' own visible state (id / HP / block / intent / powers).
+     *
+     * <p>Off by default: two monsters that look identical can still differ in move history or in
+     * what a mod keeps outside those fields, and merging them is a real loss of branches.
+     * {@code search.symmetricTargets=on} enables it.
+     */
+    public static boolean symmetricTargets() {
+        return yes("search.symmetricTargets", false);
+    }
+
+    /**
+     * 1.0.5: show the in-hook frame timings (search / repair / preview / HUD) on the status line
+     * while a search is running. Off by default: it is a diagnostic, not a playing aid.
+     */
+    public static boolean panelTiming() {
+        return yes("panel.timing", false);
+    }
+
+    /**
+     * 1.0.6 (C1): order one decision's candidates by this turn's own bound -- the hand knapsack
+     * ("can this turn kill?") and the monsters' attack intents ("must this turn block?"). Order
+     * only; nothing is dropped. {@code search.turnPlan=off} restores the engine's order.
+     */
+    public static boolean turnPlan() {
+        return yes("search.turnPlan", true);
+    }
+
+    /**
+     * 1.0.6 (C1): when the beam cuts a layer, keep the best node of every action class first
+     * (attack / skill / power / potion / end) and fill the remaining slots by score. A pure score
+     * cut can spend the whole beam on one card type -- six attack lines and no defensive one -- and
+     * the node that survives the turn is exactly the one it dropped. {@code search.diversity=off}
+     * restores the pure cut.
+     */
+    public static boolean diversity() {
+        return yes("search.diversity", true);
+    }
+
+    /**
+     * 1.0.8 (C3): how many turns past the current one the beam is allowed to expand.
+     *
+     * <p>The panel used to walk a many-card / high-HP fight to the end before it could say anything,
+     * which is exactly the "long wait, no result" the player reports on such boards. With a horizon
+     * the search stops expanding at that many turns and ranks the boards it already reached, so a
+     * good few-turn line appears immediately and each executed step re-searches from the new board.
+     *
+     * <p>{@code 0} = no horizon (the old behaviour, walk until win/loss/layer cap). Probe instances
+     * always run at 0: their gates assert what a fight searched to the end proves, and a player-only
+     * truncation must not move them.
+     */
+    public static int horizonTurns() {
+        String raw = read("search.horizonTurns", "").trim();
+        if (raw.isEmpty()) {
+            return 3;
+        }
+        try {
+            int turns = Integer.parseInt(raw);
+            return turns < 0 ? 0 : turns;
+        } catch (NumberFormatException e) {
+            return 3;
+        }
+    }
+
+    /**
+     * 1.0.8 (C2): offer one branch per card play instead of one per (card x living monster).
+     *
+     * <p>Every single-target card is expanded against every monster, and each branch costs a fork
+     * plus an engine tick. The kept targets are the ones that can change the turn: a monster this
+     * card can kill, the monster with the highest attack intent, and the weakest one. A group where
+     * any target carries a power is left untouched.
+     *
+     * <p>{@code search.targetFocus=off} restores the full list. On by default because the cost is
+     * paid on every decision of every layer and multi-monster fights are the common case; the first
+     * drop of each search is logged with the counts it saved.
+     */
+    public static boolean targetFocus() {
+        return yes("search.targetFocus", true);
+    }
+
+    /**
+     * 1.0.15 (user): true while the player's budget came from 自动. Only that mode may extend its
+     * own wait as the sandbox hand grows -- a number the player picked (6s, 12s, ...) is a promise.
+     */
+    private static volatile boolean autoBudgetMode;
+
+    public static boolean autoBudgetMode() {
+        return autoBudgetMode;
+    }
+
+    public static void setAutoBudgetMode(boolean on) {
+        autoBudgetMode = on;
+    }
+
     /** Replaces (or appends) one key in settings.txt, keeping every other line untouched. */
     private static void write(String key, String value) {
         try {
