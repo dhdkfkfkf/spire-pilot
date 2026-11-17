@@ -11,9 +11,9 @@ search result is a line, and executing a line is audited against the states the 
 > **Upstream.** This repository is a derivative of
 > [STS1 Engine Solver](https://github.com/zck070718/sts1-engine-solver) by 闪珖灵感菇 (MIT). It continues
 > from that project's 1.0.3 and rolls its later 1.0.4–1.0.15 work into this 1.0.0 release. The panel
-> layout, the sandbox mirror and the search pipeline come from there; the texture guard, the 3-turn
-> horizon, the time-budget tiers and the turn-level ranking are this repository's changes. Full
-> attribution and license texts: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+> layout, the sandbox mirror and the search pipeline come from there; the texture guard, the turn
+> horizon that only the clock may narrow, the time-budget tiers and the turn-level ranking are this
+> repository's changes. Full attribution and license texts: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 The architecture follows the reference project [CombatSolver (STS2)](https://github.com/Torch1230/CombatSolver):
 capture a root state, simulate in the background without touching the live fight, print the route,
@@ -188,6 +188,15 @@ draws a fixed banner, which separates "the panel cannot draw" from "there is no 
 - 为什么不只看手牌：有角色"每打一张抽一张"，手牌上限 5 因此永远是 5，可一回合能连着打十几张——只看手牌会把这些牌全漏掉，而这正是最费时间的一类局面。
 - 动态延长的另一半在搜索里：沙箱里任何一回合链到比开局更多的动作数时，按**实际见到的峰值**再延长，每多 1 个 +0.4 秒、总计最多 +6 秒。只对 `自动` 生效——6/12/18/30/60 是你选的数字，属于承诺，不会被偷偷改。日志：`budget: a turn chained through N action(s) …`。
 - 单回合动作数 ≥ 20 时允许交付半回合：此时凑满一整回合的克隆代价超过收益，1.0.13 的"必须整回合"在这条线以上让位。日志：`plan: half a turn delivered on purpose (N actions in one turn)`。
+
+### 1.0.1（本仓库）— 默认推到结束，预算不够才降档
+
+- `search.horizonTurns` 默认改回 `0`：能推完就把战斗推完，不再一开局就按 3 回合截断。填正数仍然是你自己设的硬上限。
+- 时间预算不够才降档，而且按 25% / 50% / 75% 三个点走：3 回合 → 2 回合 → 1 回合。已经走到的深度不回退——跑在预算前面的搜索不会被砍。
+- 半回合仍然只在单回合动作数 ≥ 20 时交付，不占降档阶梯的一格。
+- `无限` 档没有时钟，因此不降档，一直算到分叉跑完或你再点「计算」。
+- 面板承诺行随之改成「推到战斗结束」，降档后写「追求 N 回合最优（已降档）」。
+- 日志：`stage: …s of …s used, N turn(s) finished; promise narrowed to M turn(s)`。
 
 ---
 

@@ -80,7 +80,7 @@ public final class PlanText {
         // search never made; name the limit instead.
         if ("horizon".equals(r.reason)) {
             return "最近几回合的尽力线" + PlanText.costText(r.hpLoss, r.potionsUsed, r.potionHpSpent)
-                    + "（到回合上限就停，未推到战斗结束；search.horizonTurns 调大或设 0 可继续）";
+                    + "（预算不够，只推了最近几回合；调大「秒数」可继续）";
         }
         // P2-11b: the whole job searched more than this one pass did, and the panel shows that
         // total. Quoting only the last pass would read as a contradiction (panel: 20602, text: 256).

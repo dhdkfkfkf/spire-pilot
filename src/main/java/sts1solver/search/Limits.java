@@ -361,27 +361,27 @@ public final class Limits {
     }
 
     /**
-     * 1.0.8 (C3): how many turns past the current one the beam is allowed to expand.
+     * 1.0.1 (user): a fixed cap on how many turns past the current one the beam may expand.
      *
-     * <p>The panel used to walk a many-card / high-HP fight to the end before it could say anything,
-     * which is exactly the "long wait, no result" the player reports on such boards. With a horizon
-     * the search stops expanding at that many turns and ranks the boards it already reached, so a
-     * good few-turn line appears immediately and each executed step re-searches from the new board.
+     * <p>Default {@code 0}: walk the fight to the end. The player asked for exactly that -- finish it
+     * if the clock allows -- so depth is no longer cut up front. What bounds a too-long wait is the
+     * budget, and the staged ladder in {@code Solver.Session} is what turns a short clock into a
+     * 3 -> 2 -> 1 turn promise on the way down. A number here is a hard cap the player chose, and the
+     * ladder never promises more than it.
      *
-     * <p>{@code 0} = no horizon (the old behaviour, walk until win/loss/layer cap). Probe instances
-     * always run at 0: their gates assert what a fight searched to the end proves, and a player-only
-     * truncation must not move them.
+     * <p>Probe instances always run at 0: their gates assert what a fight searched to the end proves,
+     * and a player-only truncation must not move them.
      */
     public static int horizonTurns() {
         String raw = read("search.horizonTurns", "").trim();
         if (raw.isEmpty()) {
-            return 3;
+            return 0;
         }
         try {
             int turns = Integer.parseInt(raw);
             return turns < 0 ? 0 : turns;
         } catch (NumberFormatException e) {
-            return 3;
+            return 0;
         }
     }
 

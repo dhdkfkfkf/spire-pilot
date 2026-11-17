@@ -4199,25 +4199,26 @@ public final class Solver {
         private boolean provenOptimal;
         private boolean frontierDead;
         /**
-         * 1.0.8 (C3): plan the next few turns, not the whole fight.
+         * 1.0.1 (user): the cap the player set in {@code search.horizonTurns}; 0 = no cap.
          *
-         * <p>A fight with many cards or high-HP monsters makes the beam walk to the end of the fight
-         * before the panel can show anything. The horizon stops EXPANSION at
-         * {@code search.horizonTurns} turns past the root and lets the already reached boards compete
-         * by score: the player gets a good line for the next few turns at once, plays it step by step
-         * (each step re-searches), and the search never has to prove the end of a fight it cannot
-         * finish inside the budget. 0 restores the old "walk to the end" behaviour exactly.
+         * <p>The search walks the fight to the end by default. This field only exists for a player
+         * who wants a hard cap of his own, and the budget ladder below never promises more than it.
          */
         private final int horizonLimit;
         /**
-         * 1.0.8 (C5): the horizon actually in force. It starts at {@link #horizonLimit} and only
-         * ever SHRINKS: at 45% / 75% of the wall-clock budget the search checks how many turns it
-         * has really finished and, if it is behind, lowers the promise to 3 -> 2 -> 1 turn. That is
-         * the staged behaviour the player asked for: a fight that is too expensive to plan three
-         * turns of comes back with a whole-turn plan one or two turns deep instead of stopping in
-         * the middle of a turn.
+         * 1.0.1 (user): the horizon actually in force. It starts at {@link #horizonLimit} -- 0, the
+         * default, means "to the end of the fight" -- and only ever SHRINKS when the clock runs out:
+         * at 25% / 50% / 75% of the budget the search checks how many turns it has really finished
+         * and narrows the promise to 3 -> 2 -> 1 turn if that depth has not been reached yet. Half a
+         * turn is not a rung; {@link #finish()} only delivers one past {@link #HALF_TURN_ACTIONS}.
          */
         private int horizonTurns;
+        /**
+         * 1.0.1 (user): whether the clock may narrow the promise at all. True for a finite budget in
+         * a player session: there the wait has to end somewhere. Probes keep the exact old behaviour,
+         * and an unlimited budget has no clock to stage.
+         */
+        private boolean stageAllowed;
         private int maxTurnSeen = Integer.MIN_VALUE;
         /** 1.0.8 (C6, user): the best line that actually finished a turn, never a half-turn one. */
         private Node bestTurnComplete;
@@ -4406,13 +4407,13 @@ public final class Solver {
             this.beamWidth = n;
             this.maxLayer = n2;
             this.budgetMs = l;
-            // 1.0.8 (C6): an unlimited budget also means "plan the whole fight". A horizon exists to
-            // bound a wait; with no wait to bound it would only cut the answer short. Probes keep the
-            // old exact behaviour (horizon 0).
-            this.horizonLimit = (sts1solver.util.SilentInstance.isArmed() || l <= 0L
-                    || l >= Long.MAX_VALUE / 4L || Limits.horizonTurns() <= 0)
-                    ? 0 : Limits.horizonTurns();
+            // 1.0.1 (user): walk the fight to the end. The horizon is no longer a default cut; it is
+            // the fallback a short clock imposes (see the staged ladder in advance()). A number the
+            // player put in search.horizonTurns stays a hard cap, and probes stay at 0.
+            this.horizonLimit = sts1solver.util.SilentInstance.isArmed() ? 0 : Limits.horizonTurns();
             this.horizonTurns = this.horizonLimit;
+            this.stageAllowed = !sts1solver.util.SilentInstance.isArmed()
+                    && l > 0L && l < Long.MAX_VALUE / 4L;
             this.actionsAtRoot = liveActions();
             this.maxActionsSeen = this.actionsAtRoot;
             this.maxNodes = n3;
@@ -4645,7 +4646,7 @@ public final class Solver {
                 return;
             }
             long allowance = Math.min(HAND_EXTRA_MS, HAND_MS_PER_CARD * extra);
-            if (allowance > this.handAllowanceMs && this.horizonLimit > 0
+            if (allowance > this.handAllowanceMs && this.stageAllowed
                     && Limits.autoBudgetMode()) {
                 this.handAllowanceMs = allowance;
                 Log.info("budget: a turn chained through " + actions + " action(s) in the sandbox,"
@@ -4861,29 +4862,29 @@ public final class Solver {
                 this.frontier = arrayList2;
                 this.next = null;
                 ++this.layer;
-                // 1.0.8 (C5): staged horizon. A fight that cannot afford three turns of planning
-                // must not hand back half a turn: at 45% and 75% of the clock, compare the turns
-                // actually finished with the plan and lower the promise to what fits. 45% allows
-                // two turns, 75% allows one; a search that is on schedule is never touched.
-                if (this.horizonLimit > 0 && this.horizonTurns > 0) {
+                // 1.0.1 (user): the search walks the fight to the end; the clock is the only thing
+                // allowed to ask for less. At 25% / 50% / 75% of the budget the promise narrows to
+                // the turns that can still be finished -- 3, then 2, then 1 -- and only for a depth
+                // that has not been reached yet: a search ahead of the clock is never capped. Half a
+                // turn is not a rung here; finish() only delivers one past HALF_TURN_ACTIONS.
+                if (this.stageAllowed) {
                     int achieved = this.maxTurnSeen == Integer.MIN_VALUE
                             ? 0 : this.maxTurnSeen - this.horizonRootTurn;
                     long elapsed = System.currentTimeMillis() - this.startedAt;
                     long budget = this.budgetNow();
                     long pct = budget > 0L && budget < Long.MAX_VALUE / 200L
                             ? elapsed * 100L / budget : 0L;
-                    // Only a stage that has actually run out may lower the promise. Reading `achieved`
-                    // before 45% was a bug: at the first layer no turn has finished yet, so the
-                    // promise collapsed to one turn and every search stopped almost at once.
-                    if (pct >= 45L) {
-                        int allowed = pct < 75L ? Math.min(2, this.horizonLimit) : 1;
-                        int target = Math.min(allowed, Math.max(1, achieved));
-                        if (target < this.horizonTurns) {
-                            this.horizonTurns = target;
-                            Log.info("stage: " + (elapsed / 1000L) + "s of " + (budget / 1000L)
-                                    + "s used, " + achieved + " turn(s) finished; promise lowered to "
-                                    + target + " turn(s)");
-                        }
+                    int allowed = pct >= 75L ? 1 : pct >= 50L ? 2 : pct >= 25L ? 3 : 0;
+                    if (allowed > 0 && this.horizonLimit > 0) {
+                        allowed = Math.min(allowed, this.horizonLimit);
+                    }
+                    if (allowed > 0 && achieved < allowed
+                            && (this.horizonTurns == 0 || allowed < this.horizonTurns)) {
+                        this.horizonTurns = allowed;
+                        this.horizonStopped = false;
+                        Log.info("stage: " + (elapsed / 1000L) + "s of " + (budget / 1000L)
+                                + "s used, " + achieved + " turn(s) finished; promise narrowed to "
+                                + allowed + " turn(s)");
                     }
                 }
                 // 1.0.8 (C4): stop spending budget on a ranking that has stopped moving. Once the
@@ -4918,7 +4919,10 @@ public final class Solver {
                     this.horizonStopped = true;
                     Log.info("horizon: planning " + this.horizonTurns + " turn(s) ahead only; stopped"
                             + " expanding at layer " + this.layer + " (" + this.nodes + " node(s),"
-                            + " best score " + this.best.score + "); search.horizonTurns=0 plans to the end");
+                            + " best score " + this.best.score + "); "
+                            + (this.horizonLimit > 0
+                            ? "search.horizonTurns=" + this.horizonLimit
+                            : "narrowed by the budget, set search.horizonTurns to cap it yourself"));
                 }
                 node.world = null;
                 ++this.nodeIndex;
@@ -5368,9 +5372,11 @@ public final class Solver {
             // current turn but a line that actually finished one exists, hand back that line: its
             // actions cover a whole turn, which is the minimum the player asked to see.
             // 1.0.15 (user): past 20 actions a whole turn costs more than it is worth, and half a turn
-            // is the honest answer -- so the substitution is skipped on purpose.
+            // is the honest answer -- so the substitution is skipped on purpose. 1.0.1 (user): this
+            // applies whenever a clock is running, not only when search.horizonTurns was set: "to the
+            // end" does not mean "half a turn is fine".
             boolean halfTurnAllowed = this.maxActionsSeen >= HALF_TURN_ACTIONS;
-            if (!halfTurnAllowed && this.horizonLimit > 0 && this.best != null && !this.best.win
+            if (!halfTurnAllowed && this.stageAllowed && this.best != null && !this.best.win
                     && this.bestTurnComplete != null && this.horizonRootTurn >= 0
                     && this.best.turnAt <= this.horizonRootTurn) {
                 Log.info("plan: best line stopped mid-turn; delivering the best line that finishes a turn");
@@ -5417,8 +5423,9 @@ public final class Solver {
             boolean lineFinished = false;
             // 1.0.8 (C5): with a horizon in force the promise is "the next few turns". Extending a
             // losing line to the end of the battle here would undo that promise and spend exactly the
-            // time the horizon exists to save, so the extension stays a no-horizon behaviour.
-            if (!this.best.win && this.horizonLimit == 0 && list != null && !list.isEmpty()) {
+            // time the horizon exists to save, so the extension only happens while the promise still
+            // is "to the end" (1.0.1: the default, until the clock narrows it).
+            if (!this.best.win && this.horizonTurns == 0 && list != null && !list.isEmpty()) {
                 java.util.List<Action> longer = Solver.finishLine(this.root, list, 8);
                 if (longer != null && longer.size() > list.size()) {
                     list = longer;

@@ -57,7 +57,10 @@ function Resolve-Jdk {
 
 $jdkHome = Resolve-Jdk -Explicit $Jdk
 $javac = Join-Path $jdkHome 'bin\javac.exe'
-$versionText = (& $javac -version 2>&1 | Out-String)
+# javac writes "-version" to stderr, and under 'Stop' a native command's stderr becomes a
+# terminating error record (the reference project hit this). Going through cmd keeps the version on
+# stdout, so the probe cannot fail the build.
+$versionText = [string](cmd /c "`"$javac`" -version 2>&1")
 $major = 0
 if ($versionText -match 'javac\s+(\d+)') { $major = [int]$Matches[1] }
 if ($major -ge 9) { $targetArgs = @('--release', '8') } else { $targetArgs = @('-source', '8', '-target', '8') }

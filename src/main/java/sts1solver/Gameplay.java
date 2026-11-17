@@ -1066,9 +1066,11 @@ public final class Gameplay {
         return horizonText(job.horizonTurns(), job.horizonLimit(), job.turnsFinished());
     }
 
-    /** True when there is a turn promise worth printing (the session has started one). */
+    /** True when there is a turn promise worth printing. Every live session has one now. */
     private static boolean hasHorizon(int turns, int limit, int finished) {
-        return turns > 0 || limit > 0 || finished > 0;
+        // 1.0.1 (user): 0/0 used to mean "no promise to show"; it now means "to the end of the fight",
+        // which is exactly what the player wants to read before the clock forces a narrower one.
+        return true;
     }
 
     /** The same wording for the deep search (a portfolio session instead of a quick one). */
@@ -1101,7 +1103,8 @@ public final class Gameplay {
         if (turns <= 0) {
             return "推到战斗结束";
         }
-        return job.horizonLimit() > turns
+        boolean lowered = job.horizonLimit() <= 0 || job.horizonLimit() > turns;
+        return lowered
                 ? "追求 " + turns + " 回合最优（已降档）"
                 : "追求 " + turns + " 回合最优";
     }
@@ -1123,6 +1126,8 @@ public final class Gameplay {
         b.append("追求 ").append(turns).append(" 回合内预算最优解");
         if (limit > 0 && turns < limit) {
             b.append("（预算不够，从 ").append(limit).append(" 回合降到 ").append(turns).append(" 回合）");
+        } else if (limit <= 0) {
+            b.append("（预算不够，从推到战斗结束降到 ").append(turns).append(" 回合）");
         } else if (finished > 0) {
             b.append("（已走完 ").append(finished).append(" 回合）");
         }
