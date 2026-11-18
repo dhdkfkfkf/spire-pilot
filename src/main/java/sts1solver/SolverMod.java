@@ -18,7 +18,7 @@ import java.io.File;
  *
  * <ul>
  *   <li><b>Interactive</b>: the solver panel in the top-right corner, driven entirely by the mouse --
- *       计算 / 执行一步 / 自动出牌 / 秒数 / 节点 / 节奏 / 药水 / 局外收益 / 收起 / 隐藏
+ *       计算 / 自动 开/关 / 半自动-全自动 / 秒数 / 节点 / 节奏 / 药水 / 局外收益 / 收起 / 隐藏
  *       (see {@link sts1solver.ui.PanelLayout}). That panel is the only way to operate the mod: the
  *       F5–F12 key branches were deleted on 2026-11-13 (m03455), so no key press can start a search,
  *       change the budget or run the probe suite. Arrow keys still scroll the route strip.</li>

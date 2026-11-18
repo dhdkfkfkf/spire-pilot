@@ -13,8 +13,8 @@ import sts1solver.util.Log;
 /**
  * The clickable solver panel (P1-1c), modelled on the STS2 solver's overlay.
  *
- * <p>Everything the player does lives on the panel: 计算 / 执行一步 / 自动出牌 / 秒数 / 节点 / 节奏 /
- * 药水 / 局外收益 / 收起 / 隐藏. Hotkeys still work, but they are no longer the only way in, and the
+ * <p>Everything the player does lives on the panel: 计算 / 自动 开/关 / 半自动-全自动 / 秒数 / 节点 /
+ * 节奏 / 药水 / 局外收益 / 收起 / 隐藏. Hotkeys still work, but they are no longer the only way in, and the
  * panel shows the same state the keys act on. B143 (user m10519): 停止 was folded into 计算 (a second
  * click stops the search), and 局外收益 is the on/off switch for out-of-combat pricing.
  *
@@ -395,13 +395,10 @@ public final class Panel {
             // glance; the two jobs now have one home each.
             sts1solver.Gameplay.cycleAutoMode();
         } else if ("auto".equals(id)) {
-            // 全自动: start/stop the continuous run. 半自动: one step, because continuous play is
-            // what switching to 全自动 means.
-            if (sts1solver.Gameplay.fullAuto()) {
-                sts1solver.Gameplay.toggleAutopilot();
-            } else {
-                sts1solver.Gameplay.executeStep();
-            }
+            // The left slot is 自动 开/关 in both modes: it plays the whole plan, and in 全自动 the
+            // line is re-solved as it runs. The old one-step button was just the first click of
+            // this, and clicking a route pill already walks the plan that far by hand.
+            sts1solver.Gameplay.toggleAutopilot();
         } else if ("collapse".equals(id)) {
             collapsed = !collapsed;
         } else if ("seconds".equals(id)) {
@@ -1195,17 +1192,11 @@ public final class Panel {
         return sts1solver.search.GrowthBook.counting() ? "计" : "不计";
     }
 
-    /** Label for the two buttons in the two-up row (1 = mode switch, 2 = 自动出牌 / 执行一步). */
+    /** Label for the two buttons in the two-up row (1 = mode switch, 2 = 自动 开/关). */
     private static String actionLabel(int i) {
         if (i == 1) {
-            // The mode switch keeps its label in both modes, running or idle. 全自动 has no step
-            // button: the line runs on its own, and the only manual exit is switching back.
+            // The mode switch keeps its label in both modes, running or idle.
             return sts1solver.Gameplay.fullAuto() ? "全自动 ✓" : "半自动 ✓";
-        }
-        if (!sts1solver.Gameplay.fullAuto()) {
-            // 半自动: the plan is read by a human, so the manual step is always one click away --
-            // no 自动开 detour first.
-            return "执行一步";
         }
         if (sts1solver.Gameplay.autopilot()) {
             return "自动 开";

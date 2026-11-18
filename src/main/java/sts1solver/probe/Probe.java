@@ -13431,8 +13431,8 @@ Probe.core("S134 B84: a select screen opened by a power (Foresight scry) still g
                         "a click outside the panel hits nothing", "");
                 // 1.1.0 (user m06251): collapse no longer hides the whole grid. 计算 and 自动出牌
                 // stay drawn and stay clickable while collapsed -- they are the two buttons a
-                // player presses mid-fight. What collapse takes away is 执行一步, the five chips and
-                // the foot buttons. Only 隐藏 removes the overlay entirely.
+                // player presses mid-fight. What collapse takes away is the 半自动/全自动 switch, the
+                // five chips and the foot buttons. Only 隐藏 removes the overlay entirely.
                 //
                 // The collapsed panel lays these two out at its own geometry, so the probe has to
                 // hit-test the rect the collapsed panel actually draws, not the expanded one.

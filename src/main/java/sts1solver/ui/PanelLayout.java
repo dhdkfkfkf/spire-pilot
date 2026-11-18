@@ -49,7 +49,7 @@ public final class PanelLayout {
      * player is looking for.
      */
     public static final String[] LABELS = {
-            "计算", "执行一步", "自动出牌", "秒数", "节点", "节奏", "药水", "收益",
+            "计算", "半自动/全自动", "自动出牌", "秒数", "节点", "节奏", "药水", "收益",
             "收起", "隐藏"};
 
     /** Left/right inset of every band, in game units before scale. */
@@ -167,7 +167,7 @@ public final class PanelLayout {
     /**
      * Width of one foot button (收起 / 隐藏).
      *
-     * <p>m02372: these were 44 units of text, half the width of 执行一步 and a third of its height,
+     * <p>m02372: these were 44 units of text, half the width of the action row and a third of its height,
      * which made them read as captions rather than as the two controls that shrink or hide the
      * whole overlay. They are now a two-up row of the same width as the action row above them.
      */
@@ -323,7 +323,7 @@ public final class PanelLayout {
                 (WIDTH - 2.0f * PAD) * scale, PRIMARY_H * scale};
     }
 
-    /** One of the two buttons in the two-up row, by index (1 = 执行一步, 2 = 自动出牌). */
+    /** One of the two buttons in the two-up row, by index (1 = 半自动/全自动 switch, 2 = 自动 开/关). */
     public static float[] row2Rect(int index, float screenWidth, float screenHeight, float scale) {
         float x = x0(screenWidth, scale) + PAD * scale
                 + columnOf(index) * (HALF_W + INNER_GAP) * scale;
@@ -414,8 +414,8 @@ public final class PanelLayout {
      *
      * <p>Collapsed panels expose the tab plus the two action buttons (1.1.0, user m06251): 计算 and
      * the mode-specific action stay live while collapsed, so a click on either of them means what it
-     * says instead of silently expanding the panel. That second button is 自动出牌 in 全自动 and
-     * 执行一步 in 半自动. Everything else -- chips, the mode switch, the foot buttons -- is
+     * says instead of silently expanding the panel. That second button is 自动 开/关 in both modes.
+     * Everything else -- chips, the mode switch, the foot buttons -- is
      * gone while collapsed, and a click there hits nothing.
      */
     public static int hitTest(float mx, float my, float screenWidth, float screenHeight, float scale,
@@ -470,8 +470,7 @@ public final class PanelLayout {
                 (WIDTH - 2.0f * PAD) * scale, COLLAPSED_BAR_H * scale};
     }
 
-    /** One of the two action buttons that survive collapse: slot 0 is 计算, slot 1 is the mode-specific
-     *  action (自动出牌 in 全自动, 执行一步 in 半自动). */
+    /** One of the two action buttons that survive collapse: slot 0 is 计算, slot 1 is 自动 开/关. */
     public static float[] collapsedActionRect(int slot, float screenWidth, float screenHeight,
                                               float scale) {
         float x = x0(screenWidth, scale) + PAD * scale
