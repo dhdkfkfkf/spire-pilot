@@ -9,11 +9,13 @@ power and relic code run on that copy**, and searches the **states that really c
 search result is a line, and executing a line is audited against the states the search predicted.
 
 > **Upstream.** This repository is a derivative of
-> [STS1 Engine Solver](https://github.com/zck070718/sts1-engine-solver) by 闪珖灵感菇 (MIT). It continues
-> from that project's 1.0.3 and rolls its later 1.0.4–1.0.15 work into this 1.0.0 release. The panel
-> layout, the sandbox mirror and the search pipeline come from there; the texture guard, the turn
-> horizon that only the clock may narrow, the time-budget tiers and the turn-level ranking are this
-> repository's changes. Full attribution and license texts: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+> [STS1 Engine Solver](https://github.com/zck070718/sts1-engine-solver) by 闪珖灵感菇 (MIT). It starts from
+> that project's 1.0.3 and continues as its own line of releases: `0.1.0` through `1.0.0` are this
+> repository's own work on top of that base, and every change is listed under this repository's own
+> version numbers in [CHANGELOG.md](CHANGELOG.md). The panel layout, the sandbox mirror and the search
+> pipeline come from the base; the texture guard, the turn horizon that only the clock may narrow, the
+> time-budget tiers, the turn-level ranking and the panel rework are this repository's changes. Full
+> attribution and license texts: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 The architecture follows the reference project [CombatSolver (STS2)](https://github.com/Torch1230/CombatSolver):
 capture a root state, simulate in the background without touching the live fight, print the route,
@@ -117,86 +119,38 @@ draws a fixed banner, which separates "the panel cannot draw" from "there is no 
 
 ## 更新日志
 
-> 下面的 1.0.4–1.0.15 是上游项目 STS1 Engine Solver 的版本号，本仓库把它们合并为 1.0.0 一次发布；
-> 版本号保留原样，是为了让从上游过来的玩家能对上自己记忆里的改动。
+完整版本历史见 **[CHANGELOG.md](CHANGELOG.md)**。这里只列版本号与一句话主题：
 
-搜索这一侧的目标很朴素：**牌多、怪多、怪血厚的时候，也要在你能接受的等待里给出一个能用的答案**。下面按版本拆开写，每个版本只做一件事。
+| 版本 | 主题 |
+|---|---|
+| 1.5.3 | 搜索结束后，加宽阶梯仍能回答（S230 / S246 修复） |
+| 1.5.2 | 回合数 4/5，且「按回合数求解」不再被时间砍 |
+| 1.5.1 | 进度副文案按秒轮换（阶段 · 节点 · 深度 · 速率 · 短语） |
+| 1.5.0 | 像素网格进度条回到展开态，面板不再数世界线 |
+| 1.4.1 | 收起态不再压住自己的标题条 |
+| 1.4.0 | 并行计算：预取器与调度器 |
+| 1.3.1 | 全自动的三条尾巴（弱线确认门、模式切换、节奏档慢端） |
+| 1.3.0 | 全自动模式 |
+| 1.2.2 | 路线条可缩放、分级、滚动；收起只折叠按钮面板 |
+| 1.2.1 | 非战斗界面自动隐藏 |
+| 1.2.0 | 每帧白烧清零 |
+| 1.1.0 | 面板重做（状态条、chip、动作三层、折叠态三层堆叠） |
+| 1.0.1 | 默认推到结束，预算不够才降档 |
+| 1.0.0 | 改名 Spire Pilot，面板说清进度与承诺 |
+| 0.12.0 | 自动预算按「一回合能打多少动作」算，而且会长 |
+| 0.11.0 | 「计算」可以重算 |
+| 0.10.0 | 不交付半回合 |
+| 0.9.0 | 按时间分阶段降级 |
+| 0.8.0 | 秒数档位与自动预算 |
+| 0.7.0 | 推演到 3 回合就收 |
+| 0.6.0 | 目标后置 |
+| 0.5.0 | 纹理守卫的收口 |
+| 0.4.0 | 纹理守卫改成总闸门 |
+| 0.3.0 | 排序与克隆的成本 |
+| 0.2.0 | 第一次纹理守卫，加三个默认关闭的开关 |
+| 0.1.0 | 选牌脚本显示中文 |
 
-### 1.0.4 — 选牌脚本显示中文
-
-- 计划行里的选牌提示过去会印出内部 id（例如 `（选：PiercingWail → 确定）`），现在优先显示游戏里的中文名，只有该段没有显示名时才退回 id。
-
-### 1.0.5 — 第一次纹理守卫，加三个默认关闭的开关
-
-- 内置纹理守卫的第一版：在球图标、能力图标、闪光效果、治疗面板四处按字段拦截空纹理。它在球类角色上有效，但每处都是"猜 owner"，落地不全。
-- 新增三个默认关闭的开关：`search.dominance`（同层里格挡更少的状态直接丢）、`search.symmetricTargets`（合并外观完全相同的怪）、`panel.timing`（状态行显示本帧耗时）。默认关闭的理由写在 `Limits` 里：它们是"会改变答案"或"只给诊断"的东西，必须实测过才允许默认开。
-
-### 1.0.6 — 排序与克隆的成本
-
-- 回合级排序（`search.turnPlan`，默认开）：先用手牌 0/1 背包算出"这回合能不能杀"，再用怪物意图算出"这回合必须不必须防"，据此把斩杀、防御、药水的候选排到前面。只排序，不删分支——估错只花时间，不丢答案。
-- 束宽多样性（`search.diversity`，默认开）：一层被截断时，先按动作类型（攻击/技能/能力/药水/结束回合）各保底一个，再按分数填满。纯分数截断可能把整条束都花在攻击上，而活过这一回合的恰好是被丢掉的那条防御线。
-- 克隆器身份表按上次规模预分配（`Cloner.observe`），减少每次 fork 的扩容次数。
-
-### 1.0.7 — 纹理守卫改成总闸门
-
-- 删掉 1.0.5 里四个"按字段猜 owner"的补丁，改为唯一补丁：`SpriteBatch.switchTexture` 的前置拦截。纹理为 null 或宽度读不出来时不再执行原方法（原方法下一句就是 `texture.getWidth()`，也就是崩溃点），改为刷新批次并换上一个已加载的占位纹理。
-- 同一个调用点只记录一次完整栈（`tex: unusable texture (…) … first call site: 类.方法:行`），把"猜"换成"看栈"。日志里 `tex guard: active` 表示补丁确实挂上了 libgdx 类。
-
-### 1.0.8 — 纹理守卫的收口
-
-- 由 1.0.7 的总闸门承接全部职责，删除遗留的四个旧补丁类，`ModTheSpire.json` 与启动日志的守卫清单同步为一条。
-
-### 1.0.9 — 目标后置
-
-- 每张单体牌原本对每只活怪各生成一个分支，每个分支都要克隆一次沙箱。现在按「同一张牌（含升级/费用）」分组，只保留：能斩杀的目标、意图伤害最高的目标、有效血量最低的目标。
-- 组内任一目标带能力（荆棘、缓冲、愤怒、人工制品、mod 自带 power）时整组保留——这类怪换目标结果真会变，不猜。
-- 开关 `search.targetFocus`，日志 `target focus: kept X of Y branch(es)`。
-
-### 1.0.10 — 推演到 3 回合就收
-
-- 新增 `search.horizonTurns`（默认 3）：只展开到当前回合 +3 回合，到线的节点不再克隆，用它已有的评分参与竞争；执行一步后再从新局面重搜（滚动规划）。
-- 面板不再因为"要把战斗推到底"而长时间无结果；`0` 回到旧行为（推到结束），探针实例固定 `0`，自检门不受影响。
-- 日志：`horizon: planning 3 turn(s) ahead only; stopped expanding at layer …`。
-
-### 1.0.11 — 秒数档位与自动预算
-
-- 「秒数」按钮从"0 或 300s"改成一条档位：`自动` → `自动(6s)` → `自动(12s)` → `自动(18s)` → `自动(30s)` → `自动(60s)` → `无限`。
-- `自动` 按眼前的场面算：`4 + 2×活怪数 + Σ(血量+护盾)/40` 秒，夹 6–90 秒，BOSS 房翻倍。单只史莱姆约 7 秒，四只合计 300 有效生命约 20 秒。数字档（6/12/18/30/60）按你选的原样执行，BOSS 不翻倍、也不抬到别的下限。
-- `无限` 同时取消回合上限（没有等待要限制时，回合上限只会砍掉答案），改由"连续 6 层最优分不动"收尾。
-
-### 1.0.12 — 按时间分阶段降级
-
-- 数字档位是硬上限：到了就停，返回预算内最好。中途按 45% / 75% 两个时间点降深度：45% 还没走完 2 回合就放弃 3 回合，75% 还没走完 1 回合就只保 1 回合。
-- 只有真的越过该时间点才降级；提前降级会让搜索"刚开局就收工"，那是 1.0.11 曾经的真实故障。
-- 日志：`stage: …s of …s used, N turn(s) finished; promise lowered to M turn(s)`。
-
-### 1.0.13 — 不交付半回合
-
-- 全程记录"真正走完过回合"的最好一条线；收尾时若最优线停在本回合中间，而存在走完回合的线，就交付后者。
-- 斩杀的线例外：立刻赢比"整回合"重要。
-- 日志：`plan: best line stopped mid-turn; delivering …`。
-
-### 1.0.14 — 「计算」可以重算
-
-- 计划缓存按局面 digest 命中，同一局面再按「计算」过去只会返回旧答案。现在手动按键绕过一次缓存，自动出牌与重规划仍走缓存。
-- 计算中按键 = 收尾给结果（不清空已有计划）；已有结果时按键 = 重新计算。
-- 日志：`solve: plan cache bypassed (manual press wants a new answer)`。
-
-### 1.0.15 — 自动预算按"一回合能打多少动作"算，并且会长
-
-- `自动` 档加动作项：`手牌数 + 本回合已打出的牌数` 超过 5 后每多 1 个 +0.5 秒，最多 +6 秒。公式：`4 + 2×活怪数 + Σ(血量+护盾)/40 + 动作项`。
-- 为什么不只看手牌：有角色"每打一张抽一张"，手牌上限 5 因此永远是 5，可一回合能连着打十几张——只看手牌会把这些牌全漏掉，而这正是最费时间的一类局面。
-- 动态延长的另一半在搜索里：沙箱里任何一回合链到比开局更多的动作数时，按**实际见到的峰值**再延长，每多 1 个 +0.4 秒、总计最多 +6 秒。只对 `自动` 生效——6/12/18/30/60 是你选的数字，属于承诺，不会被偷偷改。日志：`budget: a turn chained through N action(s) …`。
-- 单回合动作数 ≥ 20 时允许交付半回合：此时凑满一整回合的克隆代价超过收益，1.0.13 的"必须整回合"在这条线以上让位。日志：`plan: half a turn delivered on purpose (N actions in one turn)`。
-
-### 1.0.1（本仓库）— 默认推到结束，预算不够才降档
-
-- `search.horizonTurns` 默认改回 `0`：能推完就把战斗推完，不再一开局就按 3 回合截断。填正数仍然是你自己设的硬上限。
-- 时间预算不够才降档，而且按 25% / 50% / 75% 三个点走：3 回合 → 2 回合 → 1 回合。已经走到的深度不回退——跑在预算前面的搜索不会被砍。
-- 半回合仍然只在单回合动作数 ≥ 20 时交付，不占降档阶梯的一格。
-- `无限` 档没有时钟，因此不降档，一直算到分叉跑完或你再点「计算」。
-- 面板承诺行随之改成「推到战斗结束」，降档后写「追求 N 回合最优（已降档）」。
-- 日志：`stage: …s of …s used, N turn(s) finished; promise narrowed to M turn(s)`。
+`0.x` 是本项目在上游 1.0.3 基础上的连续改良，`1.0.0` 起是面向玩家的正式版本。
 
 ---
 

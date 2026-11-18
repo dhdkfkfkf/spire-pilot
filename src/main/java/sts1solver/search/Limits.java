@@ -386,6 +386,47 @@ public final class Limits {
     }
 
     /**
+     * The turn budgets 全自动 offers, in the order the chip cycles through them. 0 = walk it out.
+     *
+     * <p>m12550: 4 and 5 joined the list. The chip used to stop at 3, so a player who wanted "the
+     * best line over the next five turns" could not ask for it -- and 5 is the row count the strip
+     * can show at its largest, so the plan he asked for is exactly what fits on screen.
+     */
+    public static final int[] HORIZON_CHOICES = {1, 2, 3, 4, 5, 0};
+
+    /** Writes {@code search.horizonTurns}; 0 means "walk the fight to its end". */
+    public static void setHorizonTurns(int turns) {
+        write("search.horizonTurns", String.valueOf(turns < 0 ? 0 : turns));
+    }
+
+    /**
+     * 1.1.0 (user m06672): the 回合 chip in 全自动.
+     *
+     * <p>It used to be reachable only by editing settings.txt, which is not a setting. The values
+     * are 1/2/3/走完: a short turn budget is a request for the best play inside those turns, not a
+     * promise to win, so the label says the number and nothing more.
+     */
+    public static int cycleHorizonTurns() {
+        int cur = horizonTurns();
+        int at = 0;
+        for (int i = 0; i < HORIZON_CHOICES.length; i++) {
+            if (HORIZON_CHOICES[i] == cur) {
+                at = i;
+                break;
+            }
+        }
+        int next = HORIZON_CHOICES[(at + 1) % HORIZON_CHOICES.length];
+        setHorizonTurns(next);
+        return next;
+    }
+
+    /** "1" / "2" / "3" / "走完" -- the 回合 chip's value. */
+    public static String horizonLabel() {
+        int turns = horizonTurns();
+        return turns <= 0 ? "走完" : String.valueOf(turns);
+    }
+
+    /**
      * 1.0.8 (C2): offer one branch per card play instead of one per (card x living monster).
      *
      * <p>Every single-target card is expanded against every monster, and each branch costs a fork

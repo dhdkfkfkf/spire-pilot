@@ -82,6 +82,27 @@ public final class PotionTieredSession {
     private int rung;
     private int bestTier = -1;
     private int bestRung = -1;
+    /**
+     * m02751: the ladder of the last session that ran, kept after {@code current} is cleared.
+     *
+     * <p>{@link #rung()} and {@link #rungs()} used to read straight through {@code current}, and
+     * every tier ends by nulling it ({@link #tierDone}, {@link #cellDone}). A caller that asks
+     * "which rung did this job run, out of how many" <em>after</em> the job finished -- which is
+     * exactly what a gate checking the widening ladder does -- therefore got -1 and 0 back and
+     * failed, on a session that had run its ladder correctly. The numbers describe work already
+     * done, so they outlive the session that did it.
+     */
+    private int lastRung = -1;
+    private int lastRungs;
+    /**
+     * m07509: the beam of the last rung that ran, kept for the same reason as {@link #lastRung}.
+     *
+     * <p>{@link #beamWidth()} answered -1 once {@code current} was cleared, so S246's check
+     * "a wider beam is running" read {@code beam=-1} on a job that had in fact reached
+     * {@code rung=3} of 4. The rung and its beam are one fact about finished work; they are
+     * remembered together or the panel and the gate disagree about the same run.
+     */
+    private int lastBeam = -1;
     private int nodesDone;
     private int expansionsDone;
     private boolean finished;
@@ -395,7 +416,10 @@ public final class PotionTieredSession {
         if (this.best != null) {
             this.best.totalNodes = this.nodesDone;
             this.best.totalExpansions = this.expansionsDone;
-            this.best.passes = Math.max(1, this.tiersRan);
+            // m07509: use the same definition the panel reads, so the number in the result and the
+            // number in passes() cannot drift apart -- tiersRan counts potion ceilings, and a deck
+            // with no potions walks the whole widening ladder with tiersRan stuck at 1.
+            this.best.passes = this.passes();
         }
         if (this.cellMode) {
             Log.info("potion tiers: cells=" + totalCells() + " ran=" + this.tiersRan
@@ -414,12 +438,25 @@ public final class PotionTieredSession {
         this.finished = true;
     }
 
+    /**
+     * m02751: snapshot the ladder numbers before the session that owns them is dropped, so
+     * {@link #rung()} / {@link #rungs()} keep answering for a job that has already finished.
+     */
+    private void rememberRung() {
+        if (this.current != null) {
+            this.lastRung = this.current.rung();
+            this.lastRungs = this.current.rungs();
+            this.lastBeam = this.current.beamWidth();
+        }
+    }
+
     private void tierDone(Solver.Result r) {
         if (this.tier == 0) {
             this.baseline = r;
         }
         this.merge(r);
         this.logTier(r);
+        this.rememberRung();
         this.current = null;
         if (this.stopRequested) {
             this.finishAll("stopped");
@@ -448,6 +485,7 @@ public final class PotionTieredSession {
         }
         this.merge(r);
         this.logCell(r);
+        this.rememberRung();
         this.current = null;
         if (this.stopRequested) {
             this.finishAll("stopped");
@@ -536,27 +574,42 @@ public final class PotionTieredSession {
         return this.expansionsDone + (this.current == null ? 0 : this.current.expansions());
     }
 
-    /** Cells started so far (1-based while running); 1 while the untiered rollback runs. */
+    /**
+     * Passes run so far (1-based while running).
+     *
+     * <p>m07509: a pass is a RUNG, not a potion tier. Since B177/B179 the widening ladder runs
+     * inside one session, so {@code tiersRan} counts potion ceilings and stays at 1 on a deck with
+     * no potions -- which made {@link sts1solver.search.QuickSession#passes()} answer 1 on a job
+     * that had walked all four rungs, and S230 read "a win from the narrow pass does not end the
+     * job" as failed on a job that had widened three times. In cell mode one cell is one pass, so
+     * the cell counter is still the right number there.
+     */
     public int passes() {
-        return Math.max(1, this.tiersRan);
+        if (this.cellMode) {
+            return Math.max(1, this.tiersRan);
+        }
+        return Math.max(1, rung() + 1);
     }
 
     public int rung() {
         if (this.cellMode) {
             return this.rung;
         }
-        return this.current == null ? -1 : this.current.rung();
+        // m02751: a finished job still answers -- see lastRung.
+        return this.current != null ? this.current.rung() : this.lastRung;
     }
 
     public int rungs() {
         if (this.cellMode) {
             return this.ladder.length;
         }
-        return this.current == null ? 0 : this.current.rungs();
+        // m02751: same rule as rung(); the ladder size outlives the session that walked it.
+        return this.current != null ? this.current.rungs() : this.lastRungs;
     }
 
     public int beamWidth() {
-        return this.current == null ? -1 : this.current.beamWidth();
+        // m07509: same rule as rung(); a finished job still answers with the beam it reached.
+        return this.current != null ? this.current.beamWidth() : this.lastBeam;
     }
 
     public int layersRun() {

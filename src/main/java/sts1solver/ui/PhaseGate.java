@@ -61,6 +61,48 @@ public final class PhaseGate {
         return hotIn(mode, fading(), hasPlayer());
     }
 
+    /**
+     * True only while the player is actually inside a fight — the panel's draw and click gate.
+     *
+     * <p>Reported (m05752): the overlay stayed on screen on the map, the event screens and the rest
+     * screen, where it has nothing to say and covers the map itself. {@link #hot()} is the frame-hook
+     * gate and stays true across the whole run on purpose (the search has to keep ticking between
+     * rooms); this one answers a different question — "is there a fight on screen right now" — so the
+     * panel can step out of the way everywhere else.
+     *
+     * <p>Kept as a pure function of its inputs for the same reason as {@link #hotIn}: a gate can walk
+     * every combination without driving the real game onto a map.
+     */
+    public static boolean fightingIn(String mode, boolean fading, boolean hasPlayer,
+                                     boolean inCombatRoom) {
+        return hotIn(mode, fading, hasPlayer) && inCombatRoom;
+    }
+
+    /** The live answer for {@link #fightingIn}; three field reads and one room read. */
+    public static boolean fighting() {
+        if (forced) {
+            return true;
+        }
+        String mode;
+        try {
+            mode = CardCrawlGame.mode == null ? null : CardCrawlGame.mode.name();
+        } catch (Throwable t) {
+            return false;
+        }
+        return fightingIn(mode, fading(), hasPlayer(), inCombatRoom());
+    }
+
+    private static boolean inCombatRoom() {
+        try {
+            com.megacrit.cardcrawl.rooms.AbstractRoom room =
+                    com.megacrit.cardcrawl.dungeons.AbstractDungeon.getCurrRoom();
+            return room != null
+                    && room.phase == com.megacrit.cardcrawl.rooms.AbstractRoom.RoomPhase.COMBAT;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     private static boolean fading() {
         try {
             return AbstractDungeon.isFadingIn || AbstractDungeon.isFadingOut;

@@ -2174,6 +2174,113 @@ public final class Solver {
     }
 
     /**
+     * P3-A (user m07004): the board a plan walks into, kept instead of thrown away.
+     *
+     * <p>{@link #replay} uninstalls its sandbox in a {@code finally}, so the state the last step
+     * reached dies with it. That is right for verification -- the answer is the steps -- but it
+     * makes the obvious speedup impossible: the next search has to start from the live board and
+     * re-derive a position the previous replay already had in hand. This variant does the same
+     * walk, then captures the end board (as a fork), its digest and its RNG position while the
+     * sandbox is still installed, and hands all of it back.
+     *
+     * <p>The end board is a full {@link World}: it is NOT installed here, so the caller owns it and
+     * may feed it to a {@link QuickSession} whenever it likes. It must be dropped as soon as it is
+     * no longer needed -- it is a whole clone of the combat.
+     *
+     * <p>{@code complete} is false when any step threw; the caller must then treat the whole thing
+     * as "no prediction" and solve from the live board as before. The replay failure fields carry
+     * the same meaning they do for {@link #replay}.
+     */
+    public static final class ReplayEnd {
+        /** The steps that actually ran, exactly as {@link #replay} reports them. */
+        public final List<Step> steps;
+        /** The board after the last step, or null when the walk did not finish. */
+        public final World end;
+        /** {@code Digest.ofCurrent()} read on the sandbox after the last step. */
+        public final String endDigest;
+        /** {@code RngStamp.of()} read on the sandbox after the last step. */
+        public final String endRng;
+        /** True only when every step ran and the end board was captured. */
+        public final boolean complete;
+
+        ReplayEnd(List<Step> steps, World end, String endDigest, String endRng, boolean complete) {
+            this.steps = steps;
+            this.end = end;
+            this.endDigest = endDigest == null ? "" : endDigest;
+            this.endRng = endRng == null ? "" : endRng;
+            this.complete = complete;
+        }
+    }
+
+    /*
+     * P3-A: same walk as replay(), plus the end board. Kept in this class because every helper the
+     * walk needs (cardsPlayedNames / turnAfterOf / recordAutoPlays / hp / block / monsterHps /
+     * monsterMaxHps / monsterNames) is private here.
+     */
+    public static ReplayEnd replayKeepingEnd(World world, List<Action> list) {
+        ArrayList<Step> arrayList = new ArrayList<Step>();
+        World kept = null;
+        String endDigest = "";
+        String endRng = "";
+        boolean complete = false;
+        REPLAY_FAILED_AT.set(Integer.valueOf(-1));
+        REPLAY_FAILED_ON.set("");
+        REPLAY_FAILURE.set("");
+        World world2 = world.fork();
+        Driver.begin();
+        try {
+            world2.install();
+            try {
+                for (int i = 0; i < list.size(); ++i) {
+                    Action action = list.get(i);
+                    int turnBefore = GameActionManager.turn;
+                    action.turnBefore = turnBefore;
+                    java.util.List<String> replayPlayedBefore = Solver.cardsPlayedNames();
+                    long traceMark = sts1solver.mirror.PlayTrace.mark();
+                    Legal.applyOrRefuse(action);
+                    Solver.answerForReplay(action);
+                    Solver.recordAutoPlays(action, replayPlayedBefore, Solver.cardsPlayedNames());
+                    action.turnAfter = Solver.turnAfterOf(turnBefore);
+                    world2.trimPresentation();
+                    world2.readBack();
+                    arrayList.add(new Step(action, Digest.ofCurrent(),
+                            sts1solver.mirror.RngStamp.of(),
+                            sts1solver.mirror.PlayTrace.describe(traceMark),
+                            turnBefore, Solver.hp(), Solver.block(), EnergyPanel.totalCount,
+                            Solver.monsterHps(), Solver.monsterMaxHps(), Solver.monsterNames()));
+                }
+                // P3-A: this is the only place the end board exists -- read it before uninstall().
+                endDigest = Digest.ofCurrent();
+                endRng = sts1solver.mirror.RngStamp.of();
+                kept = world2.fork();
+                complete = true;
+            }
+            finally {
+                world2.uninstall();
+            }
+        }
+        catch (Throwable throwable) {
+            World.forceRestore();
+            REPLAY_FAILED_AT.set(Integer.valueOf(arrayList.size()));
+            REPLAY_FAILED_ON.set(arrayList.size() < list.size() && list.get(arrayList.size()) != null
+                    ? list.get(arrayList.size()).label : "");
+            if (throwable instanceof ReplayException) {
+                String kind = ((ReplayException)throwable).kind;
+                String detail = String.valueOf(throwable.getMessage());
+                REPLAY_FAILURE.set(detail.indexOf(kind) >= 0 ? detail : kind + ": " + detail);
+            } else {
+                REPLAY_FAILURE.set(String.valueOf(throwable));
+            }
+            Log.warn("plan replay (keeping the end board) failed at step " + arrayList.size()
+                    + ": " + throwable);
+        }
+        finally {
+            Driver.end();
+        }
+        return new ReplayEnd(arrayList, kept, endDigest, endRng, complete);
+    }
+
+    /**
      * B174 (user m21993 / m22084): what a planned potion actually buys the line.
      *
      * <p>The search charges the potion its {@link PotionBook} HP (9 for a standard one, 18000 points)
@@ -4867,7 +4974,15 @@ public final class Solver {
                 // the turns that can still be finished -- 3, then 2, then 1 -- and only for a depth
                 // that has not been reached yet: a search ahead of the clock is never capped. Half a
                 // turn is not a rung here; finish() only delivers one past HALF_TURN_ACTIONS.
-                if (this.stageAllowed) {
+                // m12550: a turn count the player picked is a promise, not a wish. The ladder below
+                // exists to turn a short CLOCK into a 3 -> 2 -> 1 promise for a player who asked for
+                // no particular depth ("walk the fight to the end" is the default, so the clock has
+                // to impose something). But once 全自动 carries 回合 4 or 回合 5, narrowing it to 1
+                // turn at 75% of the budget answers a different question than the one asked: the
+                // plan would be re-cut mid-search into something the player explicitly did not
+                // request. So the ladder only runs when there is no explicit turn limit; the budget
+                // still bounds the whole search, it just no longer rewrites the horizon.
+                if (this.stageAllowed && this.horizonLimit == 0) {
                     int achieved = this.maxTurnSeen == Integer.MIN_VALUE
                             ? 0 : this.maxTurnSeen - this.horizonRootTurn;
                     long elapsed = System.currentTimeMillis() - this.startedAt;

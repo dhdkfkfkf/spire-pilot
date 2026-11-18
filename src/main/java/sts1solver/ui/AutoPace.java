@@ -17,12 +17,19 @@ import sts1solver.util.Log;
  */
 public final class AutoPace {
 
-    /** Values the 节奏 button steps through, in ms. */
-    public static final int[] PROFILE_MS = {0, 250, 450, 750, 1000};
     /** STS2's default is one beat per action; 450 ms reads as "playing", not "sped up". */
     public static final int DEFAULT_MS = 450;
     public static final int MIN_MS = 0;
     public static final int MAX_MS = 3000;
+
+    /**
+     * Values the 节奏 button steps through, in ms.
+     *
+     * <p>m06672 asked for a speed control in 全自动. MAX_MS was already 3000 but the ladder stopped
+     * at 1000, so the slow end the setting promised was unreachable from the panel. The ladder now
+     * ends at MAX_MS by construction, and gate S91 pins that.
+     */
+    public static final int[] PROFILE_MS = {0, 250, 450, 750, 1000, 1500, 2000, MAX_MS};
 
     private AutoPace() {
     }
@@ -110,7 +117,7 @@ public final class AutoPace {
         return delayMs <= 0 ? nowMs : nowMs + delayMs;
     }
 
-    /** Next pace profile (0 -> 250 -> ... -> 1000 -> 0). Returns the new value. */
+    /** Next pace profile (0 -> 250 -> ... -> 3000 -> 0). Returns the new value. */
     public static int cycle() {
         int now = delayMs();
         int next = PROFILE_MS[0];
@@ -180,8 +187,8 @@ public final class AutoPace {
     /** One panel line. */
     public static String describe() {
         int v = delayMs();
-        return "节奏: " + (v <= 0 ? "瞬时（引擎允许就出下一张）" : "每步 " + v + "ms")
-                + "（面板「节奏」按钮切换；0/250/450/750/1000）";
+        return "节奏: " + (v <= 0 ? "瞬时（0ms，引擎允许就出下一张）" : "每步 " + v + "ms")
+                + "（面板「节奏」按钮切换；0/250/450/750/1000/1500/2000/3000）";
     }
 
     private static long readLong(String key, long fallback) {

@@ -37,7 +37,6 @@ import java.util.List;
  */
 public final class Hud implements PostRenderSubscriber {
 
-    private static volatile List<String> lines;
     private static volatile boolean enabled = true;
     private static volatile boolean demo;
     private static int failures;
@@ -236,13 +235,15 @@ public final class Hud implements PostRenderSubscriber {
         BaseMod.subscribe(new Hud());
     }
 
-    public static void set(List<String> l) {
-        lines = l;
-        if (l != null && !l.isEmpty()) {
-            sts1solver.ui.Panel.setStatus(l.get(0));
-        }
-    }
-
+    /**
+     * 1.1.0 (user m04872 "p1有必要"): the plan text is no longer pushed in here.
+     *
+     * <p>This used to be {@code set(List<String> l)}, called from 76 places in {@code Gameplay} --
+     * one of them every frame -- each time rebuilding the full status sentence list. Nothing read
+     * the words: the panel took the list, asked whether it was empty, and drew its own lines from
+     * {@code Gameplay.status()} instead (m03871). The list is still built for solver.log and the
+     * bug report; the panel just asks the state a yes/no question now.
+     */
     public static void toggle() {
         enabled = !enabled;
     }
@@ -274,6 +275,11 @@ public final class Hud implements PostRenderSubscriber {
         return System.currentTimeMillis() < demoUntil;
     }
 
+    /** m05752: the panel's click gate asks the same question the draw path does. */
+    public static boolean isDemo() {
+        return demoActive();
+    }
+
     static long demoUntil;
 
     public static int failures() {
@@ -288,10 +294,14 @@ public final class Hud implements PostRenderSubscriber {
     public void receivePostRender(SpriteBatch sb) {
         // P2-27: no overlay work on menu / character-select / fade frames either -- the panel is
         // about the fight on screen, and those frames are exactly where the game is busy loading.
-        if (!demo && !sts1solver.ui.PhaseGate.hot()) {
+        // m05752: and nothing at all outside a fight. The map, the event screens and the rest site
+        // are all GAMEPLAY, so the old check let the panel sit on top of the map with nothing to say.
+        if (!demo && !sts1solver.ui.PhaseGate.fighting()) {
             return;
         }
-        List<String> l = demoActive() ? demoLines() : lines;
+        // 1.1.0 (user m04872): no list is pushed in any more, so there is nothing to wait for. The
+        // panel draws its own lines from the live state and asks only "is there a plan to draw".
+        List<String> l = demoActive() ? demoLines() : sts1solver.ui.Panel.planGate();
         if (!enabled) {
             // P2-10: hidden means "draw nothing but the tab that brings the panel back", so the
             // mouse can undo a hide without knowing the F11 hotkey.

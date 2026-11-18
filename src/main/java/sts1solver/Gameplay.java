@@ -27,8 +27,10 @@ import sts1solver.search.EscapePolicy;
 import sts1solver.search.GrowthCredit;
 import sts1solver.search.PlanCache;
 import sts1solver.search.PostCombatHealing;
+import sts1solver.search.Prefetch;
 import sts1solver.search.Solver;
 import sts1solver.ui.AutoPace;
+import sts1solver.ui.DeepBudget;
 import sts1solver.ui.Hud;
 import sts1solver.ui.ViewState;
 import sts1solver.util.Log;
@@ -46,6 +48,25 @@ public final class Gameplay {
     private static Solver.Step pending;
     private static int pendingTurnBefore;
     private static boolean autopilot;
+
+    // ---- 1.1.0 (user m06672): 半自动 / 全自动 ---------------------------------------------------
+    // 半自动 is what the mod always did: solve once, play that line, and stop when the line runs out
+    // (m16202-2: a finished route must NOT trigger a silent re-solve). 全自动 is the opposite request
+    // -- "把这场打完" -- so there the route running out means "solve the board that is live now and
+    // keep going". Everything else (settle guard, pace, failure counter) is shared, which is why this
+    // is a mode flag and not a second code path.
+    public static final int MODE_HALF = 0;
+    public static final int MODE_FULL = 1;
+    /** 半自动 by default: a player who never asked for 全自动 must not get it by accident. */
+    private static int autoMode = MODE_HALF;
+    /** How many consecutive 全自动 re-solves happened without the board advancing. */
+    private static int autoReplans;
+    /**
+     * 全自动 stops after this many re-solves in a row with no progress. It is a brake, not a limit:
+     * a real fight advances between solves, which resets the counter (see resetAutoReplans).
+     */
+    private static final int FULL_AUTO_MAX_REPLANS = 8;
+
     /**
      * P2-14: wall clock of the earliest moment the next autoplay action may run.
      *
@@ -286,7 +307,6 @@ public final class Gameplay {
         Log.info("game paused: the search and the autopilot are paused with it");
         if (quick != null || deep != null) {
             status = "计算已暂停（游戏暂停中）";
-            Hud.set(lines());
         }
     }
 
@@ -310,7 +330,6 @@ public final class Gameplay {
         }
         Log.info("game resumed: the search continues (paused " + ms + "ms)");
         if (quick != null || deep != null) {
-            Hud.set(lines());
         }
     }
 
@@ -337,12 +356,10 @@ public final class Gameplay {
         }
         if (quick != null) {
             status = "正在计算中：先点「计算」停止它，再开始深度搜索";
-            Hud.set(lines());
             return;
         }
         if (!inFight()) {
             status = "不在战斗里";
-            Hud.set(lines());
             return;
         }
         World.forceRestore();
@@ -381,7 +398,6 @@ public final class Gameplay {
             status = "深度搜索无法启动: " + t;
             Log.error("deep search start failed", t);
         }
-        Hud.set(lines());
     }
 
     /** Stop the running deep search and keep the best line found so far. */
@@ -391,7 +407,6 @@ public final class Gameplay {
         }
         deep.requestStop();
         status = "深度搜索：正在收尾…";
-        Hud.set(lines());
     }
 
     private static void tickDeep() {
@@ -403,14 +418,12 @@ public final class Gameplay {
             deep = null;
             status = "深度搜索失败: " + t;
             Log.error("deep search failed", t);
-            Hud.set(lines());
             return;
         }
         if (!done) {
             long elapsed = now() - deepStartedAt;
             status = "深度搜索 " + (elapsed / 1000) + "s / " + deep.nodes() + " 节点 / 最优 "
                     + deep.bestActions() + " 步（点「计算」停止）";
-            Hud.set(lines());
             return;
         }
         finishDeep();
@@ -433,7 +446,6 @@ public final class Gameplay {
         Gameplay.noteSkeletonDiff("deep", skelBefore);
         if (r == null) {
             status = "深度搜索没有结果";
-            Hud.set(lines());
             return;
         }
         String after = Digest.ofCurrent();
@@ -441,7 +453,6 @@ public final class Gameplay {
             status = "搜索期间局面变化，结果已丢弃；请重新搜索";
             Log.warn("deep search: LIVE STATE CHANGED DURING SEARCH | "
                     + firstDiff(Digest.stable(before), Digest.stable(after)));
-            Hud.set(lines());
             return;
         }
         int repairs = 0;
@@ -466,7 +477,6 @@ public final class Gameplay {
         Log.info("solve: DEEP " + r.summary() + " steps=" + r.plan.size() + " budget="
                 + (elapsed / 1000) + "s renderRepairs=" + repairs + " view=" + viewFix);
         Log.info("slow steps: " + Solver.slowStepSummary());
-        Hud.set(lines());
     }
 
     // ---- quick solve (P2-9): F8 in slices, same algorithm and budget -------------------------
@@ -485,7 +495,6 @@ public final class Gameplay {
         autoplayArmed = false;
         quick.requestStop();
         status = "计算中：正在收尾…";
-        Hud.set(lines());
     }
 
     /**
@@ -514,7 +523,6 @@ public final class Gameplay {
         if (deep != null) {
             autoplayArmed = false;
             status = "深度搜索进行中：点「计算」停止";
-            Hud.set(lines());
             return;
         }
         if (quick != null) {
@@ -553,13 +561,11 @@ public final class Gameplay {
                 solveQueued = true;
                 autoplayArmed = armAutoplay;
                 status = "等这一拍结算完就开始计算…";
-                Hud.set(Gameplay.lines());
                 Log.info("solve queued (engine busy): it starts as soon as the board settles");
                 return;
             }
             autoplayArmed = false;
             status = Gameplay.refusalText(blocked);
-            Hud.set(Gameplay.lines());
             Log.info("solve refused: " + blocked);
             return;
         }
@@ -577,6 +583,18 @@ public final class Gameplay {
         ViewState view = ViewState.capture();
         String cacheKey = PlanCache.key(digest, AbstractDungeon.ascensionLevel, EscapePolicy.mode().label, origin == null ? "?" : origin.describe());
         Solver.Result cached = PlanCache.get(cacheKey);
+        boolean fromPrefetch = false;
+        // P3-A (user m07004): the pace-wait frames may already have solved this exact board. Adopt
+        // that answer only when the live digest is the one the sandbox predicted -- a prediction
+        // about a board that never happened is worthless, and the search below is the honest answer.
+        // A manual press (ignoreCacheOnce) deliberately ignores it: the player asked for a new line.
+        if (cached == null && !ignoreCacheOnce) {
+            Solver.Result predicted = sts1solver.search.Prefetch.take(digest);
+            if (predicted != null) {
+                cached = predicted;
+                fromPrefetch = true;
+            }
+        }
         if (ignoreCacheOnce) {
             ignoreCacheOnce = false;
             if (cached != null) {
@@ -596,15 +614,21 @@ public final class Gameplay {
             lastRisk = null;
             lethalConfirmed = false;
             Gameplay.syncMarkers();
-            status = "\u7f13\u5b58\u547d\u4e2d\uff08\u672a\u91cd\u65b0\u641c\u7d22\uff09";
-            Hud.set(Gameplay.lines());
-            Log.info("solve: cache hit, steps=" + cached.plan.size() + " ascension=" + AbstractDungeon.ascensionLevel + " | digest=" + digest);
+            // P3-A: "缓存命中" would be a lie about where the line came from -- a prediction is a
+            // search that ran early during the pace wait, not a stored answer being replayed.
+            status = fromPrefetch ? "预取命中（等待期间已算好）" : "缓存命中（未重新搜索）";
+            Log.info("solve: " + (fromPrefetch ? "prefetch hit" : "cache hit") + ", steps="
+                    + cached.plan.size() + " ascension=" + AbstractDungeon.ascensionLevel
+                    + " | digest=" + digest);
             if (autoplayArmed) {
                 Gameplay.beginAutoplay(autoplayReason == null ? "自动出牌" : autoplayReason);
             }
             return;
         }
         try {
+            // P3-A: a real search owns the statics from here on, so any prediction still in flight
+            // is abandoned -- it holds a World fork and nothing advances it while `quick` runs.
+            Prefetch.drop();
             World liveRoot = World.captureLive();
             long budgetMs = quickBudget();
             boolean expensive = quickNarrowDeep();
@@ -620,7 +644,6 @@ public final class Gameplay {
             // whose result may point somewhere else entirely.
             Hud.markStep(-1, -1, false);
             status = "计算中…";
-            Hud.set(lines());
             Log.info("quick search: started, budget=" + budgetMs + "ms narrow=" + expensive
                     + " ascension=" + AbstractDungeon.ascensionLevel);
         }
@@ -629,7 +652,6 @@ public final class Gameplay {
             quick = null;
             autoplayArmed = false;
             status = "solve failed: " + error;
-            Hud.set(lines());
             Log.error("solve failed", error);
         }
     }
@@ -746,7 +768,6 @@ public final class Gameplay {
             quick = null;
             Gameplay.clearPreview();
             status = "战斗已结束，计算取消";
-            Hud.set(lines());
             return;
         }
         boolean done;
@@ -760,7 +781,6 @@ public final class Gameplay {
             Gameplay.clearPreview();
             status = "计算失败: " + t;
             Log.error("quick search failed", t);
-            Hud.set(lines());
             return;
         }
         Gameplay.lastAdvanceUs = (System.nanoTime() - phaseStart) / 1000L;
@@ -795,7 +815,6 @@ public final class Gameplay {
                 status = status + timing;
             }
             phaseStart = System.nanoTime();
-            Hud.set(lines());
             Gameplay.lastHudUs = (System.nanoTime() - phaseStart) / 1000L;
             Gameplay.lastTickUs = (System.nanoTime() - tickStart) / 1000L;
             return;
@@ -1272,7 +1291,6 @@ public final class Gameplay {
         if (r == null) {
             autoplayArmed = false;
             status = "计算没有结果";
-            Hud.set(lines());
             return;
         }
         String after = Digest.ofCurrent();
@@ -1283,7 +1301,6 @@ public final class Gameplay {
             status = "计算期间局面已变化，结果已丢弃；请重新点「计算」";
             Log.warn("quick search: LIVE STATE CHANGED DURING SEARCH | "
                     + firstDiff(stableBefore, stableAfter));
-            Hud.set(lines());
             return;
         }
         if (before != null && !before.equals(after)) {
@@ -1365,7 +1382,6 @@ public final class Gameplay {
         if (!wasReplan && autoplayArmed) {
             Gameplay.beginAutoplay(autoplayReason == null ? "自动出牌" : autoplayReason);
         }
-        Hud.set(Gameplay.lines());
         Log.info("solve: QUICK " + r.summary() + " ascension=" + AbstractDungeon.ascensionLevel);
         Log.info("slow steps: " + Solver.slowStepSummary());
         Log.info("plan : " + r.planText());
@@ -1609,13 +1625,14 @@ public final class Gameplay {
                     lastRisk = null;
                     lethalConfirmed = false;
                     overFrames = 0;
-                    Hud.set(null);
                     Hud.markStep(-1, -1, false);
+                    // P3-A: a prediction is about a board in the fight that just ended. Keeping it
+                    // would let a later fight inherit an answer about a different one.
+                    Prefetch.drop();
                 }
             }
             if (inCombat && plan == null && !hintShown) {
                 hintShown = true;
-                Hud.set(Gameplay.lines());
             }
         }
         catch (Throwable ignored) {
@@ -1752,13 +1769,28 @@ public final class Gameplay {
             // m16202-2: 计算完就冻结。A plan that ran out is done, win line or not: searching again
             // on our own is exactly what read as "打几个回合它又自己算了一次". The player's 计算 is the
             // only thing that starts a new route now.
-            Gameplay.stopAutopilot("路线已走完（不代表打不过）；点「计算」可以再算一条");
+            //
+            // 1.1.0 (user m06672): 半自动 keeps that promise. 全自动 is the opposite request -- "打完这
+            // 场" -- so there the route running out is the signal to solve the board that is now live
+            // and keep playing. The two modes differ ONLY here: everything below (settle guard, pace,
+            // failure counter) is shared, so 全自动 cannot act on a half-resolved board.
+            if (autoMode != MODE_FULL) {
+                Gameplay.stopAutopilot("路线已走完（不代表打不过）；点「计算」可以再算一条");
+                return;
+            }
+            if (++autoReplans > FULL_AUTO_MAX_REPLANS) {
+                Gameplay.stopAutopilot("全自动：连续 " + autoReplans + " 次重算没有推进，已停下；点「计算」可以再试");
+                return;
+            }
+            if (Gameplay.solveAgainForAutoplay("全自动")) {
+                return;
+            }
+            Gameplay.stopAutopilot("全自动：无法在当前局面重算（不在战斗中或棋盘未稳定）");
             return;
         }
         if (!fightActive) {
             autopilot = false;
             status = "\u6218\u6597\u7ed3\u675f";
-            Hud.set(Gameplay.lines());
             return;
         }
         // Idle frames while the engine resolves an action are NOT failures. Counting them as such
@@ -1770,6 +1802,9 @@ public final class Gameplay {
         // P2-14: one beat per action. The frame loop only compares the clock -- it never sleeps --
         // so the game keeps rendering at full speed while the plan waits for its next turn.
         if (!AutoPace.due(now(), nextActionAtMs)) {
+            // P3-A (user m07004): this is dead time the player already accepted, so it is where the
+            // board the plan is about to walk into gets solved. See prefetchDuringPace().
+            Gameplay.prefetchDuringPace();
             return;
         }
         if (!Gameplay.executeStepInternal()) {
@@ -1779,6 +1814,8 @@ public final class Gameplay {
             return;
         }
         autopilotFailures = 0;
+        // A step actually landed, so the board moved: 全自动's "no progress" brake starts over.
+        Gameplay.resetAutoReplans();
         nextActionAtMs = AutoPace.nextAt(now(), AutoPace.delayMs());
     }
 
@@ -1792,6 +1829,77 @@ public final class Gameplay {
         }
         long now = now();
         return AutoPace.due(now, nextActionAtMs) ? 0L : nextActionAtMs - now;
+    }
+
+    /**
+     * P3-A (user m07004): spend the pace wait solving the board the plan is about to walk into.
+     *
+     * <p>The search cannot be threaded -- {@code World.install()} swaps JVM-global statics, so two
+     * searches are two definitions of the same variable. What CAN overlap is a search and the
+     * autopilot's own beat: with one or two steps left in the plan, the board those steps lead to
+     * is already known, and the next thing the autopilot does is ask for exactly that board.
+     *
+     * <p>So the wait frames drive {@link sts1solver.search.Prefetch}, and when the plan runs out
+     * the answer is already there. Adoption is gated on the digest, so a prediction for a board the
+     * game did not actually produce is thrown away and the live path runs unchanged -- this only
+     * ever removes a search, never changes an answer.
+     *
+     * <p>Nothing here is allowed to disturb the live path: no plan, a running search, or any
+     * failure simply means "solve it the old way".
+     */
+    private static void prefetchDuringPace() {
+        try {
+            // The live path always wins: a real search owns the statics, so a prediction cannot run
+            // beside it and must not be left behind pretending it is still current. A finished
+            // prediction is dropped too -- it still holds a World fork, and nobody will ask for it
+            // once the autopilot is off (a manual 计算 sets ignoreCacheOnce and ignores it anyway).
+            if (quick != null || deep != null || !autopilot) {
+                if (Prefetch.busy() || Prefetch.hasReady()) {
+                    Prefetch.drop();
+                }
+                return;
+            }
+            if (plan == null || plan.plan == null) {
+                if (Prefetch.busy() || Prefetch.hasReady()) {
+                    Prefetch.drop();
+                }
+                return;
+            }
+            ArrayList<Action> remaining = new ArrayList<Action>();
+            for (int i = step; i < plan.plan.size(); i++) {
+                Solver.Step s = plan.plan.get(i);
+                if (s != null && s.action != null) {
+                    remaining.add(s.action);
+                }
+            }
+            if (Prefetch.busy() || Prefetch.hasReady()) {
+                // A drift replan or a stale drop replaced the plan: what was predicted is no longer
+                // where the player is heading, so it is worthless rather than merely uncertain.
+                if (!Prefetch.stillApplies(remaining)) {
+                    Log.info("prefetch: the plan moved on, the prediction no longer applies");
+                    Prefetch.drop();
+                    return;
+                }
+            }
+            if (Prefetch.busy()) {
+                Prefetch.tick(QUICK_SLICE_MS);
+                return;
+            }
+            if (Prefetch.hasReady()) {
+                return;
+            }
+            if (remaining.isEmpty() || remaining.size() > Prefetch.TAIL_MAX_STEPS) {
+                return;
+            }
+            if (!Gameplay.inFight()) {
+                return;
+            }
+            Prefetch.begin(World.captureLive(), remaining, quickBudget(), quickNarrowDeep());
+        }
+        catch (Throwable t) {
+            Log.warn("prefetch: skipped this frame (" + t + ")");
+            Prefetch.drop();
+        }
     }
 
     private static boolean inRoomCombat() {
@@ -1815,6 +1923,8 @@ public final class Gameplay {
         plan = null;
         planBuiltAt = -1L;
         step = 0;
+        // P3-A: reset is "forget everything about this fight", and a prediction is part of it.
+        Prefetch.drop();
         // B119: a new fight starts with a clean clock (the menu state itself is the game's).
         paused = false;
         pausedSinceMs = 0L;
@@ -1838,7 +1948,6 @@ public final class Gameplay {
         lastRisk = null;
         // P2-27: the text caches belong to a plan that no longer exists.
         sts1solver.ui.Panel.clearCaches();
-        Hud.set(Gameplay.lines());
     }
 
     /**
@@ -1906,7 +2015,6 @@ public final class Gameplay {
         inCombat = false;
         hintShown = false;
         status = "\u65b0\u5bf9\u5c40/\u8bfb\u6863\uff1a\u6c42\u89e3\u5668\u5df2\u6e05\u7a7a\uff08\u70b9\u300c\u8ba1\u7b97\u300d\u91cd\u7b97\uff09";
-        Hud.set(null);
         Hud.markStep(-1, -1, false);
     }
 
@@ -1952,6 +2060,9 @@ public final class Gameplay {
             b.append(" status=").append(status == null ? "-" : status);
             if (autopilot) {
                 b.append(" pace=").append(AutoPace.delayMs()).append("ms wait=").append(Gameplay.paceWaitMs());
+                // P3-A: the prediction is the only work the mod does during that wait, so the hang
+                // dump has to say whether it is running, ready, or has ever paid off.
+                b.append(" prefetch={").append(sts1solver.search.Prefetch.describeForTest()).append("}");
             }
             b.append(" hud=").append(sts1solver.ui.Hud.markerGate());
             b.append(" ").append(sts1solver.drive.Driver.gfxState());
@@ -1986,7 +2097,6 @@ public final class Gameplay {
         }
         stepTarget = n + 1;
         status = "\u70b9\u51fb\u6267\u884c\u5230\u7b2c " + (n + 1) + " \u6b65";
-        Hud.set(Gameplay.lines());
         Log.info("click: execute through step " + (n + 1));
         return true;
     }
@@ -2016,6 +2126,119 @@ public final class Gameplay {
             return;
         }
         Log.info("loot : " + r.loot.describe());
+    }
+
+    /**
+     * 1.1.0 (user m01372): the search's state as numbers, for the panel's status strip.
+     *
+     * <p>The panel used to draw the search state as five or six sentences produced by
+     * {@link #lines()}, which cost 130-156 px of a 1080 px screen and read as a paragraph. The strip
+     * wants the same facts laid out as a bar plus three short rows, so it needs the numbers rather
+     * than a formatted sentence -- but it must not re-derive them either, because "已用 / 剩余 / 百分比"
+     * disagree with each other the moment two places compute them from different clocks.
+     *
+     * <p>So this is the one place that turns the live sessions into numbers, and {@link #lines()}
+     * keeps producing the log/report text from the same fields. A field that does not apply to the
+     * current mode is left at its "nothing to say" value (0 or empty), never a stale number.
+     */
+    public static final class Status {
+        /** A search is running right now (quick or deep). */
+        public boolean searching;
+        /** The menu is up and the search is held; the clock is not moving. */
+        public boolean paused;
+        /** True for the deep (portfolio) search, false for the quick one. */
+        public boolean deep;
+        /** 0-100, or -1 when the budget is unlimited and a percentage would be a lie. */
+        public int pct = -1;
+        public long elapsedMs;
+        /** The budget in ms; 0 when unlimited. */
+        public long budgetMs;
+        public long leftMs;
+        /** Worldlines reviewed (nodes), the headline progress figure. */
+        public int worldlines;
+        public long worldlinesPerSecond;
+        /** Steps in the best line held right now; 0 before the first pass holds one. */
+        public int bestSteps;
+        /** Beam width of the running pass, 0 when it is not a beam pass. */
+        public int beam;
+        /** Layers (whole turns) the running pass has expanded. */
+        public int layers;
+        /** Turn promise in force: how many turns ahead the search may look (0 = walk to the end). */
+        public int horizonTurns;
+        /** The promise the search started with, so the strip can say it was lowered. */
+        public int horizonLimit;
+        /** Whole turns the search has finished, so "走完 N" can be shown next to the promise. */
+        public int turnsFinished;
+        /** Milliseconds since the node counter last moved (0 when it is moving). */
+        public long stalledMs;
+        // m05226 (P1b): the panel never read the pass description or the dropped-branch text --
+        // they only ever went into lines(), which builds them itself for the log. Computing them
+        // here meant status() formatted a phase string and walked the failure map on every call,
+        // and the panel calls it five times a frame. The fields are gone rather than left
+        // write-only, so nobody starts reading a value that is no longer filled in.
+        /** True when a plan exists (the collapsed tab says "N 步" instead of "空闲"). */
+        public boolean hasPlan;
+        /** Steps in the finished plan, 0 when there is none. */
+        public int planSteps;
+
+        /** True when there is a percentage worth drawing. */
+        public boolean hasPct() {
+            return pct >= 0;
+        }
+
+        /** True when the search is alive but has stopped producing worldlines. */
+        public boolean stalled() {
+            return searching && stalledMs >= 3000L;
+        }
+    }
+
+    /** The live status, built fresh each frame from the sessions (cheap: a few field reads). */
+    public static Status status() {
+        Status s = new Status();
+        s.paused = paused && (quick != null || deep != null);
+        s.hasPlan = plan != null;
+        s.planSteps = plan == null || plan.plan == null ? 0 : plan.plan.size();
+        if (deep != null) {
+            s.searching = true;
+            s.deep = true;
+            s.elapsedMs = now() - deepStartedAt;
+            s.budgetMs = DeepBudget.unlimited(deepBudgetMs) ? 0L : Math.max(1L, deepBudgetMs);
+            if (s.budgetMs == 0L) {
+                s.pct = -1;
+                s.leftMs = 0L;
+            } else {
+                s.pct = (int) Math.min(95L, s.elapsedMs * 100L / s.budgetMs);
+                s.leftMs = Math.max(0L, s.budgetMs - s.elapsedMs);
+            }
+            s.worldlines = deep.nodes();
+            s.bestSteps = deep.bestActions();
+            s.turnsFinished = deep.turnsFinished();
+            s.horizonTurns = deep.horizonTurns();
+            s.horizonLimit = deep.horizonTurns();
+            return s;
+        }
+        if (quick != null) {
+            s.searching = true;
+            s.elapsedMs = quick.elapsedMs();
+            s.budgetMs = DeepBudget.unlimited(quick.budgetMs()) ? 0L : Math.max(1L, quick.budgetMs());
+            if (s.budgetMs == 0L) {
+                s.pct = -1;
+                s.leftMs = 0L;
+            } else {
+                s.pct = (int) Math.min(95L, s.elapsedMs * 100L / s.budgetMs);
+                s.leftMs = Math.max(0L, s.budgetMs - s.elapsedMs);
+            }
+            s.worldlines = quick.nodes();
+            s.worldlinesPerSecond = quick.nodesPerSecond();
+            s.bestSteps = quick.bestActions();
+            s.layers = quick.layers();
+            s.horizonTurns = quick.horizonTurns();
+            s.horizonLimit = quick.horizonLimit();
+            s.turnsFinished = quick.turnsFinished();
+            s.stalledMs = quick.stalledMs();
+            return s;
+        }
+        return s;
     }
 
     public static List<String> lines() {
@@ -2386,7 +2609,6 @@ public final class Gameplay {
             autopilot = resumeAutopilot;
             status = reason + "：缓存命中（未重新搜索）";
             Gameplay.syncMarkers();
-            Hud.set(Gameplay.lines());
             return true;
         }
         // B42 (user m12219): this used to be a BLOCKING 4 second search. On a board that needed a little
@@ -2397,7 +2619,6 @@ public final class Gameplay {
         autopilot = resumeAutopilot;
         if (!Gameplay.startReplanSearch(reason, cacheKey)) {
             status = reason + "：重算没开始（已有搜索在跑）；可自己出牌，或点「计算」";
-            Hud.set(Gameplay.lines());
             return false;
         }
         return true;
@@ -2434,7 +2655,6 @@ public final class Gameplay {
             Gameplay.clearPreview();
             Hud.markStep(-1, -1, false);
             status = reason + "：正在重算（用满预算）…";
-            Hud.set(lines());
             Log.info("replan search: started, budget=" + budgetMs + "ms narrow=" + expensive + " reason=" + reason);
             return true;
         }
@@ -2472,7 +2692,6 @@ public final class Gameplay {
     public static void solveLive() {
         if (deep != null) {
             status = "深度搜索进行中：点「计算」停止";
-            Hud.set(lines());
             return;
         }
         String digestAfterSearch;
@@ -2492,7 +2711,6 @@ public final class Gameplay {
         String blocked = Gameplay.blockedReason();
         if (blocked != null) {
             status = Gameplay.refusalText(blocked);
-            Hud.set(Gameplay.lines());
             Log.info("solve refused: " + blocked);
             return;
         }
@@ -2518,7 +2736,6 @@ public final class Gameplay {
             lethalConfirmed = false;
             Gameplay.syncMarkers();
             status = "\u7f13\u5b58\u547d\u4e2d\uff08\u672a\u91cd\u65b0\u641c\u7d22\uff09";
-            Hud.set(Gameplay.lines());
             Log.info("solve: cache hit, steps=" + cached.plan.size() + " ascension="
                     + AbstractDungeon.ascensionLevel + " | digest=" + digestBeforeSearch);
             return;
@@ -2575,14 +2792,12 @@ public final class Gameplay {
         catch (Throwable error) {
             World.forceRestore();
             status = "solve failed: " + error;
-            Hud.set(Gameplay.lines());
             Log.error("solve failed", error);
             return;
         }
         if (!digestBeforeSearch.equals(digestAfterSearch)) {
             status = "solver corrupted the live fight";
             Log.error("LIVE STATE CHANGED DURING SEARCH", null);
-            Hud.set(Gameplay.lines());
             return;
         }
         List<String> renderDiffs = RenderState.diff(renderSnap, RenderState.capture());
@@ -2617,7 +2832,6 @@ public final class Gameplay {
         } else {
             status = sts1solver.search.PlanText.headline(found);
         }
-        Hud.set(Gameplay.lines());
         Log.info("solve: " + found.summary() + " ascension=" + AbstractDungeon.ascensionLevel);
         Log.info("plan : " + found.planText());
         Gameplay.logLoot(found);
@@ -2793,7 +3007,6 @@ public final class Gameplay {
         autoplayArmed = false;
         nextActionAtMs = 0L;
         status = reason;
-        Hud.set(Gameplay.lines());
         Log.warn("autopilot stopped: " + reason);
     }
 
@@ -2823,7 +3036,6 @@ public final class Gameplay {
             autopilot = false;
             nextActionAtMs = 0L;
             status = reason + "：正在计算（和「计算」同一条路）…";
-            Hud.set(Gameplay.lines());
             Log.info("autopilot: solving again through the 计算 path (" + reason + ")");
             return true;
         }
@@ -2845,17 +3057,14 @@ public final class Gameplay {
     private static boolean executeStepInternal() {
         if (!Gameplay.hasPlan()) {
             status = "\u65e0\u8ba1\u5212\uff1b\u8bf7\u70b9\u300c\u8ba1\u7b97\u300d";
-            Hud.set(Gameplay.lines());
             return false;
         }
         if (pending != null) {
             status = "\u4e0a\u4e00\u6b65\u8fd8\u5728\u6267\u884c\uff08\u7b49\u6e38\u620f\u63a8\u8fdb\uff09";
-            Hud.set(Gameplay.lines());
             return false;
         }
         if (Gameplay.dropStalePlan()) {
             status = "计划已过期（已经进入新回合）；点「计算」重算";
-            Hud.set(Gameplay.lines());
             return false;
         }
         Solver.Step step = Gameplay.step >= 0 && Gameplay.plan.plan != null
@@ -2864,12 +3073,10 @@ public final class Gameplay {
         String string = Gameplay.blockedReason(step == null ? null : step.action);
         if (string != null) {
             status = "\u65e0\u6cd5\u6267\u884c: " + string;
-            Hud.set(Gameplay.lines());
             return false;
         }
         if (step == null) {
             status = "\u8ba1\u5212\u5df2\u7ecf\u8d70\u5b8c\uff1b\u70b9\u300c\u8ba1\u7b97\u300d\u91cd\u7b97";
-            Hud.set(Gameplay.lines());
             return false;
         }
         if (step.action.isEndTurn()) {
@@ -2885,7 +3092,6 @@ public final class Gameplay {
                 if (!lethalConfirmed) {
                     lethalConfirmed = true;
                     status = lastRisk.describe() + "\uff1b\u518d\u70b9\u300c\u6267\u884c\u4e00\u6b65\u300d\u5f3a\u5236\u6267\u884c";
-                    Hud.set(Gameplay.lines());
                     return false;
                 }
                 lethalConfirmed = false;
@@ -2902,7 +3108,6 @@ public final class Gameplay {
         pendingTurnBefore = GameActionManager.turn;
         settleReportAt = 0L;
         status = "\u6267\u884c\u4e2d: " + step.action.label + "\uff08\u7b49\u6e38\u620f\u63a8\u8fdb\uff09";
-        Hud.set(Gameplay.lines());
         return true;
     }
 
@@ -3282,7 +3487,6 @@ public final class Gameplay {
             return;
         }
         status = why;
-        Hud.set(Gameplay.lines());
     }
 
     /**
@@ -3304,7 +3508,6 @@ public final class Gameplay {
             return;
         }
         status = why;
-        Hud.set(Gameplay.lines());
     }
 
     /**
@@ -3326,7 +3529,6 @@ public final class Gameplay {
                 + skipped + " 步，接着执行下一步）";
         Log.info("execute: " + why);
         status = why;
-        Hud.set(Gameplay.lines());
     }
 
     /**
@@ -3578,7 +3780,6 @@ public final class Gameplay {
             }
             if (answerNextScreen()) {
                 status = "\u9009\u724c\uff1a" + choiceSegmentText();
-                Hud.set(Gameplay.lines());
                 Log.info("latent selection answered with [" + choiceSegmentText() + "]"
                         + " (the screen opened after its step had been checked)");
                 return;
@@ -3750,7 +3951,6 @@ public final class Gameplay {
             } else {
                 status = why;
             }
-            Hud.set(Gameplay.lines());
             return;
         }
         if (Driver.selectionKind() == Driver.SelectionKind.REWARD) {
@@ -3769,7 +3969,6 @@ public final class Gameplay {
                     Gameplay.stopAutopilot(whyReward);
                 } else {
                     status = whyReward;
-                    Hud.set(Gameplay.lines());
                 }
                 return;
             }
@@ -3780,7 +3979,6 @@ public final class Gameplay {
                     : answerNextScreen();
             if (answered) {
                 status = "\u9009\u724c\uff1a" + pickText;
-                Hud.set(Gameplay.lines());
                 Log.info("execute: answered card reward with " + pick);
                 return;
             }
@@ -3807,14 +4005,12 @@ public final class Gameplay {
                     Gameplay.stopAutopilot(why);
                 } else {
                     status = why;
-                    Hud.set(Gameplay.lines());
                 }
                 return;
             }
             boolean answered = answerNextScreen();
             if (answered) {
                 status = "\u9009\u724c\uff1a" + choiceSegmentText();
-                Hud.set(Gameplay.lines());
                 Log.info("execute: answered selection with " + planned);
                 lastActionAtMs = now();
                 Driver.clearSelectionRetry();
@@ -3830,7 +4026,6 @@ public final class Gameplay {
                 Log.warnEvery("selection-retry", 5000L, "a filled answer is still waiting for the action that opened the screen ("
                         + Driver.selectionKind() + ") at step " + (Gameplay.step + 1));
                 status = "\u9009\u724c\u4e2d\uff1a\u7b49\u8fd9\u4e00\u6b65\u7ed3\u7b97";
-                Hud.set(Gameplay.lines());
                 return;
             }
             // B77 (m21571): the plan survives a selection the autopilot could not answer. Only the
@@ -3845,7 +4040,6 @@ public final class Gameplay {
                     Gameplay.stopAutopilot(why49);
                 } else {
                     status = why49;
-                    Hud.set(Gameplay.lines());
                 }
                 return;
             }
@@ -3855,7 +4049,6 @@ public final class Gameplay {
                 return;
             }
             status = whySel;
-            Hud.set(Gameplay.lines());
             Hud.markStep(-1, -1, false);
             Log.warn("execute: could not answer the open selection; handing control back (" + Driver.selectionKind() + ")");
             return;
@@ -3883,7 +4076,6 @@ public final class Gameplay {
                 Gameplay.stopAutopilot(why);
             } else {
                 status = why;
-                Hud.set(Gameplay.lines());
             }
             return;
         }
@@ -3975,7 +4167,6 @@ public final class Gameplay {
             if (autopilot) {
                 Gameplay.stopAutopilot(status);
             } else {
-                Hud.set(Gameplay.lines());
             }
             return;
         }
@@ -3983,7 +4174,6 @@ public final class Gameplay {
         if (Gameplay.step >= Gameplay.plan.plan.size()) {
             status = "\u8ba1\u5212\u6267\u884c\u5b8c\u6bd5\uff08" + (Gameplay.plan.win ? "\u80dc\u7ebf" : (Gameplay.plan.escaped ? "\u9003\u8dd1" : "\u672a\u80dc")) + "\uff09";
         }
-        Hud.set(Gameplay.lines());
     }
 
     /**
@@ -4064,7 +4254,6 @@ public final class Gameplay {
             // Turning autopilot on without a plan is a request to solve and go, not an error.
             if (!Gameplay.inFight()) {
                 status = "\u672a\u5728\u6218\u6597\u4e2d\uff1a\u5148\u8fdb\u5165\u4e00\u573a\u6218\u6597";
-                Hud.set(Gameplay.lines());
                 return;
             }
             if (quick != null) {
@@ -4072,20 +4261,17 @@ public final class Gameplay {
                 if (autoplayArmed) {
                     autoplayArmed = false;
                     status = "已取消：算完不会自动出牌";
-                    Hud.set(Gameplay.lines());
                     Log.info("autopilot: arming cancelled on the running search");
                     return;
                 }
                 autoplayArmed = true;
                 autoplayReason = "自动出牌";
                 status = "计算中：算完自动开始出牌（再按一次取消）";
-                Hud.set(Gameplay.lines());
                 Log.info("autopilot: armed on the running search");
                 return;
             }
             if (deep != null) {
                 status = "\u6df1\u5ea6\u641c\u7d22\u8fdb\u884c\u4e2d\uff1a\u5148\u70b9\u300c\u8ba1\u7b97\u300d\u505c\u6b62\u5b83";
-                Hud.set(Gameplay.lines());
                 return;
             }
             // B51 (m15336-2): 自动出牌 IS 计算 + 自动执行. The old path called the blocking solveLive()
@@ -4094,7 +4280,6 @@ public final class Gameplay {
             Gameplay.startQuickSolve(true);
             if (!Gameplay.hasPlan()) {
                 status = "正在计算（和「计算」同一条路）：算完自动开始出牌";
-                Hud.set(Gameplay.lines());
                 return;
             }
             if (autopilot) {
@@ -4103,10 +4288,13 @@ public final class Gameplay {
             }
             // A cached line that is not a win: fall through to the usual confirmation press.
         }
-        if (!(autopilot || plan == null || Gameplay.plan.win || Gameplay.plan.escaped || weakConfirmed)) {
+        // m07347: 全自动 is NOT asking to win -- it is asking for the best short-horizon line, so a
+        // survival line IS the answer there. The confirmation press exists to stop 半自动 from
+        // playing a weak line silently; in 全自动 it only stalls the run before the first card.
+        if (!(autopilot || Gameplay.fullAuto() || plan == null || Gameplay.plan.win
+                || Gameplay.plan.escaped || weakConfirmed)) {
             weakConfirmed = true;
             status = "\u672a\u627e\u5230\u80dc\u7ebf\uff08\u53ea\u662f\u5c3d\u529b\u7ebf\uff09\uff1b\u518d\u70b9\u300c\u81ea\u52a8\u51fa\u724c\u300d\u786e\u8ba4\u6267\u884c";
-            Hud.set(Gameplay.lines());
             return;
         }
         if (autopilot) {
@@ -4123,7 +4311,6 @@ public final class Gameplay {
         // goes through, so 自动 and the armed 算完开始 path behave the same.
         if (plan != null && !plan.planVerified) {
             status = sts1solver.search.PlanText.headline(plan);
-            Hud.set(Gameplay.lines());
             Log.warn("autopilot: not playing a line that did not replay | " + status);
             return;
         }
@@ -4135,7 +4322,6 @@ public final class Gameplay {
         weakConfirmed = false;
         autoplayArmed = false;
         status = "\u81ea\u52a8\u6267\u884c\u4e2d\uff08\u518d\u70b9\u300c\u81ea\u52a8\u51fa\u724c\u300d\u505c\u6b62\uff09";
-        Hud.set(Gameplay.lines());
         Log.info("autopilot on");
     }
 
@@ -4146,7 +4332,6 @@ public final class Gameplay {
         nextActionAtMs = 0L;
         weakConfirmed = false;
         status = "\u81ea\u52a8\u6267\u884c\u5df2\u505c\u6b62";
-        Hud.set(Gameplay.lines());
         Log.info("autopilot off");
     }
 
@@ -4161,15 +4346,16 @@ public final class Gameplay {
         autoplayArmed = false;
         if (plan == null || !Gameplay.hasPlan()) {
             status = why + "：算完了，但没有可执行的步骤";
-            Hud.set(Gameplay.lines());
             return;
         }
-        if (plan.win || plan.escaped) {
+        // m07347: same rule as the toggleAutopilot gate -- 全自动 wants the best short line, not a
+        // win, so it plays a survival line without a second press. The B78 replay check below in
+        // startAutoplay() still refuses an unverified line; that one is about safety, not intent.
+        if (plan.win || plan.escaped || Gameplay.fullAuto()) {
             Gameplay.startAutoplay();
             return;
         }
         status = why + "：" + sts1solver.search.PlanText.headline(plan) + "；这是尽力线，再按一次\u300c\u81ea\u52a8\u300d\u6267\u884c";
-        Hud.set(Gameplay.lines());
         Log.info("autopilot: the adopted line is a survival line, waiting for confirmation");
     }
 
@@ -4192,6 +4378,38 @@ public final class Gameplay {
         autopilot = true;
         autoplayArmed = false;
         nextActionAtMs = 0L;
+    }
+
+    /**
+     * Harness hook (S259): autopilot off while the PLAN stays installed.
+     *
+     * <p>{@link #installPlanForTest} turns the autopilot on, and the confirmation-press gate only
+     * runs when it is off -- so a gate that wants to press 自动出牌 on an installed line needs to get
+     * back to that state without dropping the line.
+     */
+    public static void markAutopilotOffForTest() {
+        Gameplay.markAutopilotOff();
+    }
+
+    /** Harness hook (S260): clear the autopilot state a gate turned on, without touching the plan. */
+    public static void stopAutopilotForTest() {
+        Gameplay.stopAutopilot("gate cleanup");
+    }
+
+    /**
+     * Harness hook (S264): run one scheduler slice of the pace wait, without waiting for the clock.
+     *
+     * <p>{@link #prefetchDuringPace} only runs on the frames where the autopilot is deliberately
+     * idling, so a gate that wants to see it start a prediction would otherwise have to fake a
+     * whole frame loop.
+     */
+    public static void prefetchDuringPaceForTest() {
+        Gameplay.prefetchDuringPace();
+    }
+
+    /** Harness hook (S264): park the autopilot on its pace wait, so a tick cannot play a step. */
+    public static void setPaceWaitForTest(long ms) {
+        nextActionAtMs = now() + Math.max(0L, ms);
     }
 
     public static int lastDriftStepForTest() {
@@ -4218,7 +4436,12 @@ public final class Gameplay {
         nextActionAtMs = 0L;
         lastActionAtMs = 0L;
         status = "";
-        Hud.set(Gameplay.lines());
+        // S177/S180: this hook used to end with Hud.set(Gameplay.lines()), and buildRoute() ran as a
+        // side effect of that. Hud.set was removed in 1.1.0 (the panel asks Gameplay.status()
+        // instead), which left route empty until some later frame happened to call lines() -- the
+        // gates read route() straight away, so they saw nothing. Build it here, where the plan is
+        // installed, rather than depend on a renderer that no longer reads this list.
+        buildRoute();
     }
 
     /** Probe hook (S184, B126): pretend one step of the plan is in flight. */
@@ -4300,6 +4523,67 @@ public final class Gameplay {
         return autopilot;
     }
 
+    /** MODE_HALF or MODE_FULL. See the field block for why this is one flag, not two paths. */
+    public static int autoMode() {
+        return autoMode;
+    }
+
+    public static boolean fullAuto() {
+        return autoMode == MODE_FULL;
+    }
+
+    /**
+     * 半自动 -> 全自动 -> 半自动. Turning it off also stops a running autopilot: leaving it on while
+     * the mode says 半自动 would be a state the panel cannot draw.
+     */
+    public static void cycleAutoMode() {
+        autoMode = autoMode == MODE_FULL ? MODE_HALF : MODE_FULL;
+        autoReplans = 0;
+        if (autoMode == MODE_HALF) {
+            // m07347: the switch has to take effect NOW, not when the running search lands. 半自动
+            // must never start playing by itself, so an armed solve loses its arming even while the
+            // search is still in flight (the search itself keeps going -- 计算 asked for it).
+            boolean wasArmed = autoplayArmed;
+            autoplayArmed = false;
+            if (autopilot) {
+                Gameplay.stopAutopilot("已切回半自动：路线走完就停");
+                return;
+            }
+            if (wasArmed) {
+                status = "已切回半自动：算完不会自动出牌";
+                Log.info("auto mode: half, arming cancelled on the running search");
+                return;
+            }
+        }
+        status = autoMode == MODE_FULL
+                ? "全自动：路线走完会接着算，直到战斗结束（再点「自动出牌」停止）"
+                : "半自动：算完这条线，走完就停";
+        Log.info("auto mode: " + (autoMode == MODE_FULL ? "full" : "half"));
+    }
+
+    /**
+     * 全自动 counts consecutive re-solves with no progress as a brake. Anything that proves the board
+     * moved (a step actually executed, a new fight) resets it -- see the call sites.
+     */
+    private static void resetAutoReplans() {
+        autoReplans = 0;
+    }
+
+    /** Probe hook: the brake counter, so a gate can prove it stops instead of looping forever. */
+    public static int autoReplansForTest() {
+        return autoReplans;
+    }
+
+    /**
+     * Probe hook: force the mode. The gates run in one process, so a gate that leaves 全自动 on would
+     * silently change what the next gate measures -- S99 in particular asserts that a finished route
+     * STOPS the autopilot, which is only true in 半自动.
+     */
+    public static void setAutoModeForTest(int mode) {
+        autoMode = mode == MODE_FULL ? MODE_FULL : MODE_HALF;
+        autoReplans = 0;
+    }
+
     public static void onEscapePolicyChanged(EscapePolicy.Mode mode) {
         Log.info("escape policy: " + mode.label);
         if (plan != null) {
@@ -4308,7 +4592,6 @@ public final class Gameplay {
         } else {
             status = "\u9003\u8dd1\u7b56\u7565\uff1a \u300c" + mode.label + "\u300d";
         }
-        Hud.set(Gameplay.lines());
     }
 
     public static void executePlan() {

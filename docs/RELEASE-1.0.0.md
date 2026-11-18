@@ -5,7 +5,8 @@
 再在预算内搜索出最近数回合的出牌路线。
 
 本仓库是 [STS1 Engine Solver](https://github.com/zck070718/sts1-engine-solver)（作者 闪珖灵感菇，MIT）的衍生版本：
-以该项目 1.0.3 为基线继续开发，并把 1.0.4 到 1.0.15 的全部改动合并为本次 1.0.0 发布。
+以该项目 1.0.3 为基线继续开发，`0.1.0` 到 `1.0.0` 是本项目自己在上游 1.0.3 基础上的连续改良，逐项列在
+[CHANGELOG.md](../CHANGELOG.md) 里，每条都对应本仓库自己的版本号。
 来源与许可声明见 [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)。
 
 ## 下载

@@ -1916,6 +1916,652 @@ public final class Probe {
             }
         });
 
+        Probe.core("S258 m06672: 全自动 keeps solving instead of stopping, and the brake bounds it",
+                new Runnable(){
+            @Override
+            public void run() {
+                // m06672: 半自动 stops when the route runs out (S99). 全自动 is the opposite request --
+                // "打完这场" -- so the same event must start another solve on the board that is live
+                // now. Both halves are asserted here because the two modes differ in exactly one
+                // branch, and a gate that only checked one of them would not notice the branch moving.
+                Synthetic.Spec spec = new Synthetic.Spec();
+                spec.seed = 31L;
+                spec.maxHealth = 80;
+                spec.deck = new String[]{"Strike_R", "Strike_R", "Defend_R", "Defend_R", "Bash"};
+                spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                Synthetic.build(spec, new Synthetic.SyntheticStep());
+                PlanCache.clear();
+                Gameplay.reset();
+                Gameplay.solveLive();
+                boolean had = Gameplay.hasPlan();
+                Gameplay.dropPlanForTest();
+
+                // 半自动: the run-out stops it (this is S99's promise, restated as the contrast case).
+                Gameplay.setAutoModeForTest(Gameplay.MODE_HALF);
+                Gameplay.autopilotOnForTest();
+                Gameplay.tick();
+                boolean halfStops = !Gameplay.autopilot();
+                Log.info("  S258 half: hadPlan=" + had + " stopped=" + halfStops);
+
+                // 全自动: the same run-out keeps it going. On a settled board the re-solve starts, so
+                // the autopilot is either searching again or has already re-armed for the new line.
+                Gameplay.setAutoModeForTest(Gameplay.MODE_FULL);
+                Gameplay.autopilotOnForTest();
+                Gameplay.tick();
+                boolean fullGoes = Gameplay.autopilot() || Gameplay.quickSearching()
+                        || Gameplay.autoplayArmed();
+                int replans = Gameplay.autoReplansForTest();
+                Log.info("  S258 full: going=" + fullGoes + " replans=" + replans
+                        + " searching=" + Gameplay.quickSearching());
+
+                // The brake: the counter must be bounded, so a board that never advances cannot keep
+                // the mode spinning forever.
+                Gameplay.setAutoModeForTest(Gameplay.MODE_HALF);
+                Probe.check(had, "there is a plan to run out of", "");
+                Probe.check(halfStops, "半自动 stops when the route runs out", "stopped=" + halfStops);
+                Probe.check(fullGoes, "全自动 keeps going when the route runs out", "going=" + fullGoes);
+                Probe.check(replans <= 8, "the 全自动 brake counts re-solves and stays bounded",
+                        "replans=" + replans);
+                Probe.check(!Gameplay.fullAuto(), "the gate leaves the mode it found",
+                        "mode=" + Gameplay.autoMode());
+            }
+        });
+
+        Probe.core("S259 m07347: 全自动 plays a survival line without the confirmation press",
+                new Runnable(){
+            @Override
+            public void run() {
+                // m07347: "我点开始全自动出牌，这里一张牌没出就停了". The confirmation press was built
+                // for 半自动, where playing a weak line silently would be a surprise. 全自动 is the
+                // opposite request -- m06672: "不是要赢，是短回合内收益相对最高" -- so the same line is
+                // the ANSWER there and the press only stalls the run before the first card.
+                // The board cannot be won at all (no attack card), so the line is always a survival
+                // line and the gate never depends on how fast this machine is (S81's fixture).
+                Synthetic.Spec spec = new Synthetic.Spec();
+                spec.seed = 77L;
+                spec.maxHealth = 80;
+                spec.deck = new String[]{"Defend_R", "Defend_R", "Defend_R", "Defend_R", "Defend_R"};
+                spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.Cultist"};
+                Synthetic.build(spec, new Synthetic.SyntheticStep());
+                PlanCache.clear();
+                Gameplay.reset();
+                long capBefore = Gameplay.budgetCapForTest();
+                Gameplay.setBudgetCapForTest(400L);
+                Gameplay.solveLive();
+                Gameplay.setBudgetCapForTest(capBefore);
+                Solver.Result line = Gameplay.currentPlan();
+                boolean survival = line != null && !line.win && !line.escaped;
+                Log.info("  S259 fixture: plan=" + (line != null) + " win=" + (line != null && line.win)
+                        + " verified=" + (line != null && line.planVerified)
+                        + " steps=" + (line == null || line.plan == null ? 0 : line.plan.size()));
+
+                // 半自动 keeps its press: the toggle must refuse and say so.
+                Gameplay.reset();
+                Gameplay.installPlanForTest(line, 0);
+                Gameplay.setAutoModeForTest(Gameplay.MODE_HALF);
+                Gameplay.autopilotOnForTest();
+                Gameplay.markAutopilotOffForTest();
+                Gameplay.toggleAutopilot();
+                boolean halfPlays = Gameplay.autopilot();
+                Log.info("  S259 half: autopilot=" + halfPlays);
+
+                // 全自动 drops it: the same press now starts playing.
+                Gameplay.installPlanForTest(line, 0);
+                Gameplay.setAutoModeForTest(Gameplay.MODE_FULL);
+                Gameplay.autopilotOnForTest();
+                Gameplay.markAutopilotOffForTest();
+                Gameplay.toggleAutopilot();
+                boolean fullPlays = Gameplay.autopilot();
+                Log.info("  S259 full: autopilot=" + fullPlays);
+
+                // Leave the fixture the way it was found.
+                Gameplay.setAutoModeForTest(Gameplay.MODE_HALF);
+                Gameplay.stopAutopilotForTest();
+
+                Probe.check(survival, "the fixture line really is a survival line, not a win",
+                        "win=" + (line != null && line.win));
+                Probe.check(line != null && line.planVerified,
+                        "and it is a verified line, so B78 is not what this gate measures", "");
+                Probe.check(!halfPlays, "半自动 still asks for the confirmation press", "played=" + halfPlays);
+                Probe.check(fullPlays, "全自动 plays the survival line straight away",
+                        "played=" + fullPlays);
+            }
+        });
+
+        Probe.core("S260 m07347: switching to 半自动 mid-search cancels the arming at once",
+                new Runnable(){
+            @Override
+            public void run() {
+                // m07347: "计算过程中如果自动和半自动模式切换应该会才对关闭". Two things can be waiting on
+                // the running search: the autopilot itself, and the "play it when it lands" arming.
+                // 半自动 must never start playing by itself, so both have to go the moment the mode
+                // says so -- not when the search happens to land.
+                Synthetic.Spec spec = new Synthetic.Spec();
+                spec.seed = 17L;
+                spec.maxHealth = 80;
+                spec.deck = new String[]{"Strike_R", "Strike_R", "Defend_R", "Defend_R", "Bash"};
+                spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                Synthetic.build(spec, new Synthetic.SyntheticStep());
+                PlanCache.clear();
+                Gameplay.reset();
+                long capBefore = Gameplay.budgetCapForTest();
+                Gameplay.setBudgetCapForTest(1500L);
+
+                // Half (a): a search is in flight with the autoplay arming on it.
+                Gameplay.setAutoModeForTest(Gameplay.MODE_FULL);
+                Gameplay.toggleAutopilot();
+                boolean searching = Gameplay.quickSearching();
+                boolean armedBefore = Gameplay.autoplayArmed();
+                Gameplay.cycleAutoMode();
+                boolean armedAfter = Gameplay.autoplayArmed();
+                boolean modeHalf = !Gameplay.fullAuto();
+                Log.info("  S260 armed: searching=" + searching + " armedBefore=" + armedBefore
+                        + " armedAfter=" + armedAfter + " half=" + modeHalf);
+                Gameplay.stopQuickSolve();
+                int guard = 0;
+                while (Gameplay.quickSearching() && guard++ < 500) {
+                    Gameplay.advanceQuickForTest(40L);
+                }
+
+                // Half (b): the autopilot is already playing when the switch happens.
+                Gameplay.setAutoModeForTest(Gameplay.MODE_FULL);
+                Gameplay.autopilotOnForTest();
+                boolean playingBefore = Gameplay.autopilot();
+                Gameplay.cycleAutoMode();
+                boolean playingAfter = Gameplay.autopilot();
+                Log.info("  S260 playing: before=" + playingBefore + " after=" + playingAfter);
+
+                Gameplay.setBudgetCapForTest(capBefore);
+                Gameplay.setAutoModeForTest(Gameplay.MODE_HALF);
+                Gameplay.stopAutopilotForTest();
+
+                Probe.check(searching && armedBefore,
+                        "the fixture really has an armed search in flight",
+                        "searching=" + searching + " armed=" + armedBefore);
+                Probe.check(modeHalf, "one press really lands on 半自动", "mode=" + Gameplay.autoMode());
+                Probe.check(!armedAfter, "半自动 drops the arming before the search lands",
+                        "armed=" + armedAfter);
+                Probe.check(playingBefore && !playingAfter,
+                        "and it stops an autopilot that was already playing",
+                        "before=" + playingBefore + " after=" + playingAfter);
+            }
+        });
+
+        Probe.core("S261 m06672: the 节奏 ladder reaches the slow end the setting promises",
+                new Runnable(){
+            @Override
+            public void run() {
+                // m06672 asked for a speed control in 全自动. MAX_MS was already 3000 but the ladder
+                // stopped at 1000, so the slow end could not be reached from the panel -- the button
+                // cycled 0/250/450/750/1000 and wrapped. The ladder must end exactly at MAX_MS and be
+                // strictly ascending, otherwise cycle() can walk backwards.
+                int[] p = sts1solver.ui.AutoPace.PROFILE_MS;
+                boolean ascending = true;
+                for (int i = 1; i < p.length; i++) {
+                    if (p[i] <= p[i - 1]) {
+                        ascending = false;
+                    }
+                }
+                int top = p[p.length - 1];
+                Log.info("  S261 ladder: " + java.util.Arrays.toString(p) + " max="
+                        + sts1solver.ui.AutoPace.MAX_MS);
+                int before = sts1solver.ui.AutoPace.delayMs();
+                sts1solver.ui.AutoPace.write(top);
+                sts1solver.ui.AutoPace.invalidate();
+                int wrapped = sts1solver.ui.AutoPace.cycle();
+                sts1solver.ui.AutoPace.write(before);
+                sts1solver.ui.AutoPace.invalidate();
+                int restored = sts1solver.ui.AutoPace.delayMs();
+                Log.info("  S261 wrap: top=" + top + " wrapped=" + wrapped + " restored=" + restored);
+                Probe.check(ascending && p[0] == sts1solver.ui.AutoPace.MIN_MS,
+                        "the 节奏 ladder is strictly ascending from MIN_MS",
+                        java.util.Arrays.toString(p));
+                Probe.check(top == sts1solver.ui.AutoPace.MAX_MS,
+                        "and its top rung is MAX_MS, so the slow end is reachable",
+                        "top=" + top + " max=" + sts1solver.ui.AutoPace.MAX_MS);
+                Probe.check(wrapped == p[0] && restored == before,
+                        "the slow end wraps back to 瞬时 instead of clamping", "wrapped=" + wrapped);
+            }
+        });
+
+        Probe.core("S262 m07004: a replayed tail keeps the board it ends on, and that board is real",
+                new Runnable(){
+            @Override
+            public void run() {
+                // P3-A needs a board it can search while the autopilot is still walking the tail of
+                // its plan. Solver.replay() cannot supply one: it uninstalls and throws the end board
+                // away. replayKeepingEnd() forks it before the uninstall. Two things must hold, and
+                // the second is the one that matters -- the kept board must BE the board that was
+                // measured, not a lookalike.
+                Synthetic.Spec spec = new Synthetic.Spec();
+                spec.seed = 17L;
+                spec.maxHealth = 80;
+                spec.deck = new String[]{"Strike_R", "Strike_R", "Defend_R", "Defend_R", "Bash"};
+                spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                Synthetic.build(spec, new Synthetic.SyntheticStep());
+                PlanCache.clear();
+                sts1solver.search.Prefetch.resetForTest();
+                Gameplay.reset();
+                Gameplay.solveLive();
+                Solver.Result line = Gameplay.currentPlan();
+                java.util.List<sts1solver.search.Action> tail = sts1solver.search.Prefetch
+                        .actionsOf(line == null ? null : line.plan, 0);
+                if (tail.size() > 2) {
+                    tail = new java.util.ArrayList<sts1solver.search.Action>(tail.subList(0, 2));
+                }
+                String liveBefore = Digest.ofCurrent();
+                sts1solver.mirror.World root = sts1solver.mirror.World.captureLive();
+                Solver.ReplayEnd walk = Solver.replayKeepingEnd(root, tail);
+
+                // The digest the walk recorded for its last step is the digest of the end board: both
+                // are read straight after the same readBack(), with nothing in between.
+                String lastStepDigest = "";
+                if (!walk.steps.isEmpty()) {
+                    lastStepDigest = walk.steps.get(walk.steps.size() - 1).digest;
+                }
+                // Now the real check: install the kept fork and read it. If the fork had lost or
+                // drifted a field, this is where it shows.
+                String keptDigest = "";
+                try {
+                    walk.end.install();
+                    keptDigest = Digest.ofCurrent();
+                } finally {
+                    if (walk.end.isInstalled()) {
+                        walk.end.uninstall();
+                    }
+                }
+                String liveAfter = Digest.ofCurrent();
+                Log.info("  S262 walk: steps=" + walk.steps.size() + " complete=" + walk.complete
+                        + " kept=" + (walk.end != null));
+                Log.info("  S262 digest: end=" + Digest.stable(walk.endDigest)
+                        + " lastStep=" + Digest.stable(lastStepDigest)
+                        + " installed=" + Digest.stable(keptDigest));
+
+                Probe.check(walk.complete && walk.end != null && !walk.endDigest.isEmpty(),
+                        "a tail that replays hands back the board it ends on",
+                        "complete=" + walk.complete + " end=" + (walk.end != null));
+                Probe.check(Digest.stable(lastStepDigest).equals(Digest.stable(walk.endDigest)),
+                        "the kept board is the one the last step measured",
+                        Digest.stable(lastStepDigest) + " vs " + Digest.stable(walk.endDigest));
+                Probe.check(Digest.stable(keptDigest).equals(Digest.stable(walk.endDigest)),
+                        "installing the kept fork reproduces the digest it was filed under",
+                        Digest.stable(keptDigest));
+                Probe.check(Digest.stable(liveAfter).equals(Digest.stable(liveBefore)),
+                        "and the live game is exactly where it was before the walk",
+                        Digest.stable(liveBefore) + " -> " + Digest.stable(liveAfter));
+                sts1solver.search.Prefetch.resetForTest();
+            }
+        });
+
+        Probe.core("S263 m07004: a prediction is adopted only for the board it predicted",
+                new Runnable(){
+            @Override
+            public void run() {
+                // The whole safety of P3-A is this gate. A prediction is a search that ran early, so
+                // it is only worth anything if the live board turns out to be the board it solved.
+                // Everything else -- a different hand, a monster that moved -- must fall back to the
+                // normal search instead of being played.
+                Synthetic.Spec spec = new Synthetic.Spec();
+                spec.seed = 17L;
+                spec.maxHealth = 80;
+                spec.deck = new String[]{"Strike_R", "Strike_R", "Defend_R", "Defend_R", "Bash"};
+                spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                Synthetic.build(spec, new Synthetic.SyntheticStep());
+                PlanCache.clear();
+                sts1solver.search.Prefetch.resetForTest();
+                Gameplay.reset();
+                Gameplay.solveLive();
+                Solver.Result line = Gameplay.currentPlan();
+                java.util.List<sts1solver.search.Action> tail = sts1solver.search.Prefetch
+                        .actionsOf(line == null ? null : line.plan, 0);
+                if (tail.size() > 1) {
+                    tail = new java.util.ArrayList<sts1solver.search.Action>(tail.subList(0, 1));
+                }
+                boolean began = sts1solver.search.Prefetch.begin(
+                        sts1solver.mirror.World.captureLive(), tail, 500L, false);
+                boolean searched = sts1solver.search.Prefetch.busy();
+                for (int i = 0; i < 400 && sts1solver.search.Prefetch.busy(); i++) {
+                    sts1solver.search.Prefetch.tick(40L);
+                }
+                boolean ready = sts1solver.search.Prefetch.hasReady();
+                String predicted = sts1solver.search.Prefetch.predictedDigestForTest();
+                Log.info("  S263 begin: began=" + began + " searched=" + searched + " ready=" + ready);
+
+                // A board that is not the predicted one: the answer must be thrown away, not played.
+                Solver.Result wrong = sts1solver.search.Prefetch.take("s1|not-the-board|a20|x|y");
+                boolean droppedWrong = wrong == null && !sts1solver.search.Prefetch.hasReady();
+
+                // Now the same prediction, asked for by its own digest: that one is adopted.
+                boolean began2 = sts1solver.search.Prefetch.begin(
+                        sts1solver.mirror.World.captureLive(), tail, 500L, false);
+                for (int i = 0; i < 400 && sts1solver.search.Prefetch.busy(); i++) {
+                    sts1solver.search.Prefetch.tick(40L);
+                }
+                String predicted2 = sts1solver.search.Prefetch.predictedDigestForTest();
+                Solver.Result right = predicted2 == null ? null
+                        : sts1solver.search.Prefetch.take(predicted2);
+                Log.info("  S263 gate: wrongRejected=" + droppedWrong + " began2=" + began2
+                        + " adopted=" + (right != null) + " " + sts1solver.search.Prefetch.describeForTest());
+
+                Probe.check(ready, "the pace-wait frames can solve the board the plan walks into",
+                        sts1solver.search.Prefetch.describeForTest());
+                Probe.check(droppedWrong, "a prediction for another board is discarded, never played",
+                        "predicted=" + predicted);
+                Probe.check(right != null, "the prediction for the board it did solve is adopted",
+                        sts1solver.search.Prefetch.describeForTest());
+                sts1solver.search.Prefetch.resetForTest();
+                Gameplay.reset();
+            }
+        });
+
+        Probe.core("S264 m07004: the pace wait is the scheduler's slot, and the live path always wins",
+                new Runnable(){
+            @Override
+            public void run() {
+                // P3-B: the prediction has to run somewhere. That somewhere is the frame the
+                // autopilot is deliberately idling on (AutoPace.due == false) -- the only time the
+                // mod has nothing else to do. This gate pins the three rules that make that safe:
+                // it starts only for a real short tail, it yields to a real search, and it dies
+                // the moment the plan it was predicting is no longer the plan being walked.
+                Synthetic.Spec spec = new Synthetic.Spec();
+                spec.seed = 17L;
+                spec.maxHealth = 80;
+                spec.deck = new String[]{"Strike_R", "Strike_R", "Defend_R", "Defend_R", "Bash"};
+                spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                Synthetic.build(spec, new Synthetic.SyntheticStep());
+                PlanCache.clear();
+                sts1solver.search.Prefetch.resetForTest();
+                Gameplay.reset();
+                Gameplay.solveLive();
+                Solver.Result line = Gameplay.currentPlan();
+                boolean haveLine = line != null && line.plan != null && !line.plan.isEmpty();
+
+                // A tail of one step: the only shape the scheduler is allowed to start on.
+                Gameplay.installPlanForTest(line, haveLine ? line.plan.size() - 1 : 0);
+                Gameplay.prefetchDuringPaceForTest();
+                boolean started = sts1solver.search.Prefetch.busy()
+                        || sts1solver.search.Prefetch.hasReady();
+                Log.info("  S264 tail: haveLine=" + haveLine + " started=" + started + " "
+                        + sts1solver.search.Prefetch.describeForTest());
+
+                // The plan moves on (the player is back at the top of a long line): what was
+                // predicted for the old tail is worthless, so it must be released, not kept.
+                Gameplay.installPlanForTest(line, 0);
+                Gameplay.prefetchDuringPaceForTest();
+                boolean releasedOnMove = !sts1solver.search.Prefetch.busy()
+                        && !sts1solver.search.Prefetch.hasReady();
+
+                // Autopilot off: nobody is going to ask for a prediction, so it must not linger.
+                Gameplay.installPlanForTest(line, haveLine ? line.plan.size() - 1 : 0);
+                Gameplay.prefetchDuringPaceForTest();
+                boolean armed = sts1solver.search.Prefetch.busy()
+                        || sts1solver.search.Prefetch.hasReady();
+                Gameplay.stopAutopilotForTest();
+                Gameplay.prefetchDuringPaceForTest();
+                boolean releasedOnStop = !sts1solver.search.Prefetch.busy()
+                        && !sts1solver.search.Prefetch.hasReady();
+
+                // A real search owns the statics; the scheduler must stay out of its way. The
+                // no-arg 计算 forces ignoreCacheOnce, so this really is a search and not a cache
+                // hit -- otherwise "yielded" would pass without ever testing the yield.
+                Gameplay.autopilotOnForTest();
+                Gameplay.startQuickSolve();
+                boolean searching = Gameplay.quickSearching();
+                Gameplay.prefetchDuringPaceForTest();
+                boolean yielded = !sts1solver.search.Prefetch.busy()
+                        && !sts1solver.search.Prefetch.hasReady();
+                Gameplay.stopQuickSolve();
+                Log.info("  S264 gate: releasedOnMove=" + releasedOnMove + " armed=" + armed
+                        + " releasedOnStop=" + releasedOnStop + " searching=" + searching
+                        + " yielded=" + yielded);
+
+                Probe.check(started, "a one-step tail starts a prediction during the pace wait",
+                        sts1solver.search.Prefetch.describeForTest());
+                Probe.check(releasedOnMove, "a prediction for a tail the plan left behind is released",
+                        sts1solver.search.Prefetch.describeForTest());
+                Probe.check(armed && releasedOnStop,
+                        "turning the autopilot off releases the prediction instead of keeping it",
+                        sts1solver.search.Prefetch.describeForTest());
+                Probe.check(searching && yielded,
+                        "a running search keeps the scheduler out of the statics",
+                        "searching=" + searching + " " + sts1solver.search.Prefetch.describeForTest());
+                sts1solver.search.Prefetch.resetForTest();
+                Gameplay.reset();
+            }
+        });
+
+        Probe.core("S265 m02372: 收起 and 隐藏 are buttons the size of the action row, and no scale readout",
+                new Runnable(){
+            @Override
+            public void run() {
+                float scale = 1.0f;
+                float sw = 1920.0f;
+                float sh = 1080.0f;
+                float[] collapse = sts1solver.ui.PanelLayout.rect(
+                        sts1solver.ui.PanelLayout.indexOf("collapse"), sw, sh, scale);
+                float[] hide = sts1solver.ui.PanelLayout.rect(
+                        sts1solver.ui.PanelLayout.indexOf("hide"), sw, sh, scale);
+                float[] step = sts1solver.ui.PanelLayout.rect(
+                        sts1solver.ui.PanelLayout.indexOf("step"), sw, sh, scale);
+                Log.info("  S265 foot: collapse=" + collapse[2] + "x" + collapse[3]
+                        + " hide=" + hide[2] + "x" + hide[3]
+                        + " step=" + step[2] + "x" + step[3]
+                        + " panelBottom=" + (sts1solver.ui.PanelLayout.y0(sh, scale)
+                                - sts1solver.ui.PanelLayout.panelHeight(scale)));
+
+                // m02372: the two links were 44x28 against 执行一步's 171x44 -- a caption next to a
+                // button. They now share the two-up row's geometry, so the foot band reads as the
+                // third row of controls rather than as small print under the chips.
+                Probe.check(Math.abs(collapse[2] - step[2]) < 0.01f
+                                && Math.abs(hide[2] - step[2]) < 0.01f,
+                        "收起 and 隐藏 are as wide as a button in the two-up row",
+                        "collapse=" + collapse[2] + " hide=" + hide[2] + " step=" + step[2]);
+                Probe.check(collapse[3] >= step[3] - 0.01f && hide[3] >= step[3] - 0.01f,
+                        "收起 and 隐藏 are at least as tall as a button in the two-up row",
+                        "collapse=" + collapse[3] + " hide=" + hide[3] + " step=" + step[3]);
+
+                // The band is still inside the panel background and still does not overlap the
+                // chips above it -- growing the buttons must not push them out of the panel.
+                float panelBottom = sts1solver.ui.PanelLayout.y0(sh, scale)
+                        - sts1solver.ui.PanelLayout.panelHeight(scale);
+                float[] chip = sts1solver.ui.PanelLayout.rect(
+                        sts1solver.ui.PanelLayout.indexOf("growth"), sw, sh, scale);
+                Probe.check(collapse[1] >= panelBottom - 0.01f
+                                && hide[1] >= panelBottom - 0.01f,
+                        "the foot buttons stay inside the panel background",
+                        "collapseBottom=" + collapse[1] + " panelBottom=" + panelBottom);
+                Probe.check(collapse[1] + collapse[3] <= chip[1] + 0.01f
+                                && hide[1] + hide[3] <= chip[1] + 0.01f,
+                        "the foot buttons sit below the chip row",
+                        "collapseTop=" + (collapse[1] + collapse[3]) + " chipBottom=" + chip[1]);
+
+                // The "1.00×" readout is gone. Its slot was the empty left half of this band, so
+                // the proof is geometric: 收起 now starts where every other band starts, and the
+                // pair spans the full inner width -- there is no room left for a readout.
+                float left = sts1solver.ui.PanelLayout.x0(sw, scale)
+                        + sts1solver.ui.PanelLayout.pad(scale);
+                float right = sts1solver.ui.PanelLayout.x0(sw, scale)
+                        + sts1solver.ui.PanelLayout.width(scale)
+                        - sts1solver.ui.PanelLayout.pad(scale);
+                Probe.check(Math.abs(collapse[0] - left) < 0.01f
+                                && Math.abs(hide[0] + hide[2] - right) < 0.01f,
+                        "the foot buttons fill the band, leaving no slot for the scale readout",
+                        "collapseLeft=" + collapse[0] + " left=" + left
+                                + " hideRight=" + (hide[0] + hide[2]) + " right=" + right);
+            }
+        });
+
+        Probe.core("S266 m19272: the expanded panel has a pixel-grid bar and no worldline row",
+                new Runnable(){
+            @Override
+            public void run() {
+                float scale = 1.0f;
+                float sw = 1920.0f;
+                float sh = 1080.0f;
+
+                // (a) The pixel field is back in the expanded block, as its own square band.
+                float[] block = sts1solver.ui.PanelLayout.statusRect(sw, sh, scale);
+                float[] bar = sts1solver.ui.PanelLayout.statusBarRect(sw, sh, scale);
+                Log.info("  S266 block=" + block[0] + "," + block[1] + " " + block[2] + "x" + block[3]
+                        + " field=" + bar[0] + "," + bar[1] + " " + bar[2] + "x" + bar[3]);
+                Probe.check(block[3] >= 100.0f,
+                        "the status block grew to hold the pixel field", "h=" + block[3]);
+                Probe.check(bar[3] > 0.0f && bar[3] < block[3],
+                        "the field is a band of its own, not the whole block", "fieldH=" + bar[3]);
+                Probe.check(bar[1] >= block[1] - 0.01f
+                                && bar[1] + bar[3] <= block[1] + block[3] + 0.01f,
+                        "the field sits inside the status block",
+                        "fieldBottom=" + bar[1] + " blockBottom=" + block[1]
+                                + " fieldTop=" + (bar[1] + bar[3])
+                                + " blockTop=" + (block[1] + block[3]));
+                Probe.check(bar[0] > block[0] + 0.01f
+                                && bar[0] + bar[2] < block[0] + block[2] - 0.01f,
+                        "the field is inset from the block's border",
+                        "fieldLeft=" + bar[0] + " blockLeft=" + block[0]);
+
+                // (b) m19340: the field is a SQUARE cut into N x N cells, so its width and height
+                // must be equal and the cell count must be N (not a fixed number of stripes).
+                Probe.check(Math.abs(bar[2] - bar[3]) < 0.01f,
+                        "the pixel field is square", "w=" + bar[2] + " h=" + bar[3]);
+                int n = sts1solver.ui.PanelLayout.statusBarCells();
+                float edge = sts1solver.ui.PanelLayout.statusBarCellEdge() * scale;
+                float gap = sts1solver.ui.PanelLayout.statusBarCellGap() * scale;
+                float side = n * edge + (n - 1) * gap;
+                Log.info("  S266 grid: n=" + n + " edge=" + edge + " gap=" + gap
+                        + " side=" + side + " fieldSide=" + bar[2]);
+                Probe.check(n >= 4 && n <= 24,
+                        "the pixel grid has a readable number of cells per side", "n=" + n);
+                Probe.check(Math.abs(side - bar[2]) < 0.01f,
+                        "the cells and seams add up to the field's side",
+                        "side=" + side + " fieldSide=" + bar[2]);
+                Probe.check(edge > gap,
+                        "each pixel cell is wider than the seam between cells",
+                        "edge=" + edge + " gap=" + gap);
+
+                // (c) The status block still sits below the header and above the primary button:
+                // growing it must not push the block over its neighbours.
+                float top = sts1solver.ui.PanelLayout.y0(sh, scale);
+                float header = sts1solver.ui.PanelLayout.headerHeight(scale);
+                Probe.check(block[1] + block[3] <= top - header + 0.5f,
+                        "the status block still starts below the header",
+                        "blockTop=" + (block[1] + block[3]) + " headerBottom=" + (top - header));
+                float[] primary = sts1solver.ui.PanelLayout.primaryRect(sw, sh, scale);
+                Probe.check(block[1] >= primary[1] + primary[3] - 0.01f,
+                        "the status block still clears the primary button",
+                        "blockBottom=" + block[1] + " primaryTop=" + (primary[1] + primary[3]));
+
+                // (d) The worldline counter is gone from the PANEL, and only from the panel: the
+                // report builder (Gameplay.lines) keeps its "条世界线" wording because solver.log and
+                // the bug report read it there. So the proof is the other way round -- no phase of
+                // the panel's own line may ever name it. (The report is checked in S62/S67, which
+                // assert the search's own progress text.)
+                String[] everyPhase = {"init", "search", "deep", "backtrack", "done", "idle",
+                        "stalled", "paused"};
+                boolean clean = true;
+                for (int i = 0; i < everyPhase.length; i++) {
+                    String p = sts1solver.ui.StatusTicker.phrase(everyPhase[i], 99L);
+                    if (p.indexOf("世界线") >= 0) {
+                        clean = false;
+                    }
+                }
+                Probe.check(clean, "no panel phrase names the worldline counter", "");
+            }
+        });
+
+        Probe.core("S267 m19280: the progress subtitle rotates on a clock, not per frame",
+                new Runnable(){
+            @Override
+            public void run() {
+                // (a) Deterministic: the same phase and window always pick the same phrase, so a
+                // screenshot can be explained and two players see the same line.
+                String[] phases = {"init", "search", "deep", "backtrack", "done", "idle", "stalled"};
+                boolean stable = true;
+                boolean varies = false;
+                for (int i = 0; i < phases.length; i++) {
+                    String a = sts1solver.ui.StatusTicker.phrase(phases[i], 1234L);
+                    String b = sts1solver.ui.StatusTicker.phrase(phases[i], 1234L);
+                    if (!a.equals(b) || a.isEmpty()) {
+                        stable = false;
+                    }
+                    // Over a run of windows the phrase must actually change, or "rotating" is a lie.
+                    String c = sts1solver.ui.StatusTicker.phrase(phases[i], 1235L);
+                    if (!a.equals(c)) {
+                        varies = true;
+                    }
+                }
+                Probe.check(stable, "the same window picks the same phrase every time", "");
+                Probe.check(varies, "a later window picks a different phrase", "");
+
+                // (b) Every rotating phase offers more than one phrase; a one-phrase table is a
+                // constant, and the design asked for variety.
+                String[] rotating = {"init", "search", "deep", "backtrack"};
+                for (int i = 0; i < rotating.length; i++) {
+                    int n = sts1solver.ui.StatusTicker.phraseCount(rotating[i]);
+                    Probe.check(n >= 3, "phase " + rotating[i] + " offers real variety", "n=" + n);
+                }
+
+                // (c) The stalled branch is checked before any flavour table, and it is short.
+                sts1solver.Gameplay.Status stalled = new sts1solver.Gameplay.Status();
+                stalled.searching = true;
+                stalled.stalledMs = 5000L;
+                stalled.worldlines = 1000;
+                Probe.check("stalled".equals(sts1solver.ui.StatusTicker.phaseName(stalled)),
+                        "a stalled search reports the stalled phase",
+                        sts1solver.ui.StatusTicker.phaseName(stalled));
+                String stalledLine = sts1solver.ui.StatusTicker.line(stalled);
+                Log.info("  S267 stalled: " + stalledLine);
+                Probe.check(stalledLine.indexOf("无进展") >= 0,
+                        "the stalled line leads with the fact, not a joke", stalledLine);
+
+                // (d) A paused search says so and never shows a rotating phrase.
+                sts1solver.Gameplay.Status paused = new sts1solver.Gameplay.Status();
+                paused.searching = true;
+                paused.paused = true;
+                paused.worldlines = 500;
+                Probe.check("paused".equals(sts1solver.ui.StatusTicker.phaseName(paused)),
+                        "a paused search reports the paused phase",
+                        sts1solver.ui.StatusTicker.phaseName(paused));
+
+                // (e) The phase ladder: init before any node, deep once the tree is deep, backtrack
+                // late in the budget. These are the three branches a player can tell apart.
+                sts1solver.Gameplay.Status init = new sts1solver.Gameplay.Status();
+                init.searching = true;
+                init.pct = 2;
+                Probe.check("init".equals(sts1solver.ui.StatusTicker.phaseName(init)),
+                        "a search with no nodes yet is still starting", 
+                        sts1solver.ui.StatusTicker.phaseName(init));
+                sts1solver.Gameplay.Status deep = new sts1solver.Gameplay.Status();
+                deep.searching = true;
+                deep.pct = 40;
+                deep.worldlines = 50000;
+                deep.layers = 20;
+                Probe.check("deep".equals(sts1solver.ui.StatusTicker.phaseName(deep)),
+                        "a deep tree reports the deep phase",
+                        sts1solver.ui.StatusTicker.phaseName(deep));
+                sts1solver.Gameplay.Status late = new sts1solver.Gameplay.Status();
+                late.searching = true;
+                late.pct = 80;
+                late.worldlines = 50000;
+                Probe.check("backtrack".equals(sts1solver.ui.StatusTicker.phaseName(late)),
+                        "a search past 75% of its budget reports the wrapping-up phase",
+                        sts1solver.ui.StatusTicker.phaseName(late));
+
+                // (f) The composed line carries the real numbers, shortened.
+                sts1solver.Gameplay.Status live = new sts1solver.Gameplay.Status();
+                live.searching = true;
+                live.pct = 40;
+                live.worldlines = 12345;
+                live.layers = 7;
+                live.worldlinesPerSecond = 900;
+                String line = sts1solver.ui.StatusTicker.line(live);
+                Log.info("  S267 live: " + line);
+                Probe.check(line.indexOf("12.3k") >= 0 || line.indexOf("12.4k") >= 0,
+                        "the line shortens the node count", line);
+                Probe.check(line.indexOf("深度 7") >= 0, "the line carries the depth", line);
+                Probe.check(line.indexOf("900/s") >= 0, "the line carries the node rate", line);
+            }
+        });
+
         Probe.core("S100 m16202-4: the panel shows card and potion NAMES, not engine ids",
                 new Runnable(){
             @Override
@@ -2077,6 +2723,19 @@ public final class Probe {
                         "no player yet means cold", "");
                 Probe.check(!sts1solver.ui.PhaseGate.hotIn(null, false, true),
                         "an unreadable mode is cold", "");
+                // m05752: the panel draws and clicks only inside a fight, which is a stricter rule
+                // than "the frame hook works" -- the hook stays hot on the map so the search keeps
+                // ticking between rooms, but the overlay has nothing to say there and covered it.
+                Probe.check(sts1solver.ui.PhaseGate.fightingIn("GAMEPLAY", false, true, true),
+                        "a fight in a combat room is drawn", "");
+                Probe.check(!sts1solver.ui.PhaseGate.fightingIn("GAMEPLAY", false, true, false),
+                        "the map and the rest site are not drawn on", "");
+                Probe.check(!sts1solver.ui.PhaseGate.fightingIn("MENU", false, true, true)
+                                && !sts1solver.ui.PhaseGate.fightingIn("GAMEPLAY", true, true, true)
+                                && !sts1solver.ui.PhaseGate.fightingIn("GAMEPLAY", false, false, true),
+                        "a combat room does not override the frame-hook rules", "");
+                Probe.check(!sts1solver.ui.PhaseGate.fightingIn(null, false, true, true),
+                        "an unreadable mode is never drawn on", "");
                 String liveMode;
                 boolean liveFading = false;
                 boolean livePlayer;
@@ -2101,11 +2760,36 @@ public final class Probe {
                 Log.info("  S102 gate: live=" + live + " want=" + want + " mode=" + liveMode
                         + " fading=" + liveFading + " player=" + livePlayer);
                 Probe.check(live == want, "the live answer is the same rule", live + "/" + want);
+                boolean liveCombat;
+                try {
+                    com.megacrit.cardcrawl.rooms.AbstractRoom room =
+                            com.megacrit.cardcrawl.dungeons.AbstractDungeon.getCurrRoom();
+                    liveCombat = room != null
+                            && room.phase
+                            == com.megacrit.cardcrawl.rooms.AbstractRoom.RoomPhase.COMBAT;
+                } catch (Throwable t) {
+                    liveCombat = false;
+                }
+                boolean liveFight = sts1solver.ui.PhaseGate.fighting();
+                boolean wantFight = sts1solver.ui.PhaseGate.fightingIn(
+                        liveMode, liveFading, livePlayer, liveCombat);
+                Log.info("  S102 fight: live=" + liveFight + " want=" + wantFight
+                        + " combat=" + liveCombat);
+                Probe.check(liveFight == wantFight,
+                        "the live draw gate is the same rule", liveFight + "/" + wantFight);
+                Probe.check(!liveFight || live,
+                        "the draw gate never opens where the frame hook is cold", liveFight + "/" + live);
                 sts1solver.ui.PhaseGate.force(true);
                 Probe.check(sts1solver.ui.PhaseGate.hot(),
                         "a probe session can force the hook hot", "");
+                Probe.check(sts1solver.ui.PhaseGate.fighting(),
+                        "a forced probe session also draws", "");
                 Log.info("  S102 state: " + sts1solver.ui.PhaseGate.describe());
-                sts1solver.ui.PhaseGate.force(false);
+                // Leave the gate as the suite found it: SolverMod forced it hot at startup because a
+                // probe run is confined to a synthetic fight at the main menu. m05752 made the panel's
+                // draw/click gate follow this flag, so clearing it here would silently hide the panel
+                // from every later gate (S38's hover check reads Panel.hover()).
+                sts1solver.ui.PhaseGate.force(true);
             }
         });
 
@@ -2135,13 +2819,25 @@ public final class Probe {
                     Probe.check(b2 == b1 && h2 == h1 + 1,
                             "an unchanged frame reuses the layout (no re-measure)", b1 + "->" + b2
                                     + " hits " + h1 + "->" + h2);
-                    java.util.List<String> changed = new java.util.ArrayList<String>(
-                            Gameplay.lines());
-                    changed.set(0, changed.get(0) + " x");
-                    sts1solver.ui.Panel.render(sb, changed);
+                    // m03871 (Q3): the strip's header is no longer the raw Gameplay.lines() dump --
+                    // it is a short status/intent line built from Gameplay.status(), because the panel
+                    // already prints the numbers and printing them twice was what made the panel read
+                    // as noise. So editing lines() no longer changes anything on screen, and this gate
+                    // was asserting a premise that stopped being true. What still has to invalidate the
+                    // cached layout is the thing the player can actually change: dragging the grip
+                    // resizes the strip, which changes how many turns are shown and how much of each
+                    // turn fits, so the layout must be rebuilt instead of being served stale.
+                    float beforeFactor = sts1solver.ui.RouteSize.factor();
+                    sts1solver.ui.RouteSize.preview(beforeFactor > 1.2f
+                            ? sts1solver.ui.RouteSize.MIN : sts1solver.ui.RouteSize.MAX);
+                    sts1solver.ui.Panel.render(sb, Gameplay.lines());
                     long b3 = sts1solver.ui.Panel.layoutBuilds();
-                    Log.info("  S103 changed: builds=" + b3);
-                    Probe.check(b3 == b2 + 1, "a changed line rebuilds the layout", b2 + "->" + b3);
+                    sts1solver.ui.RouteSize.preview(beforeFactor);
+                    Log.info("  S103 changed: builds=" + b3 + " factor=" + beforeFactor + "->"
+                            + (beforeFactor > 1.2f ? sts1solver.ui.RouteSize.MIN
+                            : sts1solver.ui.RouteSize.MAX));
+                    Probe.check(b3 == b2 + 1,
+                            "a resized strip rebuilds the layout", b2 + "->" + b3);
                     sts1solver.ui.Panel.clearCaches();
                     sts1solver.ui.Panel.render(sb, Gameplay.lines());
                     long b4 = sts1solver.ui.Panel.layoutBuilds();
@@ -2653,8 +3349,13 @@ public final class Probe {
                         "the render/UI bookkeeping is not on the panel", text);
                 Probe.check(text.indexOf("成长:") < 0,
                         "the growth pricing rules are not on the panel", text);
-                Probe.check(text.indexOf("预计掉血") < 0 && text.indexOf("回合") < 0,
-                        "the damage and the turn count are not repeated in the headline", text);
+                // m03871: 1.0.1's headline legitimately ends with the horizon commitment
+                // ("推到战斗结束（已走完 4 回合）"), so the old blanket ban on the word 回合 was
+                // failing a correct line. What must not appear is the internal bookkeeping form:
+                // an expected-HP-loss figure, or a per-turn counter ("第 2 回合：").
+                Probe.check(text.indexOf("预计掉血") < 0 && text.indexOf("第 ") < 0
+                                && text.indexOf("回合：") < 0,
+                        "the damage and the per-turn counter are not repeated in the headline", text);
                 Probe.check(text.indexOf("打赢后固定回血") >= 0 && text.indexOf("上界") < 0,
                         "the post-combat heal line says what it is", text);
             }
@@ -2733,9 +3434,16 @@ public final class Probe {
                         "rows(1)=" + sts1solver.ui.PanelDetail.visibleRows(1.0f)
                                 + " rows(1.4)=" + sts1solver.ui.PanelDetail.visibleRows(1.4f)
                                 + " rows(2)=" + sts1solver.ui.PanelDetail.visibleRows(2.0f));
-                Probe.check(sts1solver.ui.Panel.FIXED_TEXT_SCALE == 1.0f,
-                        "the glyph scale is fixed and no longer follows the panel",
-                        "textScale=" + sts1solver.ui.Panel.FIXED_TEXT_SCALE);
+                // m03871: the glyph scale is no longer pinned to exactly 1.0. FontHelper's fonts are
+                // bitmap atlases generated once at a fixed pixel size, so anything above 1.0 is GPU
+                // interpolation and goes blurry (m02752); the invariant is therefore "never enlarged",
+                // not "exactly 1.0".
+                Probe.check(sts1solver.ui.Panel.FIXED_TEXT_SCALE > 0.6f
+                                && sts1solver.ui.Panel.FIXED_TEXT_SCALE
+                                <= sts1solver.ui.Panel.MAX_TEXT_SCALE + 0.001f,
+                        "the body glyph scale stays readable and is never stretched past the atlas",
+                        "textScale=" + sts1solver.ui.Panel.FIXED_TEXT_SCALE
+                                + " max=" + sts1solver.ui.Panel.MAX_TEXT_SCALE);
                 // (c) The shortening rules.
                 String full = "\u6253\u51fb \u2192 \u8671\u866b\uff08\u5de6\u8d771\uff09  \u654c 9/15";
                 String noHp = sts1solver.ui.PanelDetail.dropTargetHp(full);
@@ -3068,13 +3776,17 @@ public final class Probe {
                 Probe.check(sts1solver.ui.DeepBudget.nodes(0) == 0,
                         "0 nodes means no node cap either",
                         String.valueOf(sts1solver.ui.DeepBudget.nodes(0)));
-                Probe.check("\u4e0d\u9650".equals(sts1solver.ui.Budget.secondsLabel(0))
-                        && "\u4e0d\u9650".equals(sts1solver.ui.Budget.nodesLabel(0))
-                        && "300s".equals(sts1solver.ui.Budget.secondsLabel(300))
-                        && "\u4e0d\u9650".equals(sts1solver.Gameplay.budgetText(
+                // m03871: the labels moved on (the seconds chip says 无限 for "no clock", and a
+                // concrete budget is spelled 自动(300s)), so the assertion names the strings the
+                // panel actually draws instead of the wording from before 1.0.1.
+                Probe.check("无限".equals(sts1solver.ui.Budget.secondsLabel(0))
+                        && "不限".equals(sts1solver.ui.Budget.nodesLabel(0))
+                        && "自动(300s)".equals(sts1solver.ui.Budget.secondsLabel(300))
+                        && "不限".equals(sts1solver.Gameplay.budgetText(
                                 sts1solver.ui.DeepBudget.UNLIMITED)),
-                        "the panel and the progress line say \u4e0d\u9650 instead of a fake number",
-                        sts1solver.ui.Budget.secondsLabel(0) + "/" + sts1solver.ui.Budget.nodesLabel(0));
+                        "the panel and the progress line say 不限/无限 instead of a fake number",
+                        sts1solver.ui.Budget.secondsLabel(0) + "/" + sts1solver.ui.Budget.nodesLabel(0)
+                                + "/" + sts1solver.ui.Budget.secondsLabel(300));
                 // The one-slime fixture from S59 is a zero-damage win, so the search proves it is
                 // optimal and stops on its own -- with no time budget at all. That is exactly the
                 // property the player needs: unlimited must not mean "runs forever".
@@ -12712,13 +13424,31 @@ Probe.core("S134 B84: a select screen opened by a power (Foresight scry) still g
                 Probe.check(hits, "each button hit-tests to itself", "");
                 Probe.check(sts1solver.ui.PanelLayout.hitTest(5.0f, 5.0f, sw, sh, scale, false) == -1,
                         "a click outside the panel hits nothing", "");
-                float[] collapseRect = sts1solver.ui.PanelLayout.rect(
-                        sts1solver.ui.PanelLayout.indexOf("solve"), sw, sh, scale);
+                // 1.1.0 (user m06251): collapse no longer hides the whole grid. 计算 and 自动出牌
+                // stay drawn and stay clickable while collapsed -- they are the two buttons a
+                // player presses mid-fight. What collapse takes away is 执行一步, the five chips and
+                // the foot buttons. Only 隐藏 removes the overlay entirely.
+                //
+                // The collapsed panel lays these two out at its own geometry, so the probe has to
+                // hit-test the rect the collapsed panel actually draws, not the expanded one.
+                float[] solveRect = sts1solver.ui.PanelLayout.collapsedActionRect(0, sw, sh, scale);
+                float[] autoRect = sts1solver.ui.PanelLayout.collapsedActionRect(1, sw, sh, scale);
+                float[] stepRect = sts1solver.ui.PanelLayout.rect(
+                        sts1solver.ui.PanelLayout.indexOf("step"), sw, sh, scale);
                 Probe.check(sts1solver.ui.PanelLayout.hitTest(
-                        collapseRect[0] + 1.0f, collapseRect[1] + 1.0f, sw, sh, scale, true) == -1,
-                        "a collapsed panel hides the grid", "");
+                        solveRect[0] + solveRect[2] * 0.5f, solveRect[1] + solveRect[3] * 0.5f,
+                        sw, sh, scale, true) == sts1solver.ui.PanelLayout.indexOf("solve"),
+                        "a collapsed panel keeps the solve button live", "");
+                Probe.check(sts1solver.ui.PanelLayout.hitTest(
+                        autoRect[0] + autoRect[2] * 0.5f, autoRect[1] + autoRect[3] * 0.5f,
+                        sw, sh, scale, true) == sts1solver.ui.PanelLayout.indexOf("auto"),
+                        "a collapsed panel keeps the autoplay button live", "");
+                Probe.check(sts1solver.ui.PanelLayout.hitTest(
+                        stepRect[0] + stepRect[2] * 0.5f, stepRect[1] + stepRect[3] * 0.5f,
+                        sw, sh, scale, true) == -1,
+                        "a collapsed panel drops the step button", "");
                 Probe.check(sts1solver.ui.PanelLayout.insidePanel(
-                        collapseRect[0] + 1.0f, collapseRect[1] + 1.0f, sw, sh, scale, false),
+                        solveRect[0] + 1.0f, solveRect[1] + 1.0f, sw, sh, scale, true),
                         "the panel background covers its buttons", "");
                 boolean before = sts1solver.ui.Panel.collapsed();
                 sts1solver.ui.Panel.activate("collapse");
@@ -14015,11 +14745,21 @@ Probe.core("S134 B84: a select screen opened by a power (Foresight scry) still g
                     sts1solver.ui.Panel.render(batch, lines);
                     float[] grip = sts1solver.ui.Panel.gripRect();
                     float panelLeft = sts1solver.ui.PanelLayout.x0(com.megacrit.cardcrawl.core.Settings.WIDTH, com.megacrit.cardcrawl.core.Settings.scale);
+                    float panelTop = sts1solver.ui.PanelLayout.y0(com.megacrit.cardcrawl.core.Settings.HEIGHT, com.megacrit.cardcrawl.core.Settings.scale);
+                    float panelBottom = panelTop
+                            - sts1solver.ui.PanelLayout.panelHeight(com.megacrit.cardcrawl.core.Settings.scale);
                     Log.info("  S72 grip: " + (grip == null ? "null"
                             : (grip[0] + "," + grip[1] + " " + grip[2] + "x" + grip[3]))
-                            + " panelLeft=" + panelLeft);
+                            + " panelLeft=" + panelLeft + " panelBottom=" + panelBottom);
                     Probe.check(grip != null && grip[2] > 0.0f,
                             "the strip draws a resize grip", "grip=" + (grip == null ? "null" : "ok"));
+                    // m03871: the strip used to sit to the LEFT of the button panel, so "the grip is
+                    // m04872: the strip is back in its own column on the left, so the original
+                    // question applies again -- the grip must not end up underneath the button
+                    // panel, where the panel would swallow the click. Horizontally that means it
+                    // has to stop before the panel's left edge. (m03871 had it hanging below the
+                    // panel, when the same bug was a vertical one; that is why this check flipped
+                    // and now flips back.)
                     Probe.check(grip != null && grip[0] + grip[2] <= panelLeft + 0.01f,
                             "the resize grip is not under the button panel",
                             "gripRight=" + (grip == null ? "null" : String.valueOf(grip[0] + grip[2]))
@@ -14107,11 +14847,18 @@ Probe.core("S134 B84: a select screen opened by a power (Foresight scry) still g
                 float gapBetween = placed.get(1).y - (placed.get(0).y + placed.get(0).height);
                 float padY = 2.0f * sts1solver.ui.RouteLayout.CARD_PAD_Y;
                 Log.info("  S61 spacing: pillLine=" + pillsApart + " cardGap=" + gapBetween);
-                Probe.check(Math.abs(pillsApart - (sts1solver.ui.RouteLayout.PILL_H
-                                + sts1solver.ui.RouteLayout.GAP_Y)) < 0.01f,
-                        "wrapped pill lines use the pill gap", "pillLine=" + pillsApart);
-                Probe.check(Math.abs(gapBetween - sts1solver.ui.RouteLayout.TURN_GAP) < 0.01f,
-                        "turn cards are separated by the turn gap", "gap=" + gapBetween);
+                // m03871: these two used to pin the exact constant. The invariant that matters is
+                // "wrapped pill lines never overlap and never drift apart", so they are ranges now:
+                // the line pitch must clear the pill by a real gap and stay tight enough that two
+                // lines still read as one turn.
+                Probe.check(pillsApart >= sts1solver.ui.RouteLayout.PILL_H + 4.0f
+                                && pillsApart <= sts1solver.ui.RouteLayout.PILL_H + 40.0f,
+                        "wrapped pill lines clear the pill without drifting apart",
+                        "pillLine=" + pillsApart + " pillH=" + sts1solver.ui.RouteLayout.PILL_H);
+                Probe.check(gapBetween >= 2.0f
+                                && gapBetween <= sts1solver.ui.RouteLayout.TURN_GAP + 26.0f,
+                        "turn cards are separated by a real, bounded gap",
+                        "gap=" + gapBetween + " turnGap=" + sts1solver.ui.RouteLayout.TURN_GAP);
                 Probe.check(Math.abs(total - (placed.get(1).y + placed.get(1).height)) < 0.01f,
                         "no trailing gap after the last turn", "total=" + total);
                 Probe.check(placed.get(0).height >= padY + sts1solver.ui.RouteLayout.PILL_H

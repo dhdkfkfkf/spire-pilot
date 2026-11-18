@@ -36,11 +36,25 @@ public final class Panel {
     /** True while the pointer is over the header's 导出报告 button (1.0.0 feedback request). */
     private static volatile boolean reportHover;
     private static volatile boolean collapsed;
-    private static volatile String status = "";
+    /**
+     * The plan-text gate {@link #render} is given, so that "is there a plan to draw" stays a
+     * question the caller can answer without building the answer.
+     *
+     * <p>1.1.0 (user m04872 "p1有必要"): this used to be the real text. {@code Gameplay} rebuilt the
+     * whole status list and pushed it here from 76 call sites, one of them every frame in
+     * {@code tickQuick} -- and then {@code render} only asked whether the list was empty. The list
+     * was built, copied and thrown away several times a second.
+     *
+     * <p>m06071: the strip says the full status again, so the words come back -- but they are
+     * <em>pulled</em> by {@code drawPlanText} from {@link sts1solver.Gameplay#lines()} once per
+     * drawn frame, not pushed from 76 places. {@code Gameplay} stays out of the panel's business,
+     * and an idle frame with nothing to draw costs nothing.
+     */
+    private static final java.util.List<String> PLAN_GATE =
+            java.util.Collections.unmodifiableList(java.util.Arrays.asList("plan"));
     private static int failures;
     /** Reused for measuring a button label (B144); drawing happens on the render thread only. */
     private static final GlyphLayout FIT = new GlyphLayout();
-
     /** {x, y, width, height, step} for every clickable action pill drawn last frame. */
     private static final java.util.List<float[]> pillBoxes = new java.util.ArrayList<float[]>();
 
@@ -70,11 +84,62 @@ public final class Panel {
     private static final float MAX_ROUTE_H = 520.0f;
 
     /**
-     * The glyph scale is fixed (m20027). Dragging the grip changes how many turns are visible and how
-     * much text each turn shows, never the font size: shrinking the letters made a small panel
-     * unreadable instead of compact.
+     * The body glyph scale: the size the route strip and the buttons are measured and drawn at.
+     *
+     * <p>m20027: dragging the grip still changes how many turns are visible and how much of each
+     * turn fits, never this number -- shrinking the letters made a small panel unreadable instead of
+     * compact.
+     *
+     * <p>1.1.0 (user m01052 "字号可以改"): the *panel* is no longer limited to one size. It has
+     * fixed tiers, so the header, the numbers and the labels are three different sizes instead of
+     * one. These are constants, not a function of the grip, so the panel still looks the same at
+     * every grip factor.
+     *
+     * <p>Every tier is at or below 1.0 on purpose -- see {@link #TITLE_SCALE} for why scaling the
+     * game's bitmap font up is not allowed.
      */
     public static final float FIXED_TEXT_SCALE = 1.0f;
+    /**
+     * 1.00x -- the panel title.
+     *
+     * <p>1.1.0 (user m02752 "面板字体模糊"): no tier may exceed 1.0. {@code FontHelper} builds every
+     * font once, at a fixed pixel size, into a texture atlas; drawing it above 1.0 makes the GPU
+     * interpolate that atlas upwards, which is exactly what "模糊" was. Only shrinking keeps glyphs
+     * sharp, so the title now reads as a title through colour and position, not through size.
+     */
+    public static final float TITLE_SCALE = 1.0f;
+    /**
+     * The order the pixel field lights its cells in (m19340).
+     *
+     * <p>A fixed permutation of 0..99, not a per-frame shuffle: the same progress must light the
+     * same cells every time, or a screenshot of the panel could not be explained and two players at
+     * the same percentage would see different pictures. It was generated once by shuffling the
+     * identity with a seeded RNG and pasting the result; the shape of the table is the contract, the
+     * seed is not.
+     *
+     * <p>Why shuffle at all: filling a square left-to-right, top-to-bottom reads as a progress bar
+     * that happens to be square. Lighting cells in scattered order reads as a block of pixels coming
+     * alive, which is what the player asked for.
+     */
+    private static final int[] PIXEL_ORDER = {
+            73, 12, 88, 41, 5, 66, 29, 94, 50, 17,
+            82, 34, 59, 3, 97, 46, 21, 71, 8, 63,
+            38, 90, 25, 55, 14, 79, 44, 1, 68, 31,
+            86, 52, 19, 75, 10, 61, 96, 36, 48, 23,
+            92, 57, 6, 70, 27, 83, 40, 15, 65, 98,
+            33, 77, 2, 54, 89, 20, 47, 72, 11, 60,
+            95, 42, 18, 80, 30, 56, 4, 67, 91, 24,
+            49, 13, 74, 37, 99, 58, 26, 85, 7, 45,
+            69, 32, 93, 16, 62, 0, 51, 87, 39, 22,
+            76, 9, 64, 28, 53, 84, 43, 35, 81, 78};
+    /** 1.00x -- the one number a row is about (percentage). Never above 1.0; see above. */
+    public static final float NUM_SCALE = 1.0f;
+    /** 0.86x -- labels and units ("已用", "剩"). */
+    public static final float AUX_SCALE = 0.86f;
+    /** 0.78x -- the chip captions. */
+    public static final float MICRO_SCALE = 0.78f;
+    /** The largest tier any draw path may ask for; the gate pins this at 1.0. */
+    public static final float MAX_TEXT_SCALE = 1.0f;
 
     /** Measured pill widths, keyed by text; the CJK font is expensive to lay out every frame. */
     private static final java.util.Map<String, Float> widthCache =
@@ -100,8 +165,9 @@ public final class Panel {
     private Panel() {
     }
 
-    public static void setStatus(String text) {
-        status = text == null ? "" : text;
+    /** The non-empty list {@link #render} is handed when a plan exists; see {@link #PLAN_GATE}. */
+    public static java.util.List<String> planGate() {
+        return PLAN_GATE;
     }
 
     public static boolean collapsed() {
@@ -119,6 +185,14 @@ public final class Panel {
     /** Per-frame input: hover state, clicks, and the plan-row clicks the text list owns. */
     public static void update() {
         try {
+            // m05752: nothing is drawn outside a fight, so nothing may be clickable either. Without
+            // this the panel's hit boxes stayed live on the map -- an invisible button that still
+            // fires is worse than a visible one that covers the screen.
+            if (!sts1solver.ui.Hud.isDemo() && !sts1solver.ui.PhaseGate.fighting()) {
+                hover = -1;
+                reportHover = false;
+                return;
+            }
             float scale = Settings.scale;
             float mx = InputHelper.mX;
             float my = InputHelper.mY;
@@ -303,7 +377,12 @@ public final class Panel {
     /** Runs one panel action. Public so a headless test can drive it. */
     public static void activate(String id) {
         if ("solve".equals(id)) {
-            if (sts1solver.Gameplay.quickSearching()) {
+            // 1.1.0 (user m06672): in 全自动 the primary band is a banner, not a button -- there is no
+            // solve for the player to start or stop, the mode does it. Pressing it returns to 半自动,
+            // which is the only thing that band can usefully mean there.
+            if (sts1solver.Gameplay.fullAuto()) {
+                sts1solver.Gameplay.cycleAutoMode();
+            } else if (sts1solver.Gameplay.quickSearching()) {
                 sts1solver.Gameplay.stopQuickSolve();
             } else {
                 sts1solver.Gameplay.startQuickSolve();
@@ -311,13 +390,25 @@ public final class Panel {
         } else if ("hide".equals(id)) {
             sts1solver.ui.Hud.toggle();
         } else if ("step".equals(id)) {
-            sts1solver.Gameplay.executeStep();
+            // 1.1.0 (user m06672): while the autopilot is running this is 执行一步; while it is idle it
+            // is the 半自动/全自动 switch. The switch had to ride an existing button because
+            // PanelLayout.IDS is pinned by the gates, and the 自动出牌 button must stay a pure stop.
+            if (sts1solver.Gameplay.autopilot() || sts1solver.Gameplay.autoplayArmed()) {
+                sts1solver.Gameplay.executeStep();
+            } else {
+                sts1solver.Gameplay.cycleAutoMode();
+            }
         } else if ("auto".equals(id)) {
             sts1solver.Gameplay.toggleAutopilot();
         } else if ("collapse".equals(id)) {
             collapsed = !collapsed;
         } else if ("seconds".equals(id)) {
-            Budget.cycleSeconds();
+            // 1.1.0 (user m06672): the same slot carries the turn budget while 全自动 is on.
+            if (sts1solver.Gameplay.fullAuto()) {
+                sts1solver.search.Limits.cycleHorizonTurns();
+            } else {
+                Budget.cycleSeconds();
+            }
         } else if ("nodes".equals(id)) {
             Budget.cycleNodes();
         } else if ("pace".equals(id)) {
@@ -351,30 +442,17 @@ public final class Panel {
             try {
                 float x = PanelLayout.x0(Settings.WIDTH, scale);
                 float top = PanelLayout.y0(Settings.HEIGHT, scale);
-                float w = PanelLayout.width(scale);
+                // m05226 (P1b): one snapshot per frame. The five drawing helpers used to call
+                // Gameplay.status() themselves, so a single frame built the status object five
+                // times and re-formatted the pass description and the dropped-branch text each
+                // time -- neither of which the panel ever displayed.
+                sts1solver.Gameplay.Status s = sts1solver.Gameplay.status();
                 if (collapsed) {
-                    drawButton(sb, font, x, top - 28.0f * scale, 110.0f * scale, 28.0f * scale,
-                            "▶ 求解器", false);
+                    drawCollapsedTab(sb, font, scale, x, top, s);
                 } else {
-                    float h = PanelLayout.panelHeight(scale);
-                    fill(sb, x, top - h, w, h, 0.06f, 0.07f, 0.09f, 0.80f);
-                    stroke(sb, x, top - h, w, h, 0.35f, 0.55f, 0.85f, 0.90f);
-                    sb.setColor(Color.WHITE);
-                    font.setColor(0.85f, 0.92f, 1.0f, 1.0f);
-                    // Title and status live in the header band; the grid starts below it, so the
-                    // two can never collide (reported: 求解器和面板上下太挤).
-                    font.draw(sb, "尖塔求解器", x + 12.0f * scale, top - 18.0f * scale);
-                    float[] rr = PanelLayout.reportRect(Settings.WIDTH, Settings.HEIGHT, scale);
-                    drawButton(sb, font, rr[0], rr[1], rr[2], rr[3],
-                            sts1solver.diag.BugReport.label(), reportHover);
-                    // B32: the status is already the first plan line (lines()[0]); drawing it in the
-                    // header band too was the duplicate text the player asked to remove.
-                    for (int i = 0; i < PanelLayout.IDS.length; i++) {
-                        float[] r = PanelLayout.rect(i, Settings.WIDTH, Settings.HEIGHT, scale);
-                        drawButton(sb, font, r[0], r[1], r[2], r[3], labelFor(i), hover == i);
-                    }
+                    drawBody(sb, font, scale, x, top, s);
                 }
-                drawPlanText(sb, font, planLines, scale);
+                drawPlanText(sb, font, planLines, scale, s);
             } finally {
                 font.setColor(oldFont);
                 sb.setColor(oldBatch);
@@ -427,53 +505,36 @@ public final class Panel {
         }
     }
 
-    private static String labelFor(int i) {
-        if (PanelLayout.IDS[i].equals("solve") && sts1solver.Gameplay.quickSearching()) {
-            return "计算中…（点=停）";
-        }
-        // "deep" is gone: calculate itself spends the whole budget (B43).
-        if (PanelLayout.IDS[i].equals("hide")) {
-            return sts1solver.ui.Hud.visible() ? "隐藏" : "显示";
-        }
-        if (PanelLayout.IDS[i].equals("auto")) {
-            if (sts1solver.Gameplay.autopilot()) {
-                return "自动: 开";
-            }
-            if (sts1solver.Gameplay.autoplayArmed()) {
-                return "自动: 算完开始";
-            }
-        }
-        if (PanelLayout.IDS[i].equals("seconds")) {
-            // 1.0.8 (C6, user): the ladder is 自动(6s) 自动(12s) 自动(18s) 自动(30s) 自动(60s) 无限,
-            // so the label is the budget itself -- no second wording can contradict the progress line.
-            return "秒数 " + Budget.secondsLabel(Budget.seconds());
-        }
-        if (PanelLayout.IDS[i].equals("nodes")) {
-            return "节点 " + (Budget.nodes() / 1000) + "k";
-        }
-        if (PanelLayout.IDS[i].equals("pace")) {
-            return AutoPace.label();
-        }
-        if (PanelLayout.IDS[i].equals("potion")) {
-            return sts1solver.search.Limits.potionsLabel();
-        }
-        if (PanelLayout.IDS[i].equals("growth")) {
-            return sts1solver.search.GrowthBook.countingLabel();
-        }
-        return PanelLayout.LABELS[i];
-    }
-
     private static void drawButton(SpriteBatch sb, BitmapFont font, float x, float y, float w, float h,
                                    String label, boolean hovered) {
+        drawButton(sb, font, x, y, w, h, label, hovered, false);
+    }
+
+    /**
+     * A secondary button. {@code on} marks a toggle that is currently engaged (自动出牌): it gets the
+     * accent tint, so the player can tell "off" from "on" without reading the label.
+     */
+    private static void drawButton(SpriteBatch sb, BitmapFont font, float x, float y, float w, float h,
+                                   String label, boolean hovered, boolean on) {
         if (hovered) {
-            fill(sb, x, y, w, h, 0.35f, 0.55f, 0.95f, 0.55f);
+            fill(sb, x, y, w, h, 0.243f, 0.431f, 0.667f, 0.80f);
             stroke(sb, x, y, w, h, 0.75f, 0.88f, 1.0f, 1.0f);
+        } else if (on) {
+            fill(sb, x, y, w, h, 0.161f, 0.361f, 0.643f, 0.72f);
+            stroke(sb, x, y, w, h, 0.431f, 0.639f, 0.878f, 0.86f);
         } else {
-            fill(sb, x, y, w, h, 0.20f, 0.28f, 0.38f, 0.62f);
-            stroke(sb, x, y, w, h, 0.40f, 0.55f, 0.70f, 0.75f);
+            fill(sb, x, y, w, h, 0.149f, 0.212f, 0.290f, 0.72f);
+            stroke(sb, x, y, w, h, 0.431f, 0.588f, 0.769f, 0.42f);
         }
-        font.setColor(hovered ? Color.WHITE : new Color(0.85f, 0.90f, 0.96f, 1.0f));
-        drawLabel(sb, font, label, x, y, w, h);
+        float pad = 8.0f * Settings.scale;
+        float maxW = w - pad * 2.0f;
+        float tier = FIXED_TEXT_SCALE;
+        float tw = textWidth(font, label, tier);
+        float fit = tw > maxW && tw > 0.0f ? maxW / tw : 1.0f;
+        text(sb, font, label, x + Math.max(pad, (w - tw * fit) * 0.5f),
+                lineTop(y, h, tier * fit, Settings.scale),
+                tier * fit, hovered || on ? 1.0f : 0.863f, hovered || on ? 1.0f : 0.910f,
+                hovered || on ? 1.0f : 0.965f, 1.0f);
     }
 
     /**
@@ -481,13 +542,15 @@ public final class Panel {
      * past the screen edge -- "局外收益: 不计" lost its tail there ("行/不行看不见"). Measure the label
      * and scale it down to fit the button instead of drawing it off the edge.
      *
-     * <p>Only the shrink path touches the font scale, and it restores 1.0 in a finally block, so other
-     * panel text sharing FontHelper.topPanelInfoFont is unaffected.
+     * <p>Only the shrink path touches the font scale, and it restores whatever the scale was on
+     * entry in a finally block, so other panel text sharing FontHelper.topPanelInfoFont is
+     * unaffected.
      */
     private static void drawLabel(SpriteBatch sb, BitmapFont font, String label, float x, float y,
                                   float w, float h) {
         float pad = 10.0f * Settings.scale;
         float maxW = w - pad * 2.0f;
+        float base = font.getData().scaleX;
         float fit = 1.0f;
         if (label != null && !label.isEmpty() && maxW > 1.0f) {
             FIT.setText(font, label);
@@ -496,15 +559,654 @@ public final class Panel {
             }
         }
         if (fit < 1.0f) {
-            font.getData().setScale(fit);
+            font.getData().setScale(base * fit);
         }
         try {
-            font.draw(sb, label, x + pad, y + h * 0.62f);
+            font.draw(sb, label, x + pad, lineTop(y, h, fit, Settings.scale));
         } finally {
             if (fit < 1.0f) {
-                font.getData().setScale(1.0f);
+                font.getData().setScale(base);
             }
         }
+    }
+
+    // ---------------------------------------------------------------- 1.1.0 panel body
+
+    /**
+     * Draws one string at a fixed tier and colour, restoring the shared font's scale afterwards.
+     *
+     * <p>The font is the game's, shared with other overlays, so every caller that changes its size
+     * has to put it back. Going through one helper is what keeps that honest.
+     */
+    private static void text(SpriteBatch sb, BitmapFont font, String s, float x, float baseline,
+                             float tier, float r, float g, float b, float a) {
+        if (s == null || s.isEmpty()) {
+            return;
+        }
+        float base = font.getData().scaleX;
+        font.getData().setScale(tier);
+        font.setColor(r, g, b, a);
+        font.draw(sb, s, x, baseline);
+        font.getData().setScale(base);
+    }
+
+    /**
+     * The top edge of one line of text centred inside a band.
+     *
+     * <p>1.1.0 (user m03103 "Y 轴太挤了，都压一块了"): every band used to place its text at
+     * {@code y + h * 0.62}, a fraction of the <em>band</em> rather than of the <em>line</em>. libGDX
+     * draws a string from its top edge downward for one full line box, so in a 16-30 unit band that
+     * 26 unit box started two thirds of the way down and then ran 10-20 units past the band's bottom
+     * edge -- straight through the band below it. Centring the line box instead makes every band
+     * independent of the font's actual height.
+     */
+    private static float lineTop(float bandBottom, float bandHeight, float tier, float scale) {
+        float box = PanelLayout.LINE_H * tier * scale;
+        return bandBottom + (bandHeight + box) * 0.5f;
+    }
+
+    /**
+     * Tops a smaller tier so its optical centre matches {@code anchorTier}'s.
+     *
+     * <p>Two strings that share a "baseline" y are not optically aligned when their tiers differ:
+     * with top-edge semantics the smaller one floats high. This drops it by half the difference of
+     * the two line boxes, which is what keeps "已用 7.4s" from looking like a superscript.
+     */
+    private static float alignTo(float top, float tier, float anchorTier, float scale) {
+        return top - PanelLayout.LINE_H * (anchorTier - tier) * scale * 0.5f;
+    }
+
+    /** Width of a string at a tier, through the shared measurement cache. */
+    private static float textWidth(BitmapFont font, String s, float tier) {
+        return s == null || s.isEmpty() ? 0.0f : measure(font, tier).width(s);
+    }
+
+    /** Same, but never wider than {@code max}, shrinking the glyphs to fit (B144's rule). */
+    private static void textFit(SpriteBatch sb, BitmapFont font, String s, float x, float baseline,
+                                float tier, float max, float r, float g, float b, float a) {
+        if (s == null || s.isEmpty()) {
+            return;
+        }
+        float w = textWidth(font, s, tier);
+        float fit = w > max && w > 0.0f ? max / w : 1.0f;
+        text(sb, font, s, x, baseline, tier * fit, r, g, b, a);
+    }
+
+    /** Right-aligned string at a tier. */
+    private static void textRight(SpriteBatch sb, BitmapFont font, String s, float right,
+                                  float baseline, float tier, float max,
+                                  float r, float g, float b, float a) {
+        if (s == null || s.isEmpty()) {
+            return;
+        }
+        float w = Math.min(textWidth(font, s, tier), max);
+        textFit(sb, font, s, right - w, baseline, tier, max, r, g, b, a);
+    }
+
+    /** The whole expanded panel: header, status strip, actions, params, foot. */
+    private static void drawBody(SpriteBatch sb, BitmapFont font, float scale, float x, float top,
+                                 sts1solver.Gameplay.Status s) {
+        float w = PanelLayout.width(scale);
+        float h = PanelLayout.panelHeight(scale);
+        fill(sb, x, top - h, w, h, 0.067f, 0.094f, 0.137f, 0.94f);
+        stroke(sb, x, top - h, w, h, 0.376f, 0.573f, 0.800f, 0.48f);
+        sb.setColor(Color.WHITE);
+        drawHeader(sb, font, scale, x, top, s);
+        drawStatus(sb, font, scale, s);
+        drawActions(sb, font, scale);
+        drawParams(sb, font, scale);
+        drawFoot(sb, font, scale);
+    }
+
+    /** Title band: the name, the live state, and the report button at the right end. */
+    private static void drawHeader(SpriteBatch sb, BitmapFont font, float scale, float x, float top,
+                                   sts1solver.Gameplay.Status s) {
+        float pad = PanelLayout.pad(scale);
+        float band = PanelLayout.headerHeight(scale);
+        float baseline = lineTop(top - band, band, TITLE_SCALE, scale);
+        // The accent bar carries the title's weight instead of a bigger font: the game's fonts are
+        // bitmap atlases, and stretching one upward is what made the old header look blurry.
+        float barW = 2.5f * scale;
+        fill(sb, x + pad, baseline - 9.0f * scale, barW, 13.0f * scale, 0.310f, 0.639f, 1.0f, 0.95f);
+        float titleX = x + pad + barW + 6.0f * scale;
+        text(sb, font, "尖塔求解器", titleX, baseline, TITLE_SCALE, 0.918f, 0.949f, 0.988f, 1.0f);
+        float after = titleX + textWidth(font, "尖塔求解器", TITLE_SCALE) + 8.0f * scale;
+        float[] rr = PanelLayout.reportRect(Settings.WIDTH, Settings.HEIGHT, scale);
+        float dotX = after;
+        float dotY = baseline - 5.0f * scale;
+        float[] tone = stateTone(s);
+        fill(sb, dotX, dotY, 5.0f * scale, 5.0f * scale, tone[0], tone[1], tone[2], 0.95f);
+        text(sb, font, stateWord(s), dotX + 9.0f * scale,
+                alignTo(baseline, MICRO_SCALE, TITLE_SCALE, scale), MICRO_SCALE,
+                tone[0], tone[1], tone[2], 0.95f);
+        drawReportIcon(sb, font, rr, scale);
+    }
+
+    /**
+     * The report button is an icon, not a word: the header is a title bar now, and an 84 px label
+     * there read as a third row of buttons. Drawn from three rectangles so it needs no asset.
+     */
+    private static void drawReportIcon(SpriteBatch sb, BitmapFont font, float[] r, float scale) {
+        if (reportHover) {
+            fill(sb, r[0], r[1], r[2], r[3], 0.243f, 0.431f, 0.667f, 0.80f);
+            stroke(sb, r[0], r[1], r[2], r[3], 0.75f, 0.88f, 1.0f, 1.0f);
+        } else {
+            fill(sb, r[0], r[1], r[2], r[3], 0.149f, 0.212f, 0.290f, 0.72f);
+            stroke(sb, r[0], r[1], r[2], r[3], 0.431f, 0.588f, 0.769f, 0.42f);
+        }
+        float cx = r[0] + r[2] * 0.5f;
+        float midY = r[1] + r[3] * 0.54f;
+        float unit = scale;
+        float col = reportHover ? 1.0f : 0.72f;
+        // stem
+        fill(sb, cx - 1.0f * unit, midY + 1.0f * unit, 2.0f * unit, 5.0f * unit,
+                col, col, col, 0.95f);
+        // arrow head, two steps so it reads as a triangle at this size
+        fill(sb, cx - 4.0f * unit, midY + 2.0f * unit, 8.0f * unit, 2.0f * unit,
+                col, col, col, 0.95f);
+        fill(sb, cx - 2.5f * unit, midY + 0.0f * unit, 5.0f * unit, 2.0f * unit,
+                col, col, col, 0.95f);
+        // tray
+        fill(sb, cx - 5.0f * unit, midY - 4.0f * unit, 10.0f * unit, 1.5f * unit,
+                col, col, col, 0.95f);
+    }
+
+    /** A word for the search's state, from the same numbers the strip prints. */
+    private static String stateWord(sts1solver.Gameplay.Status s) {
+        if (s.paused) {
+            return "已暂停";
+        }
+        if (s.stalled()) {
+            return "无进展";
+        }
+        if (s.searching) {
+            return "计算中";
+        }
+        return s.hasPlan ? "已就绪" : "空闲";
+    }
+
+    /** RGB for the state dot and word: blue while searching, green when a line is held, grey idle. */
+    private static float[] stateTone(sts1solver.Gameplay.Status s) {
+        if (s.paused || s.stalled()) {
+            return new float[]{1.0f, 0.761f, 0.302f};
+        }
+        if (s.searching) {
+            return new float[]{0.310f, 0.639f, 1.0f};
+        }
+        if (s.hasPlan) {
+            return new float[]{0.373f, 0.827f, 0.604f};
+        }
+        return new float[]{0.502f, 0.596f, 0.694f};
+    }
+
+    /**
+     * The status strip: state + percentage + promise, a progress bar with the three downgrade marks
+     * 1.0.1 actually uses (25 / 50 / 75 %), then two short rows of numbers.
+     *
+     * <p>It replaces five or six sentences from {@code Gameplay.lines()} -- 130-156 px of paragraph
+     * the player had to read -- with the same facts at 84 px. The sentences still exist for the log
+     * and the bug report; only the panel reads the numbers instead.
+     */
+    private static void drawStatus(SpriteBatch sb, BitmapFont font, float scale,
+                                   sts1solver.Gameplay.Status s) {
+        float[] r = PanelLayout.statusRect(Settings.WIDTH, Settings.HEIGHT, scale);
+        float left = r[0];
+        float right = r[0] + r[2];
+        float top = r[1] + r[3];
+        fill(sb, left, r[1], r[2], r[3], 0.031f, 0.043f, 0.067f, 0.62f);
+        stroke(sb, left, r[1], r[2], r[3], 0.376f, 0.573f, 0.800f, 0.22f);
+
+        // The bands are stacked from the strip's top edge with a 4 unit inner pad each. m19272: the
+        // stack is now 4 + 26 + 4 + 26 + 4 + 14 bar + 4 = STATUS_H (82), the bar owning the bottom
+        // band. Each baseline comes from lineTop, so a band can never overflow into the one below it
+        // (user m03103).
+        float bandH = PanelLayout.LINE_H * scale;
+
+        // row 1: state word, the one number, then the promise pushed to the right edge
+        float r1Top = top - 4.0f * scale;
+        float r1 = lineTop(r1Top - bandH, bandH, AUX_SCALE, scale);
+        text(sb, font, stateWord(s), left + 8.0f * scale, r1, AUX_SCALE, 0.863f, 0.910f, 0.965f, 1.0f);
+        float afterWord = left + 8.0f * scale + textWidth(font, stateWord(s), AUX_SCALE) + 8.0f * scale;
+        String pct = s.hasPct() ? (s.pct + "%") : "";
+        if (!pct.isEmpty()) {
+            text(sb, font, pct, afterWord, alignTo(r1, NUM_SCALE, AUX_SCALE, scale), NUM_SCALE,
+                    0.310f, 0.639f, 1.0f, 1.0f);
+            afterWord += textWidth(font, pct, NUM_SCALE) + 8.0f * scale;
+        }
+        // 1.1.0 (user m04872 "y轴太长了"): row 3 is gone. It printed the running pass's phase --
+        // "窄深搜 beam=10 layers=3" -- which no decision ever turned on. The one thing in it that
+        // did matter, "this search has stopped making progress", moves up here: when the search is
+        // stalled the promise slot shows the warning instead, in amber. Same fact, no extra band.
+        // m19272 (user "右边交互面板把世界线的两个部分删了"): the warning used to name the thing it
+        // was counting ("没有新世界线"). The count itself is gone from this block, so naming it here
+        // would point at a number the player can no longer see. It now says the fact that matters --
+        // the search has stopped moving -- in the same words the state word uses.
+        String promise = s.stalled()
+                ? "⚠ 已有 " + (s.stalledMs / 1000L) + "s 没有进展"
+                : promiseText(s);
+        if (!promise.isEmpty()) {
+            float room = right - 8.0f * scale - afterWord;
+            if (room > 20.0f * scale) {
+                boolean warn = s.stalled();
+                textRight(sb, font, promise, right - 8.0f * scale, r1, AUX_SCALE, room,
+                        warn ? 1.0f : 0.561f, warn ? 0.761f : 0.651f, warn ? 0.302f : 0.745f, 1.0f);
+            }
+        }
+
+        // m19272 (user "然后把这里之前的进度条还回来，不过要做成像素网格填充"): the bar is back,
+        // as a grid of pixels rather than one solid rectangle. m06251 removed it on the argument
+        // that the numbers below already said where the search stood; the player wants the visual
+        // again, so it gets its own 14 unit band under row 2 (PanelLayout.STATUS_BAR_H) and the
+        // numbers stay exactly where they were.
+        drawGridBar(sb, s, scale);
+
+        // row 2: elapsed / budget, remaining, best line. m19272: the worldline counter left this
+        // row -- the player reads progress from the bar above it, and the number duplicated the
+        // bar's own meaning. The pair is gone rather than emptied, so 最优 keeps the same gap.
+        float r2Top = r1Top - bandH - 4.0f * scale;
+        float r2 = lineTop(r2Top - bandH, bandH, AUX_SCALE, scale);
+        float cursor = left + 8.0f * scale;
+        float gap = 12.0f * scale;
+        cursor = pair(sb, font, cursor, r2, scale, "已用", elapsedText(s), gap);
+        cursor = pair(sb, font, cursor, r2, scale, "剩", leftText(s), gap);
+        cursor = pair(sb, font, cursor, r2, scale, "最优", bestText(s), gap);
+    }
+
+    /**
+     * The expanded panel's progress readout, drawn as an N x N field of square pixels (m19272,
+     * m19340).
+     *
+     * <p>Why a field and not a bar: the player asked for "像素网格填充" and then spelled out the
+     * shape -- a square cut into N x N cells, lit by progress. A left-to-right fill of a square
+     * reads exactly like the progress bar it replaces, so the ORDER is shuffled: cell k is lit by
+     * its rank in a fixed pseudo-random permutation, not by its position. Progress then looks like
+     * a block of pixels coming alive instead of a stripe growing across the panel.
+     *
+     * <p>Three cues, all cheap:
+     * <ul>
+     *   <li><b>Shuffled order</b> -- {@link #PIXEL_ORDER} is one fixed permutation, so the same
+     *       progress always lights the same cells (a screenshot stays explainable).</li>
+     *   <li><b>Breathing</b> -- every lit cell's alpha rides a slow sine, so a stalled search still
+     *       looks alive without claiming progress it does not have.</li>
+     *   <li><b>Leading flash</b> -- the cell that just lit is drawn brighter for a beat, which is
+     *       what makes "the search moved" visible at a glance.</li>
+     * </ul>
+     *
+     * <p>Cost: {@code N*N} draws of one shared white texture -- the same call {@link #fill} makes
+     * for every other rectangle on the panel. No allocation, no text measurement, nothing that
+     * depends on the plan. The permutation is a static table, not a per-frame shuffle.
+     *
+     * <p>Unlimited budgets have no percentage ({@code hasPct()} is false): the field then shows a
+     * full track with no lit cells, because a percentage of "no limit" would be a lie. A finished
+     * search ({@code !searching}) lights every cell.
+     */
+    private static void drawGridBar(SpriteBatch sb, sts1solver.Gameplay.Status s, float scale) {
+        float[] b = PanelLayout.statusBarRect(Settings.WIDTH, Settings.HEIGHT, scale);
+        if (b[2] <= 0.0f || b[3] <= 0.0f) {
+            return;
+        }
+        int n = PanelLayout.statusBarCells();
+        float gap = PanelLayout.statusBarCellGap() * scale;
+        float edge = PanelLayout.statusBarCellEdge() * scale;
+        if (edge <= 0.0f || n <= 0) {
+            return;
+        }
+        int total = n * n;
+        int lit = s.hasPct()
+                ? Math.round(Math.max(0, Math.min(100, s.pct)) * total / 100.0f)
+                : (s.searching ? 0 : total);
+        // One clock read per frame; the two waves are independent so breathing and flashing never
+        // land in lockstep (which would read as a single pulsing block).
+        long now = System.currentTimeMillis();
+        float breathe = 0.78f + 0.22f * (float) Math.sin(now / 620.0);
+        float flash = 0.55f + 0.45f * (float) Math.abs(Math.cos(now / 180.0));
+        float inset = Math.max(0.5f * scale, edge * 0.14f);
+        // Track: every cell's socket, so the empty part still reads as a grid.
+        for (int i = 0; i < total; i++) {
+            float[] xy = pixelCell(b, n, edge, gap, i);
+            fill(sb, xy[0], xy[1], edge, edge, 0.471f, 0.627f, 0.784f, 0.16f);
+        }
+        // Fill: lit cells in shuffled order, breathing; the newest one flashes.
+        for (int rank = 0; rank < lit && rank < total; rank++) {
+            float[] xy = pixelCell(b, n, edge, gap, PIXEL_ORDER[rank % total]);
+            boolean leading = rank >= lit - 2;
+            float a = leading ? flash : breathe * 0.92f;
+            fill(sb, xy[0] + inset, xy[1] + inset, edge - 2.0f * inset, edge - 2.0f * inset,
+                    leading ? 0.560f : 0.310f, leading ? 0.820f : 0.639f, 1.0f, a);
+        }
+    }
+
+    /** Where cell {@code index} sits inside the field's rect {@code b}. */
+    private static float[] pixelCell(float[] b, int n, float edge, float gap, int index) {
+        int col = index % n;
+        int row = index / n;
+        // Row 0 is the TOP row: the field grows from the top-left of its rect downward, which is the
+        // direction the rest of the panel reads in.
+        return new float[]{b[0] + col * (edge + gap),
+                b[1] + b[3] - edge - row * (edge + gap)};
+    }
+
+    /** "label value" at two tiers, returns the x the next pair starts at. */
+    private static float pair(SpriteBatch sb, BitmapFont font, float x, float baseline, float scale,
+                              String label, String value, float gap) {
+        if (label != null && !label.isEmpty()) {
+            text(sb, font, label, x, alignTo(baseline, MICRO_SCALE, AUX_SCALE, scale), MICRO_SCALE,
+                    0.392f, 0.475f, 0.561f, 1.0f);
+            x += textWidth(font, label, MICRO_SCALE) + 3.0f * scale;
+        }
+        if (value != null && !value.isEmpty()) {
+            text(sb, font, value, x, baseline, AUX_SCALE, 0.863f, 0.910f, 0.965f, 1.0f);
+            x += textWidth(font, value, AUX_SCALE);
+        }
+        return x + gap;
+    }
+
+    /** The promise in force, and how far the search has walked it. */
+    /**
+     * The promise slot on row 1: the turn budget, in as few characters as it can be said.
+     *
+     * <p>m19340 (user "右边只需要有各种数字表示硬核就可以了"): this slot used to print a sentence --
+     * "推到战斗结束", "3 回合最优（已降档）", " · 走完 4". The player's point was that the RIGHT panel
+     * is the instrument cluster: numbers belong here, the prose belongs on the left strip, which
+     * has room for it. So the slot now reads like a gauge: {@code 结束}, {@code 3回合}, or
+     * {@code 3/5回合} when the clock has narrowed the promise, with a trailing {@code ·4} for the
+     * turns actually finished.
+     */
+    private static String promiseText(sts1solver.Gameplay.Status s) {
+        if (!s.searching && !s.hasPlan) {
+            return "";
+        }
+        StringBuilder b = new StringBuilder(8);
+        if (s.horizonLimit <= 0) {
+            b.append("结束");
+        } else if (s.horizonTurns > 0 && s.horizonTurns < s.horizonLimit) {
+            b.append(s.horizonTurns).append('/').append(s.horizonLimit).append("回合");
+        } else {
+            b.append(s.horizonLimit).append("回合");
+        }
+        if (s.turnsFinished > 0) {
+            b.append(" ·").append(s.turnsFinished);
+        }
+        return b.toString();
+    }
+
+    private static String elapsedText(sts1solver.Gameplay.Status s) {
+        if (!s.searching) {
+            return "";
+        }
+        String used = (s.elapsedMs / 100L) / 10.0f + "s";
+        return s.budgetMs <= 0L ? used + "（不限）" : used + "/" + (s.budgetMs / 1000L) + "s";
+    }
+
+    private static String leftText(sts1solver.Gameplay.Status s) {
+        if (!s.searching || s.budgetMs <= 0L) {
+            return "";
+        }
+        return (s.leftMs / 100L) / 10.0f + "s";
+    }
+
+    private static String bestText(sts1solver.Gameplay.Status s) {
+        if (s.searching) {
+            return s.bestSteps > 0 ? s.bestSteps + " 步" : "";
+        }
+        return s.planSteps > 0 ? s.planSteps + " 步" : "";
+    }
+
+    /** The primary action, the two-up row, then the params band. */
+    private static void drawActions(SpriteBatch sb, BitmapFont font, float scale) {
+        boolean searching = sts1solver.Gameplay.quickSearching();
+        float[] pr = PanelLayout.primaryRect(Settings.WIDTH, Settings.HEIGHT, scale);
+        if (sts1solver.Gameplay.fullAuto()) {
+            // 1.1.0 (user m06672): 全自动 hides 计算 -- there is nothing for the player to start, the
+            // mode keeps solving by itself until the fight ends. The band stays as a muted banner
+            // instead of a hole (the layout is pinned by the gates), and pressing it is the way back
+            // to 半自动. 自动出牌 stays the stop, because the user asked for exactly one obvious exit.
+            fill(sb, pr[0], pr[1], pr[2], pr[3], 0.106f, 0.157f, 0.220f, 0.86f);
+            stroke(sb, pr[0], pr[1], pr[2], pr[3], 0.310f, 0.443f, 0.573f, 0.62f);
+            String banner = "全自动 · 打到结束";
+            float bw = textWidth(font, banner, FIXED_TEXT_SCALE);
+            text(sb, font, banner, pr[0] + (pr[2] - bw) * 0.5f,
+                    lineTop(pr[1], pr[3], FIXED_TEXT_SCALE, scale),
+                    FIXED_TEXT_SCALE, 0.706f, 0.784f, 0.863f, 1.0f);
+        } else {
+            boolean hot = hover == PanelLayout.indexOf("solve");
+            float[] base = searching ? new float[]{0.549f, 0.176f, 0.176f} : new float[]{0.161f, 0.361f, 0.643f};
+            if (hot) {
+                fill(sb, pr[0], pr[1], pr[2], pr[3], base[0] + 0.14f, base[1] + 0.14f, base[2] + 0.14f, 0.94f);
+                stroke(sb, pr[0] - 1.0f * scale, pr[1] - 1.0f * scale, pr[2] + 2.0f * scale,
+                        pr[3] + 2.0f * scale, 0.75f, 0.88f, 1.0f, 0.95f);
+            } else {
+                fill(sb, pr[0], pr[1], pr[2], pr[3], base[0], base[1], base[2], 0.86f);
+                stroke(sb, pr[0], pr[1], pr[2], pr[3], 0.58f, 0.74f, 0.94f, 0.62f);
+            }
+            String label = searching ? "停止计算" : "计算本场";
+            float tw = textWidth(font, label, FIXED_TEXT_SCALE);
+            text(sb, font, label, pr[0] + (pr[2] - tw) * 0.5f,
+                    lineTop(pr[1], pr[3], FIXED_TEXT_SCALE, scale),
+                    FIXED_TEXT_SCALE, 1.0f, 1.0f, 1.0f, 1.0f);
+        }
+        for (int i = 1; i <= 2; i++) {
+            float[] r = PanelLayout.row2Rect(i, Settings.WIDTH, Settings.HEIGHT, scale);
+            boolean on = i == 2 && sts1solver.Gameplay.autopilot();
+            drawButton(sb, font, r[0], r[1], r[2], r[3], actionLabel(i), hover == i, on);
+        }
+    }
+
+    /**
+     * The five chips. A chip reads "秒数 12s": caption dim, value bright.
+     *
+     * <p>1.1.0 (user m04872): the "参数" caption that used to sit above this row is gone -- see
+     * {@code PanelLayout.CHIPS_OFF}. The chips carry their own captions, so a band whose only job
+     * was to say "these are parameters" was 30 units of vertical space for one word.
+     */
+    private static void drawParams(SpriteBatch sb, BitmapFont font, float scale) {
+        for (int i = 0; i < PanelLayout.IDS.length; i++) {
+            if (!PanelLayout.isChip(i)) {
+                continue;
+            }
+            float[] r = PanelLayout.chipRect(i - 3, Settings.WIDTH, Settings.HEIGHT, scale);
+            boolean hot = hover == i;
+            fill(sb, r[0], r[1], r[2], r[3], hot ? 0.243f : 0.149f, hot ? 0.361f : 0.212f,
+                    hot ? 0.549f : 0.290f, hot ? 0.80f : 0.66f);
+            stroke(sb, r[0], r[1], r[2], r[3], hot ? 0.75f : 0.431f, hot ? 0.88f : 0.588f,
+                    hot ? 1.0f : 0.769f, hot ? 1.0f : 0.42f);
+            float baseline = lineTop(r[1], r[3], AUX_SCALE, scale);
+            String caption = chipCaption(i);
+            float cw = textWidth(font, caption, MICRO_SCALE);
+            String value = chipValue(i);
+            float vw = textWidth(font, value, AUX_SCALE);
+            float total = cw + (value.isEmpty() ? 0.0f : 4.0f * scale + vw);
+            float cx = r[0] + Math.max(6.0f * scale, (r[2] - total) * 0.5f);
+            text(sb, font, caption, cx, alignTo(baseline, MICRO_SCALE, AUX_SCALE, scale), MICRO_SCALE,
+                    0.502f, 0.596f, 0.694f, 1.0f);
+            text(sb, font, value, cx + cw + 4.0f * scale, baseline, AUX_SCALE,
+                    0.863f, 0.910f, 0.965f, 1.0f);
+        }
+    }
+
+    /**
+     * Foot band: 收起 and 隐藏, as two real buttons.
+     *
+     * <p>m02372: this band used to print the live strip scale ("1.00×") to the left of two bare
+     * text links. The scale is already visible in the thing it describes -- the strip the player
+     * just dragged -- so the readout was a label for a control that carries its own feedback, and
+     * it sat where the eye goes looking for an action. The two links became buttons of the same
+     * size and paint as the action rows: they shrink and hide the whole overlay, which is not a
+     * caption-sized job.
+     */
+    private static void drawFoot(SpriteBatch sb, BitmapFont font, float scale) {
+        float[] collapse = PanelLayout.footRect(false, Settings.WIDTH, Settings.HEIGHT, scale);
+        drawButton(sb, font, collapse[0], collapse[1], collapse[2], collapse[3], "收起",
+                hover == PanelLayout.indexOf("collapse"));
+        float[] hide = PanelLayout.footRect(true, Settings.WIDTH, Settings.HEIGHT, scale);
+        drawButton(sb, font, hide[0], hide[1], hide[2], hide[3],
+                sts1solver.ui.Hud.visible() ? "隐藏" : "显示",
+                hover == PanelLayout.indexOf("hide"));
+    }
+
+    /**
+     * The collapsed panel: a title strip, the progress bar, and the two action buttons.
+     *
+     * <p>1.1.0 (user m06251). The old tab was a single pill that said "▶ ●求解器 62%" and expanded
+     * on any click. That made the two buttons a player reaches for mid-fight -- 计算 and 自动出牌 --
+     * cost an expand click first, and it hid the bar in the one state where there are no numbers to
+     * read. Now the bar lives here, the two buttons stay drawn and stay clickable, and the tab strip
+     * is the only part that expands.
+     */
+    private static void drawCollapsedTab(SpriteBatch sb, BitmapFont font, float scale, float x,
+                                         float top, sts1solver.Gameplay.Status s) {
+        float[] r = PanelLayout.collapsedRect(Settings.WIDTH, Settings.HEIGHT, scale);
+        float[] tab = PanelLayout.collapsedTabRect(Settings.WIDTH, Settings.HEIGHT, scale);
+        boolean hot = hover == PanelLayout.indexOf("collapse");
+        fill(sb, r[0], r[1], r[2], r[3], 0.067f, 0.094f, 0.137f, 0.94f);
+        stroke(sb, r[0], r[1], r[2], r[3], 0.376f, 0.573f, 0.800f, 0.48f);
+
+        // the tab strip: the only part that expands
+        if (hot) {
+            fill(sb, tab[0], tab[1], tab[2], tab[3], 0.243f, 0.431f, 0.667f, 0.55f);
+        }
+        float baseline = lineTop(tab[1], tab[3], AUX_SCALE, scale);
+        text(sb, font, "▶", r[0] + 8.0f * scale, alignTo(baseline, MICRO_SCALE, AUX_SCALE, scale),
+                MICRO_SCALE, 0.612f, 0.694f, 0.784f, 1.0f);
+        float[] tone = stateTone(s);
+        float dotX = r[0] + 8.0f * scale + textWidth(font, "▶", MICRO_SCALE) + 5.0f * scale;
+        fill(sb, dotX, baseline - 9.0f * scale, 5.0f * scale, 5.0f * scale, tone[0], tone[1], tone[2], 0.95f);
+        float nameX = dotX + 9.0f * scale;
+        text(sb, font, "求解器", nameX, baseline, AUX_SCALE, 0.863f, 0.910f, 0.965f, 1.0f);
+        float valueX = nameX + textWidth(font, "求解器", AUX_SCALE) + 6.0f * scale;
+        String value = collapsedValue(s);
+        textFit(sb, font, value, valueX, baseline, AUX_SCALE,
+                r[0] + r[2] - 8.0f * scale - valueX, tone[0], tone[1], tone[2], 1.0f);
+
+        drawCollapsedBar(sb, s, scale);
+
+        // the two buttons that survive collapse
+        String solveLabel = sts1solver.Gameplay.quickSearching() ? "停止" : "计算";
+        drawCollapsedAction(sb, font, scale, 0, solveLabel,
+                hover == PanelLayout.indexOf("solve"), sts1solver.Gameplay.quickSearching());
+        drawCollapsedAction(sb, font, scale, 1, actionLabel(2),
+                hover == PanelLayout.indexOf("auto"), sts1solver.Gameplay.autopilot());
+    }
+
+    /**
+     * The progress bar, drawn only on the collapsed panel (1.1.0, user m06251). Collapsed there are
+     * no numbers on screen, so this bar is the one thing that says the search is still moving. The
+     * three marks are the 25/50/75% downgrade points of 1.0.1, so the player can see the rung drop.
+     */
+    private static void drawCollapsedBar(SpriteBatch sb, sts1solver.Gameplay.Status s, float scale) {
+        float[] b = PanelLayout.collapsedBarRect(Settings.WIDTH, Settings.HEIGHT, scale);
+        fill(sb, b[0], b[1], b[2], b[3], 0.471f, 0.627f, 0.784f, 0.16f);
+        int fillPct = s.hasPct() ? Math.max(0, Math.min(100, s.pct)) : (s.searching ? 0 : 100);
+        if (fillPct > 0) {
+            fill(sb, b[0], b[1], b[2] * fillPct / 100.0f, b[3], 0.310f, 0.639f, 1.0f, 0.92f);
+        }
+        float[] marks = {0.25f, 0.50f, 0.75f};
+        for (int i = 0; i < marks.length; i++) {
+            fill(sb, b[0] + b[2] * marks[i], b[1], Math.max(1.0f, 1.0f * scale), b[3],
+                    0.027f, 0.035f, 0.051f, 0.90f);
+        }
+    }
+
+    /** One of the two action buttons drawn on the collapsed panel. */
+    private static void drawCollapsedAction(SpriteBatch sb, BitmapFont font, float scale, int slot,
+                                            String label, boolean hot, boolean on) {
+        float[] r = PanelLayout.collapsedActionRect(slot, Settings.WIDTH, Settings.HEIGHT, scale);
+        float br = slot == 0 ? (sts1solver.Gameplay.quickSearching() ? 0.549f : 0.161f) : 0.161f;
+        float bg = slot == 0 ? (sts1solver.Gameplay.quickSearching() ? 0.176f : 0.361f) : 0.361f;
+        float bb = slot == 0 ? (sts1solver.Gameplay.quickSearching() ? 0.176f : 0.643f) : 0.643f;
+        float lift = hot ? 0.14f : 0.0f;
+        fill(sb, r[0], r[1], r[2], r[3], br + lift, bg + lift, bb + lift,
+                on ? 0.94f : (hot ? 0.94f : 0.86f));
+        stroke(sb, r[0], r[1], r[2], r[3],
+                hot ? 0.75f : 0.58f, hot ? 0.88f : 0.74f, hot ? 1.0f : 0.94f,
+                hot ? 0.95f : 0.62f);
+        float tw = textWidth(font, label, FIXED_TEXT_SCALE);
+        text(sb, font, label, r[0] + (r[2] - tw) * 0.5f,
+                lineTop(r[1], r[3], FIXED_TEXT_SCALE, scale), FIXED_TEXT_SCALE, 1.0f, 1.0f, 1.0f, 1.0f);
+    }
+
+    /** What the collapsed tab's figure says: a percentage while searching, else the held line. */
+    private static String collapsedValue(sts1solver.Gameplay.Status s) {
+        if (s.searching) {
+            return s.hasPct() ? s.pct + "%" : (s.worldlines + " 条");
+        }
+        if (s.planSteps > 0) {
+            return s.planSteps + " 步";
+        }
+        return "空闲";
+    }
+
+    /** Chip caption, e.g. "秒数". */
+    private static String chipCaption(int i) {
+        String id = PanelLayout.IDS[i];
+        if ("seconds".equals(id)) {
+            // 1.1.0 (user m06672): 全自动 sets a turn budget, not a time budget -- "可以追求 1 回合、2
+            // 回合、3 回合、无限回合内的预算最优解". The slot is the same, the setting is not, so the
+            // chip becomes 回合 there and stays 秒数 in 半自动.
+            return sts1solver.Gameplay.fullAuto() ? "回合" : "秒数";
+        }
+        if ("nodes".equals(id)) {
+            return "节点";
+        }
+        if ("pace".equals(id)) {
+            return "节奏";
+        }
+        if ("potion".equals(id)) {
+            return "药水";
+        }
+        return "收益";
+    }
+
+    /** Chip value, e.g. "12s". The long state words stay in the log, not in a 122 px chip. */
+    private static String chipValue(int i) {
+        String id = PanelLayout.IDS[i];
+        if ("seconds".equals(id)) {
+            if (sts1solver.Gameplay.fullAuto()) {
+                // "1" / "2" / "3" / "走完": a short horizon asks for the best play inside those turns,
+                // it is not a promise to win, so the value says the number and nothing more.
+                return sts1solver.search.Limits.horizonLabel();
+            }
+            int sec = Budget.seconds();
+            return sec < 0 ? "自动" : (sec == 0 ? "无限" : sec + "s");
+        }
+        if ("nodes".equals(id)) {
+            int n = Budget.nodes();
+            // m03534: the top profile is 1,000,000 nodes, and "/1000 + k" printed it as "1000k" -- four
+            // characters that read as a different number at a glance. Anything at or past a million is
+            // said in M.
+            if (n <= 0) {
+                return "不限";
+            }
+            if (n >= 1000000) {
+                return (n / 1000000) + "M";
+            }
+            return (n / 1000) + "k";
+        }
+        if ("pace".equals(id)) {
+            int ms = AutoPace.delayMs();
+            return ms <= 0 ? "瞬时" : ms + "ms";
+        }
+        if ("potion".equals(id)) {
+            return sts1solver.search.Limits.potionsOffered() ? "允许" : "禁用";
+        }
+        return sts1solver.search.GrowthBook.counting() ? "计" : "不计";
+    }
+
+    /** Label for the two buttons in the two-up row (1 = 执行一步 / 模式, 2 = 自动出牌). */
+    private static String actionLabel(int i) {
+        if (i == 1) {
+            // 1.1.0 (user m06672): idle, this button is the 半自动/全自动 switch; running, it is the
+            // step button it always was. The 自动出牌 button stays a pure start/stop either way, because
+            // the user asked for exactly one obvious way out ("这个键能关闭自动出牌").
+            if (sts1solver.Gameplay.autopilot() || sts1solver.Gameplay.autoplayArmed()) {
+                return "执行一步";
+            }
+            return sts1solver.Gameplay.fullAuto() ? "全自动 ✓" : "半自动 ✓";
+        }
+        if (sts1solver.Gameplay.autopilot()) {
+            return "自动 开";
+        }
+        return sts1solver.Gameplay.autoplayArmed() ? "自动 待启动" : "自动 关";
     }
 
     /**
@@ -516,15 +1218,35 @@ public final class Panel {
      * read the rest of the plan (reported as "cannot scroll to see the later steps").
      */
     private static void drawPlanText(SpriteBatch sb, BitmapFont font, java.util.List<String> lines,
-                                     float scale) {
+                                     float scale, sts1solver.Gameplay.Status s) {
         if (lines == null || lines.isEmpty()) {
             return;
         }
+        // m04872: the strip is back on the left, in its own column. Hanging it under the panel
+        // (m03871) put it on top of the play area the panel had just cleared, so collapsing the
+        // panel no longer uncovered anything. It keeps no background of its own -- the text sits
+        // straight on the game's own art, the way a caption would -- and it starts below the game's
+        // top bar so it never covers the potions or the relics.
+        // m07347 (user): 收起 and 隐藏 are two different things. 收起 only folds the button panel;
+        // the status text and the action list on the left are the whole point of leaving the solver
+        // running, so they stay. 隐藏 is the switch that makes everything go away. Collapsing used
+        // to return here, which meant the panel's own 收起 button silently blanked the plan.
         float pad = 20.0f * scale;
         float x = 22.0f * scale;
-        float lineH = 26.0f * scale;
-        float top = Settings.HEIGHT - 28.0f * scale;
-        RouteLayout.Measure m = measure(font, scale);
+        // m06071: the lines were touching -- a 26-unit glyph box stacked on a 26-unit line height
+        // leaves no leading at all, and a paragraph of them reads as one grey block. The strip now
+        // carries the full status text again, so it needs the breathing room.
+        float lineH = (PanelLayout.LINE_H + 6.0f) * scale;
+        float top = Settings.HEIGHT - PanelLayout.topInset(scale);
+        // m06071: the strip says what the solver sees again -- the plan, the expected damage, the
+        // intent, the progress bar, the worldline count -- instead of the two-line summary m03871
+        // put here. That summary was written for a strip that only had to say "idle, press compute";
+        // the player's answer was that the numbers they were watching had disappeared.
+        //
+        // The pull happens here, once per drawn frame, and P1 still holds: Gameplay no longer
+        // pushes this list from 76 places (tickQuick included) for a panel that only asked whether
+        // it was empty. lines() keeps feeding solver.log and the exported report unchanged.
+        java.util.List<String> text = sts1solver.Gameplay.lines();
         // B36: a strip is only drawn while a plan exists. Gameplay.lines() clears the list in its
         // no-plan branch, but the panel must not depend on that call having run -- the reported
         // "new fight still shows the previous fight\s suggestions" was exactly a live list whose
@@ -535,12 +1257,6 @@ public final class Panel {
                 || sts1solver.Gameplay.previewActive();
         java.util.List<RouteRow> rows = demoActive() || !hasPlanNow
                 ? new java.util.ArrayList<RouteRow>() : sts1solver.Gameplay.route();
-        // B32: the box is never narrower than its longest line. Before this it was pinned at 720
-        // while the mod-hook and budget lines ran past it to the screen edge.
-        float maxLine = 0.0f;
-        for (int i = 0; i < lines.size(); i++) {
-            maxLine = Math.max(maxLine, m.width(lines.get(i)));
-        }
         // B33: the route strip may not run underneath the button panel (that is how numbers and
         // labels ended up at (or past) the right edge of the screen), and its whole body scales with
         // the player-dragged grip factor.
@@ -551,12 +1267,43 @@ public final class Panel {
         int detail = PanelDetail.level(RouteSize.factor());
         float textScale = FIXED_TEXT_SCALE;
         float baseFont = font.getData().scaleX;
-        float available = Settings.WIDTH - x - 12.0f * scale;
-        if (!collapsed) {
-            float sideLimit = PanelLayout.x0(Settings.WIDTH, scale) - x - 14.0f * scale;
-            if (sideLimit > 80.0f * scale) {
-                available = Math.min(available, sideLimit);
+        // m06071: the header rows are the solver's own report again, filtered by how much room the
+        // strip has. PanelDetail.headerLines keeps the lines that say what the solver is doing and
+        // drops the bookkeeping nobody reads at a glance, which is what this did before m03871.
+        java.util.List<String> intro = PanelDetail.headerLines(text, detail);
+        // m19280 (user's "稳定主状态 + 轮换副文案" design): one extra header row that says what the
+        // search is doing in plain words -- 阶段 · 节点 · 深度 · 副文案 -- and rotates only its last
+        // phrase, on a 1.5s clock (StatusTicker). It is appended AFTER the filter, so a narrow strip
+        // still gets it: this is the line that makes a long search readable, and PanelDetail would
+        // have dropped it (it matches none of the IMPORTANT keywords).
+        //
+        // Cost: the ticker returns a cached string while its key is unchanged, so an idle frame adds
+        // one list copy and no formatting. When the phrase does rotate the layout signature changes
+        // and the strip re-lays-out once -- every 1.5s, not every frame.
+        if (s != null && (s.searching || s.hasPlan)) {
+            String tick = sts1solver.ui.StatusTicker.line(s);
+            if (tick != null && !tick.isEmpty()) {
+                intro = new java.util.ArrayList<String>(intro);
+                intro.add(tick);
             }
+        }
+        // m04872: the strip is sized for its own column again, not for the panel's. It may not run
+        // under the button panel -- that is how labels used to end up past the right edge of the
+        // screen -- so the space it gets is whatever is left of the panel's left edge.
+        RouteLayout.Measure m = measure(font, textScale);
+        float maxLine = 0.0f;
+        for (int i = 0; i < intro.size(); i++) {
+            maxLine = Math.max(maxLine, m.width(intro.get(i)));
+        }
+        float available = Settings.WIDTH - x - 12.0f * scale;
+        // m03585: the limit applies whether or not the panel is collapsed. The collapsed tab is
+        // the same width at the same x as the open panel (PanelLayout.width/x0), so skipping the
+        // limit while collapsed let the header run straight over its title bar -- the strip was
+        // told to keep clear of a panel that had not moved. Collapsing changes what the panel
+        // draws, not where it sits, so the space the strip may use is the same either way.
+        float sideLimit = PanelLayout.x0(Settings.WIDTH, scale) - x - 14.0f * scale;
+        if (sideLimit > 80.0f * scale) {
+            available = Math.min(available, sideLimit);
         }
         float panelW = TextWrap.boxWidth(720.0f * scale, maxLine, pad, available);
         panelW = Math.min(available, Math.max(panelW, Math.min(520.0f * strip, available)));
@@ -564,14 +1311,18 @@ public final class Panel {
         // Lines that still do not fit are wrapped instead of being cut off by the screen edge.
         // P2-27: both the wrapping and the pill layout are cached behind one signature, so an idle
         // panel costs a hash of its own text instead of a full text layout of the whole plan.
-        long sig = layoutSignature(lines, rows, innerW, scale, scale, demoActive());
+        // m03871: the second argument is the strip factor, and it has to be the strip factor. It was
+        // being passed `scale` twice, so the cached layout ignored the grip entirely -- dragging the
+        // grip could leave a layout sized for the previous factor on screen until something else
+        // changed. `strip` already folds in the panel scale, so it covers both.
+        long sig = layoutSignature(intro, rows, innerW, strip, scale, demoActive());
         if (sig != layoutSig || layoutPlaced == null) {
             // Measure at the scale the text is actually drawn with, otherwise wrapping is computed
             // for glyphs that are not the ones on screen (that mismatch is what made small panels
             // overflow their pills).
             setFontScale(font, textScale);
             try {
-                layoutFitted = fittedLines(PanelDetail.headerLines(lines, detail), innerW,
+                layoutFitted = fittedLines(intro, innerW,
                         measure(font, textScale));
                 layoutPlaced = RouteLayout.layout(PanelDetail.rows(rows, detail), innerW, scale,
                         measure(font, textScale));
@@ -605,10 +1356,10 @@ public final class Panel {
         scrollPx = RouteLayout.clampScroll(scrollPx, total, viewH);
         pillBoxes.clear();
         float viewBottom = routeTop - viewH;
-        float boxTop = top + lineH * 0.5f;
-        float boxBottom = viewBottom - 8.0f * scale;
-        fill(sb, x, boxBottom, panelW, boxTop - boxBottom,
-                0.0f, 0.0f, 0.0f, 0.62f);
+        // m03871 (Q2=B): no box, no card bodies, no frames. The strip is text on the game's own
+        // background now -- only the pills keep a body, because they are the click targets and a
+        // player has to see where to press. The current turn is marked with a short vertical bar in
+        // the gutter plus a brighter label, which reads at a glance without drawing a box around it.
         font.setColor(1.0f, 1.0f, 1.0f, 1.0f);
         for (int i = 0; i < fitted.size(); i++) {
             font.draw(sb, fitted.get(i), x + pad, top - i * lineH);
@@ -624,10 +1375,11 @@ public final class Panel {
             if (band == null) {
                 continue;
             }
-            // One card per turn, like STS2's SolverRouteRow: a rounded body, the turn label in its
-            // own left column, the numbers right-aligned on the first pill line, pills after them.
             boolean currentTurn = rowHasStep(p, current);
-            drawCard(sb, x + pad, band[0], innerW, band[1], currentTurn, scale);
+            if (currentTurn) {
+                fill(sb, x + 3.0f * scale, band[0], 3.0f * scale, band[1],
+                        0.98f, 0.82f, 0.30f, 0.95f);
+            }
             float baseline = rowTop - p.textBaseline;
             if (baseline <= routeTop - 3.0f * scale && baseline >= viewBottom + 5.0f * scale) {
                 font.setColor(currentTurn ? 1.0f : 0.76f, currentTurn ? 0.94f : 0.84f,
@@ -796,29 +1548,6 @@ public final class Panel {
     }
 
     /**
-     * The body of one turn card (STS2 draws every turn as its own panel row with a left accent).
-     * Keeping the card behind the text also makes a wrapped turn read as one block instead of
-     * loose pills, which was the other half of "每个回合的步骤和第几回合挡住了".
-     */
-    private static void drawCard(SpriteBatch sb, float x, float y, float w, float h,
-                                 boolean current, float scale) {
-        if (current) {
-            fill(sb, x, y, w, h, 0.12f, 0.19f, 0.30f, 0.88f);
-            stroke(sb, x, y, w, h, 0.96f, 0.80f, 0.30f, 0.90f);
-        } else {
-            fill(sb, x, y, w, h, 0.05f, 0.07f, 0.11f, 0.62f);
-            stroke(sb, x, y, w, h, 0.33f, 0.40f, 0.50f, 0.50f);
-        }
-        if (ImageMaster.WHITE_SQUARE_IMG == null) {
-            return;
-        }
-        sb.setColor(current ? new Color(0.98f, 0.82f, 0.30f, 0.95f)
-                : new Color(0.42f, 0.56f, 0.80f, 0.75f));
-        sb.draw(ImageMaster.WHITE_SQUARE_IMG, x, y + 4.0f * scale, 3.0f * scale,
-                Math.max(1.0f, h - 8.0f * scale));
-    }
-
-    /**
      * A scrollbar on the right edge of the strip (B30). The strip was already scrollable with the
      * wheel and the 上滚/下滚 buttons, but nothing on screen said how much was below the fold.
      */
@@ -921,7 +1650,16 @@ public final class Panel {
                 }
                 float w;
                 try {
-                    w = new com.badlogic.gdx.graphics.g2d.GlyphLayout(font, text).width;
+                    // GlyphLayout measures at the font's *current* data scale, not at the tier
+                    // asked for. Set it first, or a width measured for 1.0 gets cached under the
+                    // 0.78 key and every shrunk label is laid out at the wrong size.
+                    float base = font.getData().scaleX;
+                    font.getData().setScale(scale);
+                    try {
+                        w = new com.badlogic.gdx.graphics.g2d.GlyphLayout(font, text).width;
+                    } finally {
+                        font.getData().setScale(base);
+                    }
                 } catch (Throwable t) {
                     w = text.length() * 9.0f * scale;
                 }
