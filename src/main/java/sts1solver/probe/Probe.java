@@ -1073,6 +1073,11 @@ public final class Probe {
                 long deadline = System.currentTimeMillis() + 60000L;
                 while (!Gameplay.advanceQuickForTest(10L) && System.currentTimeMillis() < deadline) {
                 }
+                // The strip is built inside Gameplay.lines(), which the panel calls every frame; a
+                // headless gate has no next frame, so run the same step once before reading route().
+                // Without this the check only saw rows left over from the previous gate, and passed
+                // in suite order while failing on its own.
+                Gameplay.lines();
                 int pills = Gameplay.route().size();
                 Probe.check(Gameplay.hasPlan() && pills > 0,
                         "the first fight really has a route strip", "rows=" + pills);
