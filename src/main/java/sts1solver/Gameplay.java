@@ -1321,6 +1321,13 @@ public final class Gameplay {
         if (r == null) {
             autoplayArmed = false;
             status = "计算没有结果";
+            // B42: a press that arrived while this search wound down already asked for a new one.
+            // Returning here dropped that press whenever the old search stopped before producing
+            // anything, so the panel kept "计算没有结果" and no plan ever appeared.
+            if (quickRestartRequested) {
+                quickRestartRequested = false;
+                startQuickSolve(armForRestart);
+            }
             return;
         }
         String after = Digest.ofCurrent();
@@ -1950,6 +1957,37 @@ public final class Gameplay {
     }
 
     public static void reset() {
+        // A running search belongs to the fight being forgotten. Cancelling it here keeps a late
+        // finishQuick() from adopting a plan for a board that is gone: a gate that reset right
+        // before its own solve read the old search's "计算没有结果" instead of starting clean, which
+        // is how the S114 pair failed whenever the preceding gate left a search in flight.
+        if (quick != null) {
+            quick.requestStop();
+            quick = null;
+            quickBefore = null;
+            quickRenderBefore = null;
+            quickSkelBefore = null;
+            quickStatics = null;
+            quickView = null;
+            quickCacheKey = null;
+            quickHorizonText = "";
+            quickRestartRequested = false;
+            quickIsReplan = false;
+            quickReason = null;
+            Gameplay.clearPreview();
+            sts1solver.ui.FrameStats.finishSearch();
+            World.forceRestore();
+        }
+        if (deep != null) {
+            deep.requestStop();
+            deep = null;
+            deepBefore = null;
+            deepRenderBefore = null;
+            deepSkelBefore = null;
+            deepView = null;
+            sts1solver.ui.FrameStats.finishSearch();
+            World.forceRestore();
+        }
         plan = null;
         planBuiltAt = -1L;
         step = 0;
