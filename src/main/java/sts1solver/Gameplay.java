@@ -81,6 +81,16 @@ public final class Gameplay {
      * started on the first frame whose board is settled.
      */
     private static boolean solveQueued;
+    /**
+     * A monster whose intent is still the placeholder (DEBUG) has not chosen its move yet. Planning
+     * from that board made the sandbox simulate a no-op enemy turn: the live Cultist then applied
+     * Ritual3 on its turn while the plan predicted no power, and the first audited step after it
+     * drifted. The press is kept until the intents exist, with a cap so an exotic mod that never
+     * rolls cannot hold 计算 forever.
+     */
+    private static long intentWaitSince;
+    private static boolean intentWaitExpired;
+    private static final long INTENT_WAIT_MAX_MS = 4000L;
     private static int overFrames;
     private static int verified;
     private static String escapeNote;
@@ -567,6 +577,14 @@ public final class Gameplay {
             autoplayArmed = false;
             status = Gameplay.refusalText(blocked);
             Log.info("solve refused: " + blocked);
+            return;
+        }
+        String wait = Gameplay.solveWaitReason();
+        if (wait != null) {
+            solveQueued = true;
+            autoplayArmed = armAutoplay;
+            status = "等怪物的意图出来就开始计算…";
+            Log.info("solve queued (" + wait + "): it starts as soon as the board is ready");
             return;
         }
         solveQueued = false;
@@ -1450,6 +1468,11 @@ public final class Gameplay {
         if (!Gameplay.engineSettled() && !picking) {
             return;
         }
+        // m131408: settled is not the same as ready. A monster that has not chosen its move yet
+        // makes the plan simulate an enemy turn that never happened, so wait for that too.
+        if (!picking && Gameplay.solveWaitReason() != null) {
+            return;
+        }
         boolean arm = autoplayArmed;
         solveQueued = false;
         Log.info("solve queued: the board settled, starting the search the player asked for");
@@ -2009,6 +2032,8 @@ public final class Gameplay {
         autopilot = false;
         autoplayArmed = false;
         solveQueued = false;
+        intentWaitSince = 0L;
+        intentWaitExpired = false;
         staleReplans = 0;
         verified = 0;
         lethalConfirmed = false;
@@ -2072,6 +2097,8 @@ public final class Gameplay {
         autopilot = false;
         autoplayArmed = false;
         solveQueued = false;
+        intentWaitSince = 0L;
+        intentWaitExpired = false;
         autopilotFailures = 0;
         nextActionAtMs = 0L;
         exhaustedReplans = 0;
@@ -3155,7 +3182,9 @@ public final class Gameplay {
 
     private static boolean executeStepInternal() {
         if (!Gameplay.hasPlan()) {
-            status = "\u65e0\u8ba1\u5212\uff1b\u8bf7\u70b9\u300c\u8ba1\u7b97\u300d";
+            status = Gameplay.quickSearching()
+                    ? "\u8fd8\u5728\u8ba1\u7b97\uff1a\u7b97\u5b8c\u518d\u70b9\u300c\u6267\u884c\u4e00\u6b65\u300d"
+                    : "\u65e0\u8ba1\u5212\uff1b\u8bf7\u70b9\u300c\u8ba1\u7b97\u300d";
             return false;
         }
         if (pending != null) {
@@ -4314,6 +4343,57 @@ public final class Gameplay {
         return engineSettled();
     }
 
+    /**
+     * A monster that has not rolled its move still carries the placeholder intent. A plan captured
+     * there mirrors a monster that will do nothing on its turn, while the live one gets its real
+     * move -- the exact shape of the "one step then drift" report from a fight entered by load.
+     */
+    private static boolean intentsUnrolled() {
+        try {
+            com.megacrit.cardcrawl.rooms.AbstractRoom room = AbstractDungeon.getCurrRoom();
+            if (room == null || room.monsters == null || room.monsters.monsters == null) {
+                return false;
+            }
+            java.util.ArrayList monsters = room.monsters.monsters;
+            for (int i = 0; i < monsters.size(); ++i) {
+                AbstractMonster monster = (AbstractMonster)monsters.get(i);
+                if (monster == null || monster.isDeadOrEscaped()) {
+                    continue;
+                }
+                if (monster.intent == null || monster.intent == AbstractMonster.Intent.DEBUG) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        catch (Throwable throwable) {
+            return false;
+        }
+    }
+
+    /** Null when the board can be planned now; a short reason while it is still opening up. */
+    private static String solveWaitReason() {
+        if (!Gameplay.intentsUnrolled()) {
+            intentWaitSince = 0L;
+            intentWaitExpired = false;
+            return null;
+        }
+        if (intentWaitExpired) {
+            return null;
+        }
+        long time = now();
+        if (intentWaitSince == 0L) {
+            intentWaitSince = time;
+        }
+        if (time - intentWaitSince >= INTENT_WAIT_MAX_MS) {
+            intentWaitExpired = true;
+            Log.warn("solve: a living monster still shows intent DEBUG after " + (time - intentWaitSince)
+                    + "ms; planning anyway");
+            return null;
+        }
+        return "怪物意图还没确定";
+    }
+
     private static boolean engineSettled() {
         try {
             GameActionManager gameActionManager = AbstractDungeon.actionManager;
@@ -4655,7 +4735,7 @@ public final class Gameplay {
             }
         }
         status = autoMode == MODE_FULL
-                ? "全自动：路线走完会接着算，直到战斗结束（再点「自动出牌」停止）"
+                ? "全自动：路线走完会接着算，直到战斗结束（再点「自动 关」停止）"
                 : "半自动：算完这条线，走完就停";
         Log.info("auto mode: " + (autoMode == MODE_FULL ? "full" : "half"));
     }

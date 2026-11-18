@@ -390,16 +390,18 @@ public final class Panel {
         } else if ("hide".equals(id)) {
             sts1solver.ui.Hud.toggle();
         } else if ("step".equals(id)) {
-            // 1.1.0 (user m06672): while the autopilot is running this is 执行一步; while it is idle it
-            // is the 半自动/全自动 switch. The switch had to ride an existing button because
-            // PanelLayout.IDS is pinned by the gates, and the 自动出牌 button must stay a pure stop.
-            if (sts1solver.Gameplay.autopilot() || sts1solver.Gameplay.autoplayArmed()) {
-                sts1solver.Gameplay.executeStep();
-            } else {
-                sts1solver.Gameplay.cycleAutoMode();
-            }
+            // The right slot is always the 半自动/全自动 switch. Putting 执行一步 on the same button
+            // made 全自动 display a step button it has no use for and made the mode unknown at a
+            // glance; the two jobs now have one home each.
+            sts1solver.Gameplay.cycleAutoMode();
         } else if ("auto".equals(id)) {
-            sts1solver.Gameplay.toggleAutopilot();
+            // 全自动: start/stop the continuous run. 半自动: one step, because continuous play is
+            // what switching to 全自动 means.
+            if (sts1solver.Gameplay.fullAuto()) {
+                sts1solver.Gameplay.toggleAutopilot();
+            } else {
+                sts1solver.Gameplay.executeStep();
+            }
         } else if ("collapse".equals(id)) {
             collapsed = !collapsed;
         } else if ("seconds".equals(id)) {
@@ -1081,7 +1083,8 @@ public final class Panel {
         drawCollapsedBar(sb, s, scale);
 
         // the two buttons that survive collapse
-        String solveLabel = sts1solver.Gameplay.quickSearching() ? "停止" : "计算";
+        String solveLabel = sts1solver.Gameplay.fullAuto() ? "全自动"
+                : (sts1solver.Gameplay.quickSearching() ? "停止" : "计算");
         drawCollapsedAction(sb, font, scale, 0, solveLabel,
                 hover == PanelLayout.indexOf("solve"), sts1solver.Gameplay.quickSearching());
         drawCollapsedAction(sb, font, scale, 1, actionLabel(2),
@@ -1192,16 +1195,17 @@ public final class Panel {
         return sts1solver.search.GrowthBook.counting() ? "计" : "不计";
     }
 
-    /** Label for the two buttons in the two-up row (1 = 执行一步 / 模式, 2 = 自动出牌). */
+    /** Label for the two buttons in the two-up row (1 = mode switch, 2 = 自动出牌 / 执行一步). */
     private static String actionLabel(int i) {
         if (i == 1) {
-            // 1.1.0 (user m06672): idle, this button is the 半自动/全自动 switch; running, it is the
-            // step button it always was. The 自动出牌 button stays a pure start/stop either way, because
-            // the user asked for exactly one obvious way out ("这个键能关闭自动出牌").
-            if (sts1solver.Gameplay.autopilot() || sts1solver.Gameplay.autoplayArmed()) {
-                return "执行一步";
-            }
+            // The mode switch keeps its label in both modes, running or idle. 全自动 has no step
+            // button: the line runs on its own, and the only manual exit is switching back.
             return sts1solver.Gameplay.fullAuto() ? "全自动 ✓" : "半自动 ✓";
+        }
+        if (!sts1solver.Gameplay.fullAuto()) {
+            // 半自动: the plan is read by a human, so the manual step is always one click away --
+            // no 自动开 detour first.
+            return "执行一步";
         }
         if (sts1solver.Gameplay.autopilot()) {
             return "自动 开";

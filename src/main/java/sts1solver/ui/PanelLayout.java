@@ -413,8 +413,9 @@ public final class PanelLayout {
      * Index of the button under (mx, my), or -1.
      *
      * <p>Collapsed panels expose the tab plus the two action buttons (1.1.0, user m06251): 计算 and
-     * 自动出牌 stay live while collapsed, so a click on either of them means what it says instead
-     * of silently expanding the panel. Everything else -- chips, 执行一步, the foot buttons -- is
+     * the mode-specific action stay live while collapsed, so a click on either of them means what it
+     * says instead of silently expanding the panel. That second button is 自动出牌 in 全自动 and
+     * 执行一步 in 半自动. Everything else -- chips, the mode switch, the foot buttons -- is
      * gone while collapsed, and a click there hits nothing.
      */
     public static int hitTest(float mx, float my, float screenWidth, float screenHeight, float scale,
@@ -469,7 +470,8 @@ public final class PanelLayout {
                 (WIDTH - 2.0f * PAD) * scale, COLLAPSED_BAR_H * scale};
     }
 
-    /** One of the two action buttons that survive collapse: slot 0 is 计算, slot 1 is 自动出牌. */
+    /** One of the two action buttons that survive collapse: slot 0 is 计算, slot 1 is the mode-specific
+     *  action (自动出牌 in 全自动, 执行一步 in 半自动). */
     public static float[] collapsedActionRect(int slot, float screenWidth, float screenHeight,
                                               float scale) {
         float x = x0(screenWidth, scale) + PAD * scale
