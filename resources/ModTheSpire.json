@@ -3,7 +3,7 @@
   "name": "Spire Pilot",
   "author_list": ["dhdkfkfkf"],
   "description": "Combat solver for Slay the Spire 1: it mirrors the live combat engine into an isolated copy, runs the game's own card, relic, potion and monster code on that copy, and searches the real states. Nothing is re-modelled by hand, so there is no per-card table to keep in sync. Compatibility: works in theory with any mod that adds content (cards, relics, potions, characters, monsters, events) without changing how combat itself resolves. Built-in texture guard: skips or replaces textures that failed to load (the shell-Texture NullPointerException in SpriteBatch.switchTexture) instead of crashing.",
-  "version": "1.5.3",
+  "version": "1.6.0",
   "sts_version": "12-18-2022",
   "mts_version": "3.30.0",
   "dependencies": ["basemod"]
