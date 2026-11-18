@@ -2306,6 +2306,12 @@ public final class Gameplay {
             s.stalledMs = quick.stalledMs();
             return s;
         }
+        // B192 (user 2026-11-18 screenshot): with the search finished and a plan in hand the strip
+        // read "已就绪 · 节点 0" beside the panel's "20 节点" -- the finished line's own node count
+        // is the only true number left to show, and it stops the two readouts contradicting.
+        if (plan != null) {
+            s.worldlines = plan.nodes;
+        }
         return s;
     }
 
@@ -2473,6 +2479,13 @@ public final class Gameplay {
                 + (Gameplay.plan.potionsUsed > 0 ? " · 药水 " + Gameplay.plan.potionsUsed : "")
                 + (verified > 0 ? " · 已校验 " + verified + " 步" : "")
                 + (autopilot ? " · 自动执行中 · " + AutoPace.label() : ""));
+        // B192 (user 2026-11-18): "结束回合 | 结束回合" under a proven win is correct when the
+        // enemies leave instead of dying (a Looter flees), but without this row the plan reads as
+        // the solver doing nothing. Empty for every ordinary plan.
+        String leaving = sts1solver.search.PlanText.leavingNote(Gameplay.plan);
+        if (!leaving.isEmpty()) {
+            rows.add(leaving);
+        }
         // The actions are no longer text rows: they live in the turn rows of the pill strip (see
         // route() and Panel.drawRoute), which can hold the whole plan and scroll instead of folding.
         rowSteps.clear();

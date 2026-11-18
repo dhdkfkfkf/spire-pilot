@@ -3594,7 +3594,12 @@ public final class Solver {
                 if (skipped > 0) {
                     sb.append(" skip=").append(skipped);
                 }
-                if (st.action.isEndTurn() && st.turnAfter == st.turnBefore) {
+                // B192 (user 2026-11-18): the LAST step of a finished line does not advance the
+                // turn when the fight ends inside it (the last enemy fled or died there). That is
+                // the battle's ending, not a stall -- the reported Looter plan read as "stuck"
+                // even though the end turn was exactly how the fight was supposed to close.
+                boolean battleEnded = i == this.plan.size() - 1 && this.lineFinished;
+                if (st.action.isEndTurn() && st.turnAfter == st.turnBefore && !battleEnded) {
                     sb.append("!stuck");
                 }
                 java.util.List<String> auto = st.action.autoPlays;

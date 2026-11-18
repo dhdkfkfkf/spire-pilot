@@ -89,6 +89,56 @@ public final class PlanText {
     }
 
     /**
+     * B192 (user 2026-11-18): a plan that "only ends turns" needs to say why.
+     *
+     * <p>Looter (and any fleeing monster) can end the fight by leaving, not by dying: the winning
+     * line is then two end turns with no card played, and the panel used to print just
+     * {@code 结束回合 | 结束回合} under "可赢（已证明最优）". The player read that as the solver
+     * doing nothing, and pressing 计算 again only repeated it. The search already chose this line on
+     * purpose (B164 prices killing vs. letting it run); this row states the reason so the plan can be
+     * trusted at a glance.
+     *
+     * <p>The shape that proves it: the plan's LAST step is an end turn whose turn counter did not
+     * advance (the fight ended inside it) while enemies are still standing (monster HP > 0). A win
+     * whose enemies are all at 0 HP ended by killing, not by leaving, and gets no row. Empty string
+     * when the shape does not hold, which is every ordinary plan.
+     */
+    public static String leavingNote(Solver.Result r) {
+        if (r == null || !r.win || !r.planVerified || r.plan == null || r.plan.isEmpty()) {
+            return "";
+        }
+        Solver.Step last = r.plan.get(r.plan.size() - 1);
+        if (last == null || last.action == null || !last.action.isEndTurn()) {
+            return "";
+        }
+        if (last.turnBefore < 0 || last.turnAfter != last.turnBefore) {
+            return "";
+        }
+        boolean standing = false;
+        if (last.monsterHp != null) {
+            for (int hp : last.monsterHp) {
+                if (hp > 0) {
+                    standing = true;
+                    break;
+                }
+            }
+        }
+        if (!standing) {
+            return "";
+        }
+        boolean played = false;
+        for (int i = 0; i < r.plan.size(); ++i) {
+            Solver.Step st = r.plan.get(i);
+            if (st != null && st.action != null && !st.action.isEndTurn()) {
+                played = true;
+                break;
+            }
+        }
+        return (played ? "" : "这场不用出牌：")
+                + "敌人会在第 " + last.turnBefore + " 回合自己逃跑，战斗随即结束（之后不会再吃伤害）";
+    }
+
+    /**
      * B173 (user m21993/m22084): the cost of a winning line, as the panel prints it in the
      * "预算内最好" line. A potion is not free -- it is priced as HP the belt gave up
      * ({@link Solver.Result#potionHpSpent}, which the search subtracts at every node) -- and this
