@@ -803,8 +803,10 @@ public final class Gameplay {
             if (sts1solver.ui.DeepBudget.unlimited(cap)) {
                 // No percentage without a denominator (P2-12): the moving worldline count is the
                 // "it is still working" signal the player asked for.
+                // m19420: same register as the panel rows -- "已算 N 秒" reads like a person,
+                // "已用 Ns（不限）" reads like a form.
                 status = "计算中 · " + statusHorizon(quick) + worldlineText(quick) + hint
-                        + " · 已用 " + (elapsed / 1000) + "s（不限）";
+                        + " · 已算 " + (elapsed / 1000) + " 秒";
             } else {
                 int pct = (int)Math.min(95L, elapsed * 100L / cap);
                 status = "计算中 " + pct + "%（未求解 " + (100 - pct) + "%） · "
@@ -864,7 +866,8 @@ public final class Gameplay {
         buildPreviewRoute(path);
         // The strip below carries the actions; this row says what it is, how long the line is, and
         // (B118) what it is expected to cost -- the finished panel's "预计 -N HP" number.
-        previewLine = "暂定路线（仍在计算，未回放校验）· " + path.size() + " 步"
+        // m19410: "（仍在计算，未回放校验）" read like a log tag. Say the same thing as a sentence.
+        previewLine = "暂定路线 · 还在算，没回放校验过 · " + path.size() + " 步"
                 + hpPreviewText(previewNetHpLoss, previewHpLoss)
                 + (previewRoute.size() < countPreviewRows(path)
                         ? " · 只显示前 " + previewRoute.size() + " 回合" : "");
@@ -1134,21 +1137,48 @@ public final class Gameplay {
         return t.isEmpty() ? "" : t + " · ";
     }
 
+    /**
+     * The title row's status word, in the player's language (m19410).
+     *
+     * <p>The row used to print the raw {@code status} field. Most of its values are already Chinese
+     * sentences, but a few are internal tokens -- {@code "idle"} is the one a player actually saw,
+     * as "Spire Pilot  [idle]". Anything that looks like an internal token is either translated
+     * here or dropped: the log keeps the original.
+     */
+    private static String statusText(String status) {
+        if (status == null || status.isEmpty()) {
+            return "";
+        }
+        if ("idle".equals(status)) {
+            return "待命";
+        }
+        if ("计算中…".equals(status)) {
+            return "计算中";
+        }
+        if (status.indexOf("solve failed") >= 0) {
+            return "计算出错，详情见日志";
+        }
+        return status;
+    }
+
     private static String horizonText(int turns, int limit, int finished) {
         if (!hasHorizon(turns, limit, finished)) {
             return "";
         }
+        // m19410: "追求 N 回合内预算最优解" was a specification sentence. The promise is the same
+        // fact told plainly: how far ahead it is looking, and whether the clock has already taken
+        // part of that away.
         if (turns <= 0) {
-            return "推到战斗结束（已走完 " + finished + " 回合）";
+            return "会算到战斗结束 · 已走完 " + finished + " 回合";
         }
         StringBuilder b = new StringBuilder();
-        b.append("追求 ").append(turns).append(" 回合内预算最优解");
+        b.append("只往前看 ").append(turns).append(" 回合");
         if (limit > 0 && turns < limit) {
-            b.append("（预算不够，从 ").append(limit).append(" 回合降到 ").append(turns).append(" 回合）");
+            b.append("（时间不够，从 ").append(limit).append(" 回合缩到 ").append(turns).append("）");
         } else if (limit <= 0) {
-            b.append("（预算不够，从推到战斗结束降到 ").append(turns).append(" 回合）");
+            b.append("（时间不够，从算到底缩到 ").append(turns).append(" 回合）");
         } else if (finished > 0) {
-            b.append("（已走完 ").append(finished).append(" 回合）");
+            b.append(" · 已走完 ").append(finished).append(" 回合");
         }
         return b.toString();
     }
@@ -2261,21 +2291,26 @@ public final class Gameplay {
             progress.add(pct < 0
                     ? "Spire Pilot  [深度搜索中 · 不限时]"
                     : "Spire Pilot  [深度搜索中 " + pct + "% · 未求解 " + (100 - pct) + "%]");
+            // m19420 (user "这文字写的很low，很无趣"): the same rewrite the 计算 path got. A number
+            // first, then what it buys; no engine vocabulary ("beam=10 layers=69" was the old tail)
+            // and no node count the subtitle row already carries.
             if (pct < 0) {
-                progress.add("已用 " + (elapsed / 1000) + "s（不限）   节点 " + deep.nodes()
-                        + "   最优 " + deep.bestActions() + " 步");
+                progress.add("已算 " + (elapsed / 1000) + " 秒 · 没有时限 · "
+                        + deep.nodes() + " 条世界线 · 当前最优 " + deep.bestActions() + " 步");
             } else {
                 long left = Math.max(0L, cap - elapsed);
-                progress.add(progressBar(pct) + " " + pct + "%   已用 " + (elapsed / 1000) + "s / "
-                        + budgetText(cap) + "   剩 " + (left / 1000) + "s   节点 " + deep.nodes()
-                        + "   最优 " + deep.bestActions() + " 步");
+                progress.add(progressBar(pct) + " " + pct + "%   已算 " + (elapsed / 1000) + " 秒 / "
+                        + budgetText(cap) + "   还剩 " + (left / 1000) + " 秒 · "
+                        + deep.nodes() + " 条世界线 · 当前最优 " + deep.bestActions() + " 步");
             }
             String deepHorizon = horizonText(deep);
-            progress.add(deepHorizon.isEmpty() ? deep.phase() : deepHorizon + "   " + deep.phase());
+            if (!deepHorizon.isEmpty()) {
+                progress.add(deepHorizon);
+            }
             if (!expandFailures.isEmpty()) {
                 progress.add("引擎异常: " + expandFailures);
             }
-            progress.add("再点「计算」停止，保留当前最优线");
+            progress.add("再点「计算」就停下，手里这条最优线会留着");
             return progress;
         }
         if (quick != null) {
@@ -2286,7 +2321,9 @@ public final class Gameplay {
                 // Unlimited: no percentage bar, because there is nothing to be a percentage of.
                 // The worldline line below is the progress indicator (P2-12).
                 progress.add("Spire Pilot  [计算中 · 不限时]");
-                progress.add("已用 " + (elapsed / 1000) + "s（不限，一直算到分叉跑完或再点「计算」）");
+                // m19410: "（不限，一直算到分叉跑完或再点「计算」）" stated the rule and nothing else.
+                // The number first, then what the wait is worth.
+                progress.add("已算 " + (elapsed / 1000) + " 秒 · 没有时限，算到分叉跑完，或你再点一次");
             } else {
                 int pct = (int)Math.min(95L, elapsed * 100L / cap);
                 long left = Math.max(0L, cap - elapsed);
@@ -2298,8 +2335,13 @@ public final class Gameplay {
             if (!horizon.isEmpty()) {
                 progress.add(horizon);
             }
+            // m19410: this row used to end with quick.phase() -- "窄搜 beam=10 layers=69" -- which is
+            // the search's own vocabulary, not the player's, and its node count repeated the subtitle
+            // row verbatim. What a player wants from this row is the answer being held: how many
+            // worldlines went in, and how long the best line is so far.
             progress.add(worldlineText(quick)
-                    + "   最优 " + quick.bestActions() + " 步（未证明）   " + quick.phase());
+                    + "   ·   当前最优 " + quick.bestActions() + " 步"
+                    + (quick.bestActions() <= 0 ? "（还没找到能赢的线）" : "（还没证明最优）"));
             // B115 (m00748): the line the search is holding right now. It is NOT the plan: it has not
             // been replayed, so the row says so and the turn rows stay empty until finishQuick().
             if (previewLine != null) {
@@ -2308,7 +2350,7 @@ public final class Gameplay {
             }
             long stalled = quick.stalledMs();
             if (stalled >= 3000L) {
-                progress.add("⚠ 已有 " + (stalled / 1000) + "s 没有新世界线：可能卡在某次结算上（再点「计算」可停）");
+                progress.add("⚠ 已经 " + (stalled / 1000) + " 秒没有新进展，可能卡在某次结算上；再点「计算」可以停");
             }
             if (!expandFailures.isEmpty()) {
                 progress.add("引擎异常: " + expandFailures);
@@ -2325,7 +2367,11 @@ public final class Gameplay {
         // m19237: the player does not want the internal bookkeeping on screen. "渲染已修复 6" and
         // "UI状态已还原" were already written to solver.log (where they belong); showing them here only
         // raised the question of what they meant.
-        rows.add("Spire Pilot" + (plan == null && !status.isEmpty() ? "  [" + status + "]" : "")
+        // m19410 (user: the strip reads dry): the title row used to print the raw `status` field,
+        // and one of its values is the English word "idle" -- a player saw "Spire Pilot  [idle]".
+        // Internal states are for the log; the panel says what the player is looking at.
+        rows.add("Spire Pilot" + (plan == null && !statusText(status).isEmpty()
+                        ? "  [" + statusText(status) + "]" : "")
                 + (Hud.failures() > 0 ? "   HUD ERRORS: " + Hud.failures() : ""));
         if (!Solver.expandFailures().isEmpty()) {
             rows.add("引擎异常（搜索分支被丢弃）: " + Solver.expandFailures());
@@ -2339,7 +2385,9 @@ public final class Gameplay {
             route.clear();
             rowSteps.clear();
             lastHorizonText = "";
-            rows.add("点「计算」求解本场（真实引擎镜像 + beam 搜索）");
+            // m19410: "（真实引擎镜像 + beam 搜索）" is how the README describes the engine, not
+            // how a player asks for help. The hint now says what pressing the button gets you.
+            rows.add("点「计算」，让我把这场算一遍");
             return rows;
         }
         if (pending != null) {
