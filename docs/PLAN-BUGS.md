@@ -4739,3 +4739,28 @@ pending 被清空后，`planIsStale()` 的 `pending == null` 分支只看 `curre
 
 **验证（2026-11-19）**：构建 `BUILD OK`（151 源文件、614 entries、`mod\spire-pilot.jar` 1,410,102 B）；`install.ps1 -SkipBuild` 装进游戏，sha256 `086804F4…DB0F`，与构建产物一致。聚焦门禁 `-Gates "S47,S268,S269,S270,S271,S272,S273,S274,S275"` → `passed=57 failed=0`；证据行 `S273 default: damage=8 turn=false hp=10 seen=1/1/1/1 muted=0 | quiet: damage=7 turn=true hp=9 seen=0/0/0/0 muted=4 | live: … mutedAfter=4`、`S275 publish=50 guarded=21 unreachable=29 unclassified=[] unknown=[] patchClasses=21`。再用本机 20 个 jar（含 GuFu、MLOnmyojiMod）跑 `-AllMods -Gates "S273,S274,S275"` → `passed=19 failed=0`。默认核心套件在本机仍受 180 s 超时限制（1.6.3 起的已知环境问题），本次以聚焦门禁取证。
 
+#### B198 兼容开关拆成两组；配置面板重做；徽章过大（2026-11-19，用户反馈）
+
+**现象**：用户截图指出三件事——Config 面板的排版与文案太差、主菜单上的徽章图标过大、希望开关按钩子细分（先说 21 个，后改为两组）。徽章截图里 128 px 的方块盖住了整排 mod 名称。
+
+**徽章根因**：`basemod.ModBadge` 用 `texture.getWidth()/getHeight()` 当绘制尺寸，再乘 `Settings.scale`；BaseMod 自己的 `BADGE_W/BADGE_H` 是 **40**。1.6.7 的 `ModConfig.badge()` 生成 128×128 纹理，所以是标准尺寸的 3.2 倍。修法：40×40 纹理，图形按比例缩小。
+
+**分组设计**（`CompatMode` + `HookQuiet`）：两个独立开关，默认都关。
+
+- `compatCombat=on`：15 个战斗钩子（`HookQuiet.COMBAT_HOOKS`，即 `ModHooks.COMBAT_HOOKS` 名单）。
+- `compatOther=on`：6 个战斗外的 dispatch（`HookQuiet.OTHER_HOOKS`：最大生命变化、获得遗物、获得药水、卡牌描述、解锁刷新、死亡界面）。
+- 旧键 `compatHooks=on` 仍认：某一组没有自己的键时沿用旧值，升级不丢配置。
+- `HookQuiet.combatMuted()` / `otherMuted()` 代替原来的 `muted()`；15 个战斗补丁调前者，6 个调后者。
+- 部分勾选只保住该组：已知卡死是 `publishOnPlayerDamaged`（战斗组），只勾「战斗之外」不解决；任何部分勾选都会让含 mod 的路线只作参考，面板与文档都写明。
+- `ContentOrigin` 的来源行按 `CompatMode.combat()` 写「模拟时不运行 / 照常运行」——它描述的是 mod 的战斗钩子。
+
+**面板**（`ui/ModConfig.java`）：标题用 `charTitleFont`，正文 6 行说人话（模拟会真抽牌受伤 → 第三方钩子可能卡死 → 两个开关各管什么 → 代价），两个 `ModLabeledToggleButton` 各占一行并带组内数量（`HookQuiet.COMBAT_METHODS` / `OTHER_METHODS`，避免文案与代码漂移），下方两行金色提醒：拿不准就两组都勾（代价是路线只作参考）、第二组管弹界面/放声音/发奖励。
+
+**门禁**：
+- S273 改为四个窗口取证：默认（两组关）四类订阅者全跑；只开战斗组（伤害与怪物回合被跳过，最大生命/死亡照常）；只开战斗外组（最大生命/死亡被跳过，伤害/怪物回合照常）；两组全开（零订阅者，4 次跳过）。窗口外照常运行且不计入跳过数。断言 `COMBAT_METHODS == 15`、`OTHER_METHODS == 6`。
+- S274 检查面板存在、两个开关存在、文案包含「两个开关」「全不勾」「只当参考」以及两组的 15 项 / 6 项，开关初始值等于两个存储设定。
+- S275 在原有分类之外新增：两组各 15 / 6、互不重叠、并集等于 `GUARDED`。
+
+**验证（2026-11-19，1.6.8）**：构建 `BUILD OK`（151 源文件、615 entries、`mod\spire-pilot.jar` 1,413,033 B）；`install.ps1 -SkipBuild` 装进游戏，sha256 `2EE41BE0…3FCD`，与构建产物一致。聚焦门禁 `-Gates "S47,S268,S269,S270,S271,S272,S273,S274,S275"` → `passed=60 failed=0`；S273 四窗口证据 `default: damage=8 turn=true hp=10 seen=1/1/1/1 muted=0 | combat: damage=7 turn=false hp=10 seen=0/0/1/1 muted=2 | other: damage=8 turn=true hp=9 seen=1/1/0/0 muted=2 | both: damage=7 turn=false hp=9 seen=0/0/0/0 muted=4 | live: damage=8 seen=1 mutedAfter=0`，S275 `publish=50 guarded=21 combat=15 other=6 unreachable=29 unclassified=[] unknown=[] patchClasses=21`。再用本机 20 个 jar（含 GuFu、MLOnmyojiMod）跑 `-AllMods -Gates "S273,S274,S275"` → `passed=22 failed=0`。默认核心套件在本机仍受 180 s 超时限制（1.6.3 起的已知环境问题），本次以聚焦门禁取证。面板不写「卡死多半来自哪一组」：用户 2026-11-19 明确说无法确定，已删。
+
+

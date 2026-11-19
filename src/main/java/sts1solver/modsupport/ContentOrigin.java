@@ -67,7 +67,7 @@ public final class ContentOrigin {
                 // B197: the mode says whether the sandbox runs those listeners (default) or keeps the
                 // events to itself (兼容实验模式; a listener written for a real frame may loop).
                 return "来源: 原版 + " + hookCount + " 个 mod 战斗钩子"
-                        + (sts1solver.mirror.CompatMode.isolation()
+                        + (sts1solver.mirror.CompatMode.combat()
                                 ? "（模拟时不运行）" : "（模拟时照常运行）")
                         + (hooks.isEmpty() ? "" : ": " + join(hooks));
             }
@@ -78,7 +78,7 @@ public final class ContentOrigin {
             sb.append(": ").append(join(modContent));
             if (hookCount > 0) {
                 sb.append("；").append(hookCount).append(" 个 mod 战斗钩子")
-                        .append(sts1solver.mirror.CompatMode.isolation() ? "模拟时不运行" : "照常运行");
+                        .append(sts1solver.mirror.CompatMode.combat() ? "模拟时不运行" : "照常运行");
             }
             return sb.toString();
         }

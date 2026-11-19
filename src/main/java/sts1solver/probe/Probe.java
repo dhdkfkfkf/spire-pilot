@@ -2920,16 +2920,15 @@ public final class Probe {
             }
         });
 
-        Probe.core("S273 B197: the sandbox hook switch has two modes, each with its promised behaviour",
-                new Runnable(){
+        Probe.core("S273 B198: the two switch groups mute only their own events", new Runnable(){
             @Override
             public void run() {
                 // B197 (user 2026-11-19): luShi's onPlayerDamaged subscriber looped forever inside a
-                // simulated attack, on the render thread. The default mode keeps that behaviour (the
-                // listeners run, their effects are part of the plan); the compatibility experiment
-                // makes the window keep the events. Both directions are measured here. The subscriber
-                // list is swapped for one test counter so the gate never runs real mod code (luShi
-                // among them) and always restores the real list afterwards.
+                // simulated attack, on the render thread. B198: the single switch became two groups --
+                // the 15 combat hooks and the 6 events outside combat. Each group must mute its own
+                // dispatches and leave the other group running; all-off must be the old behaviour.
+                // The subscriber lists are swapped for one counter so the gate never runs real mod
+                // code (luShi among them) and always restores the real lists afterwards.
                 Synthetic.Spec spec = new Synthetic.Spec();
                 spec.seed = 9273L;
                 spec.maxHealth = 80;
@@ -2945,8 +2944,6 @@ public final class Probe {
                 java.util.List<Object> turnList = null;
                 java.util.List<Object> hpList = null;
                 java.util.List<Object> deathList = null;
-                World w = null;
-                boolean installed = false;
                 HookCounter counter = new HookCounter();
                 try {
                     java.lang.reflect.Field damageField = sts1solver.reflect.Reflect.find(
@@ -2993,107 +2990,85 @@ public final class Probe {
                             deathList.add(counter);
                         }
                     }
-                    sts1solver.mirror.CompatMode.setForTest(Boolean.FALSE);
+                    int[] def = hookWindowRun(false, false, counter);
+                    int[] combatOnly = hookWindowRun(true, false, counter);
+                    int[] otherOnly = hookWindowRun(false, true, counter);
+                    int[] both = hookWindowRun(true, true, counter);
+                    // Outside a window the switch is irrelevant: the live dispatch must run.
                     sts1solver.mirror.HookQuiet.resetForTest();
                     com.megacrit.cardcrawl.characters.AbstractPlayer p =
                             com.megacrit.cardcrawl.dungeons.AbstractDungeon.player;
                     com.megacrit.cardcrawl.cards.DamageInfo info =
                             new com.megacrit.cardcrawl.cards.DamageInfo(p, 5,
                                     com.megacrit.cardcrawl.cards.DamageInfo.DamageType.NORMAL);
-                    com.megacrit.cardcrawl.monsters.AbstractMonster monster =
-                            com.megacrit.cardcrawl.dungeons.AbstractDungeon.getMonsters()
-                                    .monsters.get(0);
-                    // Default mode: the window runs listeners exactly like the pre-1.6.7 build.
-                    w = World.captureLive();
-                    w.install();
-                    installed = true;
-                    int defaultAmount = basemod.BaseMod.publishOnPlayerDamaged(7, info);
-                    boolean defaultTurn = basemod.BaseMod.publishPreMonsterTurn(monster);
-                    int defaultHp = basemod.BaseMod.publishMaxHPChange(9);
-                    basemod.BaseMod.publishPostDeath();
-                    int defaultSeen = counter.damaged;
-                    int defaultTurns = counter.turns;
-                    int defaultHpSeen = counter.maxHp;
-                    int defaultDeaths = counter.deaths;
-                    int defaultMuted = sts1solver.mirror.HookQuiet.mutedCount();
-                    w.readBack();
-                    w.uninstall();
-                    installed = false;
-                    // The compatibility experiment: the same calls, no subscriber, each skip counted.
-                    sts1solver.mirror.CompatMode.setForTest(Boolean.TRUE);
-                    sts1solver.mirror.HookQuiet.resetForTest();
-                    w = World.captureLive();
-                    w.install();
-                    installed = true;
-                    int quietAmount = basemod.BaseMod.publishOnPlayerDamaged(7, info);
-                    boolean quietTurn = basemod.BaseMod.publishPreMonsterTurn(monster);
-                    int quietHp = basemod.BaseMod.publishMaxHPChange(9);
-                    basemod.BaseMod.publishPostDeath();
-                    // Snapshot while the window is still open: the live calls below run the counter.
-                    int quietSeen = counter.damaged - defaultSeen;
-                    int quietTurns = counter.turns - defaultTurns;
-                    int quietHpSeen = counter.maxHp - defaultHpSeen;
-                    int quietDeaths = counter.deaths - defaultDeaths;
-                    int quietMuted = sts1solver.mirror.HookQuiet.mutedCount();
-                    w.readBack();
-                    w.uninstall();
-                    installed = false;
-                    int live = basemod.BaseMod.publishOnPlayerDamaged(7, info);
-                    boolean turnLive = basemod.BaseMod.publishPreMonsterTurn(monster);
-                    int liveHp = basemod.BaseMod.publishMaxHPChange(9);
-                    basemod.BaseMod.publishPostDeath();
-                    int liveSeen = counter.damaged - defaultSeen - quietSeen;
-                    int liveTurns = counter.turns - defaultTurns - quietTurns;
-                    int liveHpSeen = counter.maxHp - defaultHpSeen - quietHpSeen;
-                    int liveDeaths = counter.deaths - defaultDeaths - quietDeaths;
+                    int before = counter.damaged;
+                    int liveDamage = basemod.BaseMod.publishOnPlayerDamaged(7, info);
+                    int liveSeen = counter.damaged - before;
                     int mutedAfter = sts1solver.mirror.HookQuiet.mutedCount();
-                    Log.info("  S273 default: damage=" + defaultAmount + " turn=" + defaultTurn
-                            + " hp=" + defaultHp + " seen=" + defaultSeen + "/" + defaultTurns
-                            + "/" + defaultHpSeen + "/" + defaultDeaths
-                            + " muted=" + defaultMuted + " | quiet: damage=" + quietAmount
-                            + " turn=" + quietTurn + " hp=" + quietHp
-                            + " seen=" + quietSeen + "/" + quietTurns + "/" + quietHpSeen
-                            + "/" + quietDeaths
-                            + " muted=" + quietMuted + " | live: damage=" + live
-                            + " turn=" + turnLive + " hp=" + liveHp
-                            + " seen=" + liveSeen + "/" + liveTurns + "/" + liveHpSeen
-                            + "/" + liveDeaths + " mutedAfter=" + mutedAfter);
-                    Probe.check(damageList != null && turnList != null,
+                    Log.info("  S273 default: damage=" + def[0] + " turn=" + (def[1] != 0)
+                            + " hp=" + def[2] + " seen=" + def[3] + "/" + def[4] + "/"
+                            + def[5] + "/" + def[6] + " muted=" + def[7]
+                            + " | combat: damage=" + combatOnly[0] + " turn=" + (combatOnly[1] != 0)
+                            + " hp=" + combatOnly[2] + " seen=" + combatOnly[3] + "/"
+                            + combatOnly[4] + "/" + combatOnly[5] + "/" + combatOnly[6]
+                            + " muted=" + combatOnly[7]
+                            + " | other: damage=" + otherOnly[0] + " turn=" + (otherOnly[1] != 0)
+                            + " hp=" + otherOnly[2] + " seen=" + otherOnly[3] + "/"
+                            + otherOnly[4] + "/" + otherOnly[5] + "/" + otherOnly[6]
+                            + " muted=" + otherOnly[7]
+                            + " | both: damage=" + both[0] + " turn=" + (both[1] != 0)
+                            + " hp=" + both[2] + " seen=" + both[3] + "/" + both[4] + "/"
+                            + both[5] + "/" + both[6] + " muted=" + both[7]
+                            + " | live: damage=" + liveDamage + " seen=" + liveSeen
+                            + " mutedAfter=" + mutedAfter);
+                    Probe.check(damageList != null && turnList != null && hpList != null
+                                    && deathList != null,
                             "BaseMod exposes the hook lists this guard covers", "");
-                    Probe.check(defaultAmount == 8 && defaultSeen == 1 && !defaultTurn
-                                    && defaultTurns == 1 && defaultHp == 10 && defaultHpSeen == 1
-                                    && defaultDeaths == 1 && defaultMuted == 0,
-                            "default mode: the window runs mod listeners, veto and damage change included",
-                            "amount=" + defaultAmount + " seen=" + defaultSeen + "/" + defaultTurns
-                                    + " turn=" + defaultTurn + " hp=" + defaultHp + "/" + defaultHpSeen
-                                    + " deaths=" + defaultDeaths + " muted=" + defaultMuted);
-                    Probe.check(quietAmount == 7 && quietSeen == 0 && quietTurn && quietTurns == 0,
-                            "compat mode: inside a window no subscriber runs and the turn is not vetoed",
-                            "amount=" + quietAmount + " seen=" + quietSeen + "/" + quietTurns
-                                    + " turn=" + quietTurn);
-                    Probe.check(quietHp == 9 && quietHpSeen == 0 && quietDeaths == 0,
-                            "compat mode also keeps max-HP and death events to the window",
-                            "hp=" + quietHp + " seen=" + quietHpSeen + " deaths=" + quietDeaths);
-                    Probe.check(quietMuted >= 4,
-                            "each skipped dispatch is counted for the search log",
-                            "muted=" + quietMuted);
-                    Probe.check(live == 8 && liveSeen == 1 && !turnLive && liveTurns == 1
-                                    && liveHp == 10 && liveHpSeen == 1 && liveDeaths == 1,
-                            "outside a window listeners still run, whichever mode was last used",
-                            "amount=" + live + " seen=" + liveSeen + "/" + liveTurns
-                                    + " hp=" + liveHp + "/" + liveHpSeen + " deaths=" + liveDeaths);
-                    Probe.check(mutedAfter == quietMuted,
-                            "a live dispatch is not counted as muted", "");
+                    Probe.check(def[0] == 8 && def[1] == 1 && def[2] == 10
+                                    && def[3] == 1 && def[4] == 1 && def[5] == 1 && def[6] == 1
+                                    && def[7] == 0,
+                            "both groups off: the window runs every listener, old behaviour intact",
+                            "damage=" + def[0] + " turn=" + def[1] + " hp=" + def[2] + " seen="
+                                    + def[3] + "/" + def[4] + "/" + def[5] + "/" + def[6]
+                                    + " muted=" + def[7]);
+                    Probe.check(combatOnly[0] == 7 && combatOnly[1] == 0 && combatOnly[3] == 0
+                                    && combatOnly[4] == 0 && combatOnly[2] == 10
+                                    && combatOnly[5] == 1 && combatOnly[6] == 1
+                                    && combatOnly[7] == 2,
+                            "combat on: damage and monster-turn listeners skip; max-HP and death still run",
+                            "damage=" + combatOnly[0] + " turn=" + combatOnly[1] + " hp="
+                                    + combatOnly[2] + " seen=" + combatOnly[3] + "/"
+                                    + combatOnly[4] + "/" + combatOnly[5] + "/" + combatOnly[6]
+                                    + " muted=" + combatOnly[7]);
+                    Probe.check(otherOnly[0] == 8 && otherOnly[1] == 1 && otherOnly[3] == 1
+                                    && otherOnly[4] == 1 && otherOnly[2] == 9
+                                    && otherOnly[5] == 0 && otherOnly[6] == 0
+                                    && otherOnly[7] == 2,
+                            "other on: max-HP and death listeners skip; combat listeners still run",
+                            "damage=" + otherOnly[0] + " turn=" + otherOnly[1] + " hp="
+                                    + otherOnly[2] + " seen=" + otherOnly[3] + "/"
+                                    + otherOnly[4] + "/" + otherOnly[5] + "/" + otherOnly[6]
+                                    + " muted=" + otherOnly[7]);
+                    Probe.check(both[0] == 7 && both[1] == 0 && both[2] == 9
+                                    && both[3] == 0 && both[4] == 0 && both[5] == 0 && both[6] == 0
+                                    && both[7] == 4,
+                            "both on: no subscriber runs and each skip is counted",
+                            "damage=" + both[0] + " turn=" + both[1] + " hp=" + both[2] + " seen="
+                                    + both[3] + "/" + both[4] + "/" + both[5] + "/" + both[6]
+                                    + " muted=" + both[7]);
+                    Probe.check(liveDamage == 8 && liveSeen == 1 && mutedAfter == 0,
+                            "outside a window listeners still run and are not counted as muted",
+                            "damage=" + liveDamage + " seen=" + liveSeen
+                                    + " mutedAfter=" + mutedAfter);
                     Probe.check(sts1solver.mirror.HookQuiet.GUARDED_METHODS == 21
-                                    && sts1solver.mirror.HookQuiet.GUARDED.length == 21,
-                            "the guard covers every hook list the panel counts", "");
+                                    && sts1solver.mirror.HookQuiet.COMBAT_METHODS == 15
+                                    && sts1solver.mirror.HookQuiet.OTHER_METHODS == 6,
+                            "the guard covers 15 combat + 6 non-combat dispatches", "");
                 } catch (Throwable t) {
                     Probe.check(false, "S273 ran without throwing", String.valueOf(t));
                 } finally {
                     try {
-                        if (installed) {
-                            World.forceRestore();
-                        }
+                        sts1solver.mirror.World.forceRestore();
                     } catch (Throwable ignored) {
                     }
                     try {
@@ -3121,16 +3096,17 @@ public final class Probe {
             }
         });
 
-        Probe.core("S274 B197: the Mods screen offers the compatibility switch with both costs on it",
+        Probe.core("S274 B198: the Mods screen offers two group switches with their costs on it",
                 new Runnable(){
             @Override
             public void run() {
                 // B197 (user 2026-11-19, "放在主界面的mod点进去，自己mod的config里"): main menu ->
-                // Mods -> Spire Pilot -> Config. The gate cannot click the screen, so it checks what
-                // the screen is built from: a registered panel, the toggle, and the lines that say
-                // what each mode buys and costs.
+                // Mods -> Spire Pilot -> Config. B198: one switch became two group switches. The gate
+                // cannot click the screen, so it checks what the screen is built from: a registered
+                // panel, both toggles, and the lines that say what each choice buys and costs.
                 basemod.ModPanel panel = sts1solver.ui.ModConfig.panel();
-                basemod.ModLabeledToggleButton toggle = sts1solver.ui.ModConfig.toggle();
+                basemod.ModLabeledToggleButton combat = sts1solver.ui.ModConfig.combatToggle();
+                basemod.ModLabeledToggleButton other = sts1solver.ui.ModConfig.otherToggle();
                 Probe.check(panel != null, "the Mods screen has a registered config panel", "");
                 int labels = 0;
                 StringBuilder text = new StringBuilder();
@@ -3147,18 +3123,31 @@ public final class Probe {
                         }
                     }
                 }
+                if (combat != null && combat.text != null && combat.text.text != null) {
+                    text.append(combat.text.text).append('\n');
+                }
+                if (other != null && other.text != null && other.text.text != null) {
+                    text.append(other.text.text).append('\n');
+                }
                 String all = text.toString();
-                Probe.check(labels >= 8 && all.contains("默认模式") && all.contains("兼容实验模式"),
-                        "the panel names both modes", "labels=" + labels);
-                Probe.check(all.contains("钩子里的效果也算进路线") && all.contains("整个游戏会卡死"),
-                        "default mode: both the benefit and the freeze risk are written on it", "");
-                Probe.check(all.contains("卡不死游戏") && all.contains("只看作参考"),
-                        "compat mode: both the isolation and the fidelity cost are written on it", "");
-                Probe.check(toggle != null && toggle.toggle != null,
-                        "a toggle exists for the switch", "");
-                Probe.check(toggle != null && toggle.toggle.enabled
-                                == sts1solver.mirror.CompatMode.isolation(),
-                        "the toggle shows the stored mode at startup", "");
+                Probe.check(labels >= 8 && all.contains("两个开关"),
+                        "the panel explains that two switches decide what is not sent", "labels=" + labels);
+                Probe.check(all.contains("整个游戏也会卡死") || all.contains("游戏也跟着卡死")
+                                || all.contains("卡死"),
+                        "the panel says a stuck listener can freeze the game", "");
+                Probe.check(all.contains("全不勾") && all.contains("和以前完全一样"),
+                        "the panel says both-off is the old behaviour", "");
+                Probe.check(all.contains("只当参考"),
+                        "the panel states the fidelity cost of skipping", "");
+                Probe.check(all.contains("15 项") && all.contains("6 项"),
+                        "the two toggle labels name their group sizes", "");
+                Probe.check(combat != null && combat.toggle != null
+                                && other != null && other.toggle != null,
+                        "a toggle exists for each group", "");
+                Probe.check(combat != null && other != null
+                                && combat.toggle.enabled == sts1solver.mirror.CompatMode.combat()
+                                && other.toggle.enabled == sts1solver.mirror.CompatMode.other(),
+                        "both toggles show the stored setting at startup", "");
             }
         });
 
@@ -3186,6 +3175,14 @@ public final class Probe {
                     }
                     java.util.Set<String> guarded = new java.util.TreeSet<String>();
                     java.util.Collections.addAll(guarded, sts1solver.mirror.HookQuiet.GUARDED);
+                    java.util.Set<String> combatGroup = new java.util.TreeSet<String>();
+                    java.util.Collections.addAll(combatGroup, sts1solver.mirror.HookQuiet.COMBAT_HOOKS);
+                    java.util.Set<String> otherGroup = new java.util.TreeSet<String>();
+                    java.util.Collections.addAll(otherGroup, sts1solver.mirror.HookQuiet.OTHER_HOOKS);
+                    java.util.Set<String> union = new java.util.TreeSet<String>(combatGroup);
+                    union.addAll(otherGroup);
+                    java.util.Set<String> groupOverlap = new java.util.TreeSet<String>(combatGroup);
+                    groupOverlap.retainAll(otherGroup);
                     java.util.Set<String> unreachable = new java.util.TreeSet<String>();
                     java.util.Collections.addAll(unreachable, sts1solver.mirror.HookQuiet.UNREACHABLE);
                     java.util.Set<String> overlap = new java.util.TreeSet<String>(guarded);
@@ -3197,12 +3194,20 @@ public final class Probe {
                     unknown.addAll(unreachable);
                     unknown.removeAll(declared);
                     Log.info("  S275 publish=" + declared.size() + " guarded=" + guarded.size()
+                            + " combat=" + combatGroup.size() + " other=" + otherGroup.size()
                             + " unreachable=" + unreachable.size() + " unclassified="
                             + unclassified + " unknown=" + unknown
                             + " patchClasses=" + patchClasses);
                     Probe.check(patchClasses == guarded.size(),
                             "one patch class per guarded publish method",
                             "classes=" + patchClasses + " listed=" + guarded.size());
+                    Probe.check(combatGroup.size() == sts1solver.mirror.HookQuiet.COMBAT_METHODS
+                                    && otherGroup.size() == sts1solver.mirror.HookQuiet.OTHER_METHODS,
+                            "the two groups hold 15 and 6 methods",
+                            "combat=" + combatGroup.size() + " other=" + otherGroup.size());
+                    Probe.check(groupOverlap.isEmpty() && union.equals(guarded),
+                            "the two groups partition the guarded list",
+                            "overlap=" + groupOverlap + " union=" + union.size());
                     Probe.check(overlap.isEmpty(),
                             "no method is listed as both muted and unreachable",
                             String.valueOf(overlap));
@@ -19499,6 +19504,51 @@ private static void s78Write(File file, String text, long modified) {
         public void receivePostDeath() {
             ++deaths;
         }
+    }
+
+    /**
+     * S273: one sandbox window with the given group pins, publishing the four measured events.
+     * Returns {damage, turn?0:1, maxHp, seenDamage, seenTurns, seenHp, seenDeaths, muted}.
+     */
+    private static int[] hookWindowRun(boolean combat, boolean other, HookCounter counter) {
+        int d0 = counter.damaged;
+        int t0 = counter.turns;
+        int h0 = counter.maxHp;
+        int x0 = counter.deaths;
+        sts1solver.mirror.CompatMode.setForTest(Boolean.valueOf(combat), Boolean.valueOf(other));
+        sts1solver.mirror.HookQuiet.resetForTest();
+        sts1solver.mirror.World w = sts1solver.mirror.World.captureLive();
+        int[] r = new int[8];
+        boolean installed = false;
+        try {
+            w.install();
+            installed = true;
+            com.megacrit.cardcrawl.characters.AbstractPlayer p =
+                    com.megacrit.cardcrawl.dungeons.AbstractDungeon.player;
+            com.megacrit.cardcrawl.cards.DamageInfo info =
+                    new com.megacrit.cardcrawl.cards.DamageInfo(p, 5,
+                            com.megacrit.cardcrawl.cards.DamageInfo.DamageType.NORMAL);
+            com.megacrit.cardcrawl.monsters.AbstractMonster monster =
+                    com.megacrit.cardcrawl.dungeons.AbstractDungeon.getMonsters().monsters.get(0);
+            r[0] = basemod.BaseMod.publishOnPlayerDamaged(7, info);
+            r[1] = basemod.BaseMod.publishPreMonsterTurn(monster) ? 0 : 1;
+            r[2] = basemod.BaseMod.publishMaxHPChange(9);
+            basemod.BaseMod.publishPostDeath();
+            r[3] = counter.damaged - d0;
+            r[4] = counter.turns - t0;
+            r[5] = counter.maxHp - h0;
+            r[6] = counter.deaths - x0;
+            r[7] = sts1solver.mirror.HookQuiet.mutedCount();
+        } finally {
+            try {
+                if (installed) {
+                    w.readBack();
+                    w.uninstall();
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return r;
     }
 
     static {

@@ -35,14 +35,16 @@ import com.megacrit.cardcrawl.rooms.AbstractRoom;
  * for a real frame may pause on an animation, open a screen, or (as here) loop on a condition the
  * sandbox never satisfies.
  *
- * <p><b>When it mutes is a player choice</b> ({@link CompatMode}): the default is OFF, i.e. the
- * pre-1.6.7 behaviour -- inside a window the real engine publishes to every subscriber, so their
- * effects belong to the prediction (and any buggy listener, luShi included, still chokes the
- * render thread). Turning on the "兼容实验模式" toggle in the Mods screen flips this class on: a
- * window then keeps the events to itself, which is the only way to guarantee that a third-party
- * listener cannot freeze a search.
+ * <p><b>When it mutes is a player choice</b> ({@link CompatMode}). Since 1.6.8 that choice has two
+ * independent groups -- the 15 combat hooks and the 6 non-combat events -- both off by default,
+ * i.e. the pre-1.6.7 behaviour: inside a window the real engine publishes to every subscriber, so
+ * their effects belong to the prediction (and any buggy listener, luShi included, still chokes the
+ * render thread). Turning a group on in the Mods screen keeps that group's events to the window,
+ * which is the only way to guarantee that a third-party listener in that group cannot freeze a
+ * search.
  *
- * <p>What is muted when ON: every BaseMod {@code publish*} a sandbox window can reach. That is the
+ * <p>What is muted when a group is on: every BaseMod {@code publish*} a sandbox window can reach is
+ * in one of the two groups ({@link #COMBAT_HOOKS}, {@link #OTHER_HOOKS}). The combat group is the
  * 15 {@code ModHooks.COMBAT_HOOKS} lists -- card draw/use/exhaust, energy recharge, monster turn,
  * battle start/end, potion use, power apply/modified, player block loss/damage, player turn start
  * -- plus the six non-combat-list dispatches engine calls still reach inside a window: max-HP
@@ -56,7 +58,7 @@ import com.megacrit.cardcrawl.rooms.AbstractRoom;
  * potions and monsters still run their own code in the sandbox -- only the cross-cutting hook
  * listeners are skipped.
  *
- * <p>Outside a window {@code muted()} is false and every method behaves exactly as BaseMod's, so
+ * <p>Outside a window both checks return false and every method behaves exactly as BaseMod's, so
  * real play keeps its mod behaviour. The cost inside a window is fidelity: a mod whose combat
  * effect lives in one of these hooks is not modelled by a prediction (it never was certified --
  * ModHooks documents the reference solver treating subscribers as a certification blocker). The
@@ -79,9 +81,14 @@ public final class HookQuiet {
     private HookQuiet() {
     }
 
-    /** True while a window is installed AND the player turned the isolation on (default off). */
-    public static boolean muted() {
-        return World.anyInstalled() && CompatMode.isolation();
+    /** True while a window is installed AND the player muted the 15 combat hooks (default off). */
+    public static boolean combatMuted() {
+        return World.anyInstalled() && CompatMode.combat();
+    }
+
+    /** True while a window is installed AND the player muted the 6 non-combat events (default off). */
+    public static boolean otherMuted() {
+        return World.anyInstalled() && CompatMode.other();
     }
 
     static void count() {
@@ -99,16 +106,34 @@ public final class HookQuiet {
     /** One entry per publish method guarded here; the gate suite pins the count. */
     public static final int GUARDED_METHODS = 21;
 
-    /** The publish methods muted inside a window. S275 checks this against the patches. */
-    public static final String[] GUARDED = {
-            "publishPostDraw", "publishPostExhaust", "publishOnCardUse",
-            "publishPostEnergyRecharge", "publishPreMonsterTurn", "publishStartBattle",
-            "publishPostBattle", "publishPrePotionUse", "publishPostPotionUse",
+    /** The 15 hooks BaseMod itself groups as combat hooks (ModHooks.COMBAT_HOOKS). */
+    public static final int COMBAT_METHODS = 15;
+
+    /** The 6 non-combat dispatches a window can still reach. */
+    public static final int OTHER_METHODS = 6;
+
+    /** The combat group, in the order the Config screen lists them. */
+    public static final String[] COMBAT_HOOKS = {
+            "publishStartBattle", "publishOnPlayerTurnStart",
+            "publishOnPlayerTurnStartPostDraw", "publishPostDraw", "publishOnCardUse",
+            "publishPostExhaust", "publishPostEnergyRecharge", "publishPreMonsterTurn",
             "publishPostPowerApply", "publishOnPowersModified", "publishOnPlayerLoseBlock",
-            "publishOnPlayerDamaged", "publishOnPlayerTurnStart",
-            "publishOnPlayerTurnStartPostDraw", "publishMaxHPChange", "publishRelicGet",
-            "publishPotionGet", "publishOnCreateDescription", "publishPostRefresh",
-            "publishPostDeath" };
+            "publishOnPlayerDamaged", "publishPrePotionUse", "publishPostPotionUse",
+            "publishPostBattle" };
+
+    /** The non-combat group, in the order the Config screen lists them. */
+    public static final String[] OTHER_HOOKS = {
+            "publishMaxHPChange", "publishRelicGet", "publishPotionGet",
+            "publishOnCreateDescription", "publishPostRefresh", "publishPostDeath" };
+
+    /** The publish methods muted inside a window. S275 checks this against the patches. */
+    public static final String[] GUARDED;
+
+    static {
+        GUARDED = new String[GUARDED_METHODS];
+        System.arraycopy(COMBAT_HOOKS, 0, GUARDED, 0, COMBAT_METHODS);
+        System.arraycopy(OTHER_HOOKS, 0, GUARDED, COMBAT_METHODS, OTHER_METHODS);
+    }
 
     /**
      * The rest of BaseMod's publish surface, which a window cannot reach: frame hooks (the sandbox
@@ -153,7 +178,7 @@ public final class HookQuiet {
     public static final class PostDraw {
         @SpirePrefixPatch
         public static SpireReturn<Void> prefix(AbstractCard card) {
-            return muted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
+            return combatMuted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
         }
     }
 
@@ -163,7 +188,7 @@ public final class HookQuiet {
     public static final class PostExhaust {
         @SpirePrefixPatch
         public static SpireReturn<Void> prefix(AbstractCard card) {
-            return muted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
+            return combatMuted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
         }
     }
 
@@ -173,7 +198,7 @@ public final class HookQuiet {
     public static final class OnCardUse {
         @SpirePrefixPatch
         public static SpireReturn<Void> prefix(AbstractCard card) {
-            return muted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
+            return combatMuted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
         }
     }
 
@@ -183,7 +208,7 @@ public final class HookQuiet {
     public static final class PostEnergyRecharge {
         @SpirePrefixPatch
         public static SpireReturn<Void> prefix() {
-            return muted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
+            return combatMuted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
         }
     }
 
@@ -193,7 +218,7 @@ public final class HookQuiet {
     public static final class PreMonsterTurn {
         @SpirePrefixPatch
         public static SpireReturn<Boolean> prefix(AbstractMonster monster) {
-            return muted() ? HookQuiet.skipTrue() : SpireReturn.Continue();
+            return combatMuted() ? HookQuiet.skipTrue() : SpireReturn.Continue();
         }
     }
 
@@ -203,7 +228,7 @@ public final class HookQuiet {
     public static final class StartBattle {
         @SpirePrefixPatch
         public static SpireReturn<Void> prefix(AbstractRoom room) {
-            return muted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
+            return combatMuted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
         }
     }
 
@@ -213,7 +238,7 @@ public final class HookQuiet {
     public static final class PostBattle {
         @SpirePrefixPatch
         public static SpireReturn<Void> prefix(AbstractRoom room) {
-            return muted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
+            return combatMuted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
         }
     }
 
@@ -223,7 +248,7 @@ public final class HookQuiet {
     public static final class PrePotionUse {
         @SpirePrefixPatch
         public static SpireReturn<Void> prefix(AbstractPotion potion) {
-            return muted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
+            return combatMuted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
         }
     }
 
@@ -233,7 +258,7 @@ public final class HookQuiet {
     public static final class PostPotionUse {
         @SpirePrefixPatch
         public static SpireReturn<Void> prefix(AbstractPotion potion) {
-            return muted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
+            return combatMuted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
         }
     }
 
@@ -244,7 +269,7 @@ public final class HookQuiet {
         @SpirePrefixPatch
         public static SpireReturn<Void> prefix(AbstractPower power, AbstractCreature source,
                                                AbstractCreature target) {
-            return muted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
+            return combatMuted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
         }
     }
 
@@ -254,7 +279,7 @@ public final class HookQuiet {
     public static final class OnPowersModified {
         @SpirePrefixPatch
         public static SpireReturn<Void> prefix() {
-            return muted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
+            return combatMuted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
         }
     }
 
@@ -264,7 +289,7 @@ public final class HookQuiet {
     public static final class OnPlayerLoseBlock {
         @SpirePrefixPatch
         public static SpireReturn<Integer> prefix(int amount) {
-            return muted() ? HookQuiet.skipInt(amount) : SpireReturn.Continue();
+            return combatMuted() ? HookQuiet.skipInt(amount) : SpireReturn.Continue();
         }
     }
 
@@ -274,7 +299,7 @@ public final class HookQuiet {
     public static final class OnPlayerDamaged {
         @SpirePrefixPatch
         public static SpireReturn<Integer> prefix(int amount, DamageInfo info) {
-            return muted() ? HookQuiet.skipInt(amount) : SpireReturn.Continue();
+            return combatMuted() ? HookQuiet.skipInt(amount) : SpireReturn.Continue();
         }
     }
 
@@ -284,7 +309,7 @@ public final class HookQuiet {
     public static final class OnPlayerTurnStart {
         @SpirePrefixPatch
         public static SpireReturn<Void> prefix() {
-            return muted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
+            return combatMuted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
         }
     }
 
@@ -294,7 +319,7 @@ public final class HookQuiet {
     public static final class OnPlayerTurnStartPostDraw {
         @SpirePrefixPatch
         public static SpireReturn<Void> prefix() {
-            return muted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
+            return combatMuted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
         }
     }
 
@@ -304,7 +329,7 @@ public final class HookQuiet {
     public static final class MaxHPChange {
         @SpirePrefixPatch
         public static SpireReturn<Integer> prefix(int amount) {
-            return muted() ? HookQuiet.skipInt(amount) : SpireReturn.Continue();
+            return otherMuted() ? HookQuiet.skipInt(amount) : SpireReturn.Continue();
         }
     }
 
@@ -314,7 +339,7 @@ public final class HookQuiet {
     public static final class RelicGet {
         @SpirePrefixPatch
         public static SpireReturn<Void> prefix(AbstractRelic relic) {
-            return muted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
+            return otherMuted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
         }
     }
 
@@ -324,7 +349,7 @@ public final class HookQuiet {
     public static final class PotionGet {
         @SpirePrefixPatch
         public static SpireReturn<Void> prefix(AbstractPotion potion) {
-            return muted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
+            return otherMuted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
         }
     }
 
@@ -334,7 +359,7 @@ public final class HookQuiet {
     public static final class OnCreateDescription {
         @SpirePrefixPatch
         public static SpireReturn<String> prefix(String text, AbstractCard card) {
-            return muted() ? HookQuiet.skipString(text) : SpireReturn.Continue();
+            return otherMuted() ? HookQuiet.skipString(text) : SpireReturn.Continue();
         }
     }
 
@@ -344,7 +369,7 @@ public final class HookQuiet {
     public static final class PostRefresh {
         @SpirePrefixPatch
         public static SpireReturn<Void> prefix() {
-            return muted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
+            return otherMuted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
         }
     }
 
@@ -354,7 +379,7 @@ public final class HookQuiet {
     public static final class PostDeath {
         @SpirePrefixPatch
         public static SpireReturn<Void> prefix() {
-            return muted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
+            return otherMuted() ? HookQuiet.skipVoid() : SpireReturn.Continue();
         }
     }
 }
