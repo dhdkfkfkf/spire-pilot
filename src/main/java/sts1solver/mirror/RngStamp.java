@@ -48,6 +48,47 @@ public final class RngStamp {
         return sb.toString();
     }
 
+    /**
+     * Append all thirteen combat RNG counters to a canonical state writer.
+     *
+     * <p>The tag range is owned by the caller; this method writes thirteen consecutive tags in the
+     * same stable stream order as {@link #of()}. A missing stream is encoded as -1, matching the
+     * diagnostic string representation.
+     */
+    public static void appendCanonical(CanonicalStateWriter writer, int firstTag) {
+        if (writer == null) {
+            throw new IllegalArgumentException("writer must not be null");
+        }
+        if (firstTag < 0 || firstTag > Integer.MAX_VALUE - 12) {
+            throw new IllegalArgumentException("invalid firstTag: " + firstTag);
+        }
+        int tag = firstTag;
+        writer.putInt(tag++, counter(AbstractDungeon.cardRandomRng));
+        writer.putInt(tag++, counter(AbstractDungeon.shuffleRng));
+        writer.putInt(tag++, counter(AbstractDungeon.aiRng));
+        writer.putInt(tag++, counter(AbstractDungeon.miscRng));
+        writer.putInt(tag++, counter(AbstractDungeon.monsterRng));
+        writer.putInt(tag++, counter(AbstractDungeon.monsterHpRng));
+        writer.putInt(tag++, counter(AbstractDungeon.relicRng));
+        writer.putInt(tag++, counter(AbstractDungeon.potionRng));
+        writer.putInt(tag++, counter(AbstractDungeon.cardRng));
+        writer.putInt(tag++, counter(AbstractDungeon.eventRng));
+        writer.putInt(tag++, counter(AbstractDungeon.merchantRng));
+        writer.putInt(tag++, counter(AbstractDungeon.treasureRng));
+        writer.putInt(tag, counter(AbstractDungeon.mapRng));
+    }
+
+    /** Canonical byte representation of the thirteen RNG counters. */
+    public static byte[] canonicalBytes() {
+        CanonicalStateWriter writer = new CanonicalStateWriter();
+        appendCanonical(writer, 0);
+        return writer.toByteArray();
+    }
+
+    private static int counter(Random rng) {
+        return rng == null ? -1 : rng.counter;
+    }
+
     /** The four streams a card play actually rolls on, short enough to print per play. */
     public static String compact() {
         StringBuilder sb = new StringBuilder(32);
