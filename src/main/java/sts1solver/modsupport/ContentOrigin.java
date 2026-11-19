@@ -64,7 +64,11 @@ public final class ContentOrigin {
                     return "来源: 原版";
                 }
                 // Vanilla classes but mod code is listening: worth naming, no longer a refusal.
+                // B197: the mode says whether the sandbox runs those listeners (default) or keeps the
+                // events to itself (兼容实验模式; a listener written for a real frame may loop).
                 return "来源: 原版 + " + hookCount + " 个 mod 战斗钩子"
+                        + (sts1solver.mirror.CompatMode.isolation()
+                                ? "（模拟时不运行）" : "（模拟时照常运行）")
                         + (hooks.isEmpty() ? "" : ": " + join(hooks));
             }
             StringBuilder sb = new StringBuilder("来源: 含 mod 内容（按真实引擎模拟）");
@@ -72,6 +76,10 @@ public final class ContentOrigin {
                 sb.append("，已识别 mod: ").append(join(profiles));
             }
             sb.append(": ").append(join(modContent));
+            if (hookCount > 0) {
+                sb.append("；").append(hookCount).append(" 个 mod 战斗钩子")
+                        .append(sts1solver.mirror.CompatMode.isolation() ? "模拟时不运行" : "照常运行");
+            }
             return sb.toString();
         }
 

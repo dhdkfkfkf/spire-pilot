@@ -124,6 +124,7 @@ draws a fixed banner, which separates "the panel cannot draw" from "there is no 
 
 | 版本 | 主题 |
 |---|---|
+| 1.6.7 | Mods→Spire Pilot→Config 新增「兼容实验模式」；默认模式与以前一致 |
 | 1.6.6 | 结束回合风险过高在按下前提醒；半自动濒死结束回合需二次确认 |
 | 1.6.5 | 停止原因显示；预算停止说明当前最好线；局外计时击杀小偷优先于放跑 |
 | 1.6.4 | 半自动的左侧按钮回到「自动 开/关」；逐步执行改点路线里的步骤 |

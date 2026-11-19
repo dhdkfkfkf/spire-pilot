@@ -4715,3 +4715,27 @@ pending 被清空后，`planIsStale()` 的 `pending == null` 分支只看 `curre
 另：默认核心套件在本机跑满 180s 仍未结束（超时被杀）。已完成部分里 S93 / S258 / S260 及若干“搜索应该在跑”的门禁失败，日志都停在 `solve queued (怪物意图还没确定)`——这是 1.6.3 的「计算等怪物意图确定」上线后，这些门禁夹具没有推动一帧让意图滚出来，与本版改动路径无关；恢复核心套件全绿需要给这些夹具补帧或显式给怪一个非 DEBUG 意图，列为下一步。
 
 **教训**：安全提示的**时机**和措辞一样重要——在玩家还有选择的时候出现才叫提醒，在执行之后出现只能叫记录；而只写进 `status` 的记录，在有路线时根本不会显示。
+
+### B197 点了「计算」整个游戏卡死：沙盒把战斗事件广播给了 GuFu 的死循环（2026-11-19，用户报告）
+
+**现象**：用户报告「现在我游戏里一点这个mod的计算就会非常卡，什么都点不了，关了重新开游戏也没用」，并附一份只读调查报告：同时装着「阴阳师：晴明」和 GuFu 时，点「计算」后整帧不返回，鼠标键盘全无响应；重启后同一场战斗再点，再次卡死。
+
+**证据**：`%USERPROFILE%\spire-pilot\hang-20261119-132655.txt`——一帧耗时 **4,142 ms**，20/20 个采样都在 `luShi.luShi.onAttackAssit(luShi.java:519)`；栈为 `Driver.engineFrame:1054` ← `Driver.drain:557` ← `Driver.endTurn` ← `Legal.apply:347` ← `Solver.expandCore:1087`，即**求解器在沙盒里模拟结束回合**时进入该行。同一时刻 solver.log 记录 `18 个 mod 战斗钩子`（含 `onPlayerDamaged`），本 mod 无白名单（m11229 之后全部接受，按真实引擎模拟）。
+
+**根因**：模拟的怪物攻击走到 `AbstractPlayer.damage` → BaseMod `OnPlayerDamagedHook` → `publishOnPlayerDamaged` → GuFu 的 `luShi.receiveOnPlayerDamaged`（其守卫是 `room.phase == COMBAT && orbs.size() > 0`）→ `onAttackAssit`。反汇编 `GuFu.jar`（Workshop 2890876601）：`onAttackAssit` 遍历充能球，遇到「既不是 `EmptyOrbSlot`、也不是 luShi 自己的随从」的球时走「不是我的随从」分支——该分支**直接跳回循环头，不递增下标**（第 519 行，字节码偏移 77），只有存在一个醒着的 luShi 随从才不走进去。「阴阳师：晴明」的 `MysticTalisman` 充能球正好落进这一类（日志 `E=MLOnmyojiMod:MysticTalisman`）。于是就是死循环。这同步跑在渲染线程上，Java 无法从外部打断，**任何 watchdog 都只能事后报告（hang dump 就是）**；同一段代码在真实游戏里也走同一条路径——只要带着非古夫随从的球挨打（例如晴明的充能球，且没有醒着的随从）同样会卡死，求解器只是让它提前触发。
+
+**修法**（用户 2026-11-19 定方向：「默认是之前的模式，现在你这个改的模式作为兼容实验模式」，并放进 Mods 界面的 Config）：
+
+- **默认模式 = 1.6.6 的行为**：沙盒窗口里 BaseMod 照常向所有订阅者广播，钩子里的效果属于预测的一部分。风险照旧（GuFu 那类钩子仍可能卡死），面板/文档明说。
+- **兼容实验模式**（新增，默认关）：`mirror/CompatMode.java` 把开关存进 `settings.txt` 的 `compatHooks=on`（1s 缓存，改完即时生效）；`mirror/HookQuiet.java` 的 `muted()` 改为 `World.anyInstalled() && CompatMode.isolation()`。打开后拦截 **21 个** publish 方法：15 个战斗钩子（`ModHooks.COMBAT_HOOKS` 名单）加上沙盒同样能触达的 6 个——最大生命变化（`AbstractCreature.increaseMaxHp`）、获得遗物（`AbstractRelic.obtain`）、获得药水（`AbstractPlayer.obtainPotion`）、卡牌描述（`AbstractCard.initializeDescription`）、解锁刷新（`UnlockTracker.refresh`）、死亡界面（`DeathScreen`/`VictoryScreen`）。窗口内直接返回中性值（伤害/格挡/最大生命原值、描述原文、`preMonsterTurn` 返回 `true`），不调用任何订阅者并计数。窗口外与真实游戏一律不变。
+- **覆盖面的自证**：BaseMod 共 50 个 `publish*`，代码里的 `GUARDED` / `UNREACHABLE` 两张表逐一分类；不可达的是帧回调（Update/Render/ImGui——沙盒跑引擎调用，不跑帧循环）与启动/菜单钩子。门禁 S275 核对两张表：不重叠、无已消失的方法、并集等于 BaseMod 的全部 publish 方法，且补丁类数量等于拦截名单（`@SpirePatch` 是 CLASS 保留级别，运行时读不到注解；补丁指向不存在的方法会让游戏加载即失败，由加载器兜底）。BaseMod 以后新增接口会直接失败，而不是悄悄多一个入口。
+- **配置界面**（`ui/ModConfig.java`）：主界面 → Mods → Spire Pilot → Config，`ModPanel` + `ModLabeledToggleButton`；面板上直接写两种模式的利弊：默认模式「钩子效果进路线 / 钩子卡住会卡死」，兼容实验模式「卡不死 / 钩子效果不算进路线，只看作参考」。注册 `registerModBadge` 需要纹理，用一个运行时生成的深蓝方块徽章，不新增二进制资源。
+- `Gameplay.finishQuick`：兼容实验模式下每次搜索结束打一行 `sandbox: N BaseMod hook dispatch(es) not sent to other mods (兼容实验模式; their effects are not in this plan)`；默认模式不计、不打印。
+- `ContentOrigin.Status.describe()`：按当前模式写「（模拟时不运行）」或「（模拟时照常运行）」。
+
+**不做**「给 GuFu 特判」：下一个 mod 的监听器一样能卡死，而且 mod 一更新条件就变；隔离面必须是“所有第三方监听器”，且由玩家来选。
+
+**门禁**：S273——合成 JawWorm 战，把 `onPlayerDamagedSubscribers`/`preMonsterTurnSubscribers`/`maxHPChangeSubscribers`/`postDeathSubscribers` 暂换成计数订阅者（绝不运行真实 mod 代码，结束时恢复）：默认模式下窗口内 `publishOnPlayerDamaged(7)` 返回 8、订阅者 1 次，`publishPreMonsterTurn` 返回 false（否决）、1 次，`publishMaxHPChange(9)` 返回 10、1 次，`publishPostDeath` 1 次；切到兼容实验模式后同样调用返回 7 / true / 9、订阅者 0 次，计数 +4；窗口外无论刚才是哪种模式，订阅者照常运行；`GUARDED_METHODS == 21`。S274——主界面注册了配置面板，面板上同时出现「默认模式」「兼容实验模式」和两边的利弊句，开关存在且初始值等于 `CompatMode.isolation()`。S275——21 个补丁类，`GUARDED`/`UNREACHABLE` 不重叠、无已消失的方法、并集覆盖 BaseMod 的全部 publish 方法、补丁类数量等于 `GUARDED` 长度。
+
+**验证（2026-11-19）**：构建 `BUILD OK`（151 源文件、614 entries、`mod\spire-pilot.jar` 1,410,102 B）；`install.ps1 -SkipBuild` 装进游戏，sha256 `086804F4…DB0F`，与构建产物一致。聚焦门禁 `-Gates "S47,S268,S269,S270,S271,S272,S273,S274,S275"` → `passed=57 failed=0`；证据行 `S273 default: damage=8 turn=false hp=10 seen=1/1/1/1 muted=0 | quiet: damage=7 turn=true hp=9 seen=0/0/0/0 muted=4 | live: … mutedAfter=4`、`S275 publish=50 guarded=21 unreachable=29 unclassified=[] unknown=[] patchClasses=21`。再用本机 20 个 jar（含 GuFu、MLOnmyojiMod）跑 `-AllMods -Gates "S273,S274,S275"` → `passed=19 failed=0`。默认核心套件在本机仍受 180 s 超时限制（1.6.3 起的已知环境问题），本次以聚焦门禁取证。
+

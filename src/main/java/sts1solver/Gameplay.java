@@ -236,6 +236,8 @@ public final class Gameplay {
     private static ViewState quickView;
     private static String quickCacheKey;
     private static long quickStartedAt;
+    /** B197: hook dispatches skipped before this search started, so the end of it can say the delta. */
+    private static int quickHookMutedBefore;
     private static final int QUICK_SLICE_MS = 40;
     // B42: an autopilot replan is the SAME search as F8, not a 4 s guess. It runs in slices with the
     // full budget (A0) and is adopted when it finishes; the flags let finishQuick() word it right and
@@ -675,6 +677,7 @@ public final class Gameplay {
             Gameplay.beginSearchAudit(render);
             quickView = view;
             quickStartedAt = now();
+            quickHookMutedBefore = sts1solver.mirror.HookQuiet.mutedCount();
             sts1solver.search.Solver.resetSlowSteps(); // B170
             quick = new sts1solver.search.QuickSession(liveRoot, budgetMs, expensive);
             Gameplay.clearPreview();
@@ -1356,6 +1359,14 @@ public final class Gameplay {
         // to survive the bookkeeping below -- which clears it when the line is unusable.
         boolean armForRestart = autoplayArmed;
         World.forceRestore();
+        // B197 (兼容实验模式): say how much of the fight was solved without other mods' listeners.
+        // The count is per search because a per-node line would drown the log; zero stays silent,
+        // and in the default mode nothing is muted so this line never appears.
+        int hooksSkipped = sts1solver.mirror.HookQuiet.mutedCount() - quickHookMutedBefore;
+        if (hooksSkipped > 0) {
+            Log.info("sandbox: " + hooksSkipped + " BaseMod hook dispatch(es) not sent to other mods"
+                    + " (兼容实验模式; their effects are not in this plan)");
+        }
         if (r == null) {
             autoplayArmed = false;
             status = "计算没有结果";
@@ -2824,6 +2835,7 @@ public final class Gameplay {
             Gameplay.beginSearchAudit(render);
             quickView = view;
             quickStartedAt = now();
+            quickHookMutedBefore = sts1solver.mirror.HookQuiet.mutedCount();
             quickIsReplan = true;
             quickReason = reason;
             sts1solver.search.Solver.resetSlowSteps(); // B170

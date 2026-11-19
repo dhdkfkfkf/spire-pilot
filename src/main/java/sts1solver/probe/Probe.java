@@ -2920,6 +2920,306 @@ public final class Probe {
             }
         });
 
+        Probe.core("S273 B197: the sandbox hook switch has two modes, each with its promised behaviour",
+                new Runnable(){
+            @Override
+            public void run() {
+                // B197 (user 2026-11-19): luShi's onPlayerDamaged subscriber looped forever inside a
+                // simulated attack, on the render thread. The default mode keeps that behaviour (the
+                // listeners run, their effects are part of the plan); the compatibility experiment
+                // makes the window keep the events. Both directions are measured here. The subscriber
+                // list is swapped for one test counter so the gate never runs real mod code (luShi
+                // among them) and always restores the real list afterwards.
+                Synthetic.Spec spec = new Synthetic.Spec();
+                spec.seed = 9273L;
+                spec.maxHealth = 80;
+                spec.deck = new String[]{"Strike_R", "Strike_R", "Defend_R", "Defend_R", "Bash"};
+                spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                Synthetic.build(spec, new Synthetic.SyntheticStep());
+                Gameplay.reset();
+                java.util.List<Object> savedDamage = null;
+                java.util.List<Object> savedTurns = null;
+                java.util.List<Object> savedHp = null;
+                java.util.List<Object> savedDeath = null;
+                java.util.List<Object> damageList = null;
+                java.util.List<Object> turnList = null;
+                java.util.List<Object> hpList = null;
+                java.util.List<Object> deathList = null;
+                World w = null;
+                boolean installed = false;
+                HookCounter counter = new HookCounter();
+                try {
+                    java.lang.reflect.Field damageField = sts1solver.reflect.Reflect.find(
+                            basemod.BaseMod.class, "onPlayerDamagedSubscribers");
+                    java.lang.reflect.Field turnField = sts1solver.reflect.Reflect.find(
+                            basemod.BaseMod.class, "preMonsterTurnSubscribers");
+                    java.lang.reflect.Field hpField = sts1solver.reflect.Reflect.find(
+                            basemod.BaseMod.class, "maxHPChangeSubscribers");
+                    java.lang.reflect.Field deathField = sts1solver.reflect.Reflect.find(
+                            basemod.BaseMod.class, "postDeathSubscribers");
+                    if (damageField != null) {
+                        Object value = sts1solver.reflect.Reflect.get(damageField, null);
+                        if (value instanceof java.util.List) {
+                            damageList = (java.util.List<Object>) value;
+                            savedDamage = new java.util.ArrayList<Object>(damageList);
+                            damageList.clear();
+                            damageList.add(counter);
+                        }
+                    }
+                    if (turnField != null) {
+                        Object value = sts1solver.reflect.Reflect.get(turnField, null);
+                        if (value instanceof java.util.List) {
+                            turnList = (java.util.List<Object>) value;
+                            savedTurns = new java.util.ArrayList<Object>(turnList);
+                            turnList.clear();
+                            turnList.add(counter);
+                        }
+                    }
+                    if (hpField != null) {
+                        Object value = sts1solver.reflect.Reflect.get(hpField, null);
+                        if (value instanceof java.util.List) {
+                            hpList = (java.util.List<Object>) value;
+                            savedHp = new java.util.ArrayList<Object>(hpList);
+                            hpList.clear();
+                            hpList.add(counter);
+                        }
+                    }
+                    if (deathField != null) {
+                        Object value = sts1solver.reflect.Reflect.get(deathField, null);
+                        if (value instanceof java.util.List) {
+                            deathList = (java.util.List<Object>) value;
+                            savedDeath = new java.util.ArrayList<Object>(deathList);
+                            deathList.clear();
+                            deathList.add(counter);
+                        }
+                    }
+                    sts1solver.mirror.CompatMode.setForTest(Boolean.FALSE);
+                    sts1solver.mirror.HookQuiet.resetForTest();
+                    com.megacrit.cardcrawl.characters.AbstractPlayer p =
+                            com.megacrit.cardcrawl.dungeons.AbstractDungeon.player;
+                    com.megacrit.cardcrawl.cards.DamageInfo info =
+                            new com.megacrit.cardcrawl.cards.DamageInfo(p, 5,
+                                    com.megacrit.cardcrawl.cards.DamageInfo.DamageType.NORMAL);
+                    com.megacrit.cardcrawl.monsters.AbstractMonster monster =
+                            com.megacrit.cardcrawl.dungeons.AbstractDungeon.getMonsters()
+                                    .monsters.get(0);
+                    // Default mode: the window runs listeners exactly like the pre-1.6.7 build.
+                    w = World.captureLive();
+                    w.install();
+                    installed = true;
+                    int defaultAmount = basemod.BaseMod.publishOnPlayerDamaged(7, info);
+                    boolean defaultTurn = basemod.BaseMod.publishPreMonsterTurn(monster);
+                    int defaultHp = basemod.BaseMod.publishMaxHPChange(9);
+                    basemod.BaseMod.publishPostDeath();
+                    int defaultSeen = counter.damaged;
+                    int defaultTurns = counter.turns;
+                    int defaultHpSeen = counter.maxHp;
+                    int defaultDeaths = counter.deaths;
+                    int defaultMuted = sts1solver.mirror.HookQuiet.mutedCount();
+                    w.readBack();
+                    w.uninstall();
+                    installed = false;
+                    // The compatibility experiment: the same calls, no subscriber, each skip counted.
+                    sts1solver.mirror.CompatMode.setForTest(Boolean.TRUE);
+                    sts1solver.mirror.HookQuiet.resetForTest();
+                    w = World.captureLive();
+                    w.install();
+                    installed = true;
+                    int quietAmount = basemod.BaseMod.publishOnPlayerDamaged(7, info);
+                    boolean quietTurn = basemod.BaseMod.publishPreMonsterTurn(monster);
+                    int quietHp = basemod.BaseMod.publishMaxHPChange(9);
+                    basemod.BaseMod.publishPostDeath();
+                    // Snapshot while the window is still open: the live calls below run the counter.
+                    int quietSeen = counter.damaged - defaultSeen;
+                    int quietTurns = counter.turns - defaultTurns;
+                    int quietHpSeen = counter.maxHp - defaultHpSeen;
+                    int quietDeaths = counter.deaths - defaultDeaths;
+                    int quietMuted = sts1solver.mirror.HookQuiet.mutedCount();
+                    w.readBack();
+                    w.uninstall();
+                    installed = false;
+                    int live = basemod.BaseMod.publishOnPlayerDamaged(7, info);
+                    boolean turnLive = basemod.BaseMod.publishPreMonsterTurn(monster);
+                    int liveHp = basemod.BaseMod.publishMaxHPChange(9);
+                    basemod.BaseMod.publishPostDeath();
+                    int liveSeen = counter.damaged - defaultSeen - quietSeen;
+                    int liveTurns = counter.turns - defaultTurns - quietTurns;
+                    int liveHpSeen = counter.maxHp - defaultHpSeen - quietHpSeen;
+                    int liveDeaths = counter.deaths - defaultDeaths - quietDeaths;
+                    int mutedAfter = sts1solver.mirror.HookQuiet.mutedCount();
+                    Log.info("  S273 default: damage=" + defaultAmount + " turn=" + defaultTurn
+                            + " hp=" + defaultHp + " seen=" + defaultSeen + "/" + defaultTurns
+                            + "/" + defaultHpSeen + "/" + defaultDeaths
+                            + " muted=" + defaultMuted + " | quiet: damage=" + quietAmount
+                            + " turn=" + quietTurn + " hp=" + quietHp
+                            + " seen=" + quietSeen + "/" + quietTurns + "/" + quietHpSeen
+                            + "/" + quietDeaths
+                            + " muted=" + quietMuted + " | live: damage=" + live
+                            + " turn=" + turnLive + " hp=" + liveHp
+                            + " seen=" + liveSeen + "/" + liveTurns + "/" + liveHpSeen
+                            + "/" + liveDeaths + " mutedAfter=" + mutedAfter);
+                    Probe.check(damageList != null && turnList != null,
+                            "BaseMod exposes the hook lists this guard covers", "");
+                    Probe.check(defaultAmount == 8 && defaultSeen == 1 && !defaultTurn
+                                    && defaultTurns == 1 && defaultHp == 10 && defaultHpSeen == 1
+                                    && defaultDeaths == 1 && defaultMuted == 0,
+                            "default mode: the window runs mod listeners, veto and damage change included",
+                            "amount=" + defaultAmount + " seen=" + defaultSeen + "/" + defaultTurns
+                                    + " turn=" + defaultTurn + " hp=" + defaultHp + "/" + defaultHpSeen
+                                    + " deaths=" + defaultDeaths + " muted=" + defaultMuted);
+                    Probe.check(quietAmount == 7 && quietSeen == 0 && quietTurn && quietTurns == 0,
+                            "compat mode: inside a window no subscriber runs and the turn is not vetoed",
+                            "amount=" + quietAmount + " seen=" + quietSeen + "/" + quietTurns
+                                    + " turn=" + quietTurn);
+                    Probe.check(quietHp == 9 && quietHpSeen == 0 && quietDeaths == 0,
+                            "compat mode also keeps max-HP and death events to the window",
+                            "hp=" + quietHp + " seen=" + quietHpSeen + " deaths=" + quietDeaths);
+                    Probe.check(quietMuted >= 4,
+                            "each skipped dispatch is counted for the search log",
+                            "muted=" + quietMuted);
+                    Probe.check(live == 8 && liveSeen == 1 && !turnLive && liveTurns == 1
+                                    && liveHp == 10 && liveHpSeen == 1 && liveDeaths == 1,
+                            "outside a window listeners still run, whichever mode was last used",
+                            "amount=" + live + " seen=" + liveSeen + "/" + liveTurns
+                                    + " hp=" + liveHp + "/" + liveHpSeen + " deaths=" + liveDeaths);
+                    Probe.check(mutedAfter == quietMuted,
+                            "a live dispatch is not counted as muted", "");
+                    Probe.check(sts1solver.mirror.HookQuiet.GUARDED_METHODS == 21
+                                    && sts1solver.mirror.HookQuiet.GUARDED.length == 21,
+                            "the guard covers every hook list the panel counts", "");
+                } catch (Throwable t) {
+                    Probe.check(false, "S273 ran without throwing", String.valueOf(t));
+                } finally {
+                    try {
+                        if (installed) {
+                            World.forceRestore();
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                    try {
+                        if (damageList != null && savedDamage != null) {
+                            damageList.clear();
+                            damageList.addAll(savedDamage);
+                        }
+                        if (turnList != null && savedTurns != null) {
+                            turnList.clear();
+                            turnList.addAll(savedTurns);
+                        }
+                        if (hpList != null && savedHp != null) {
+                            hpList.clear();
+                            hpList.addAll(savedHp);
+                        }
+                        if (deathList != null && savedDeath != null) {
+                            deathList.clear();
+                            deathList.addAll(savedDeath);
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                    sts1solver.mirror.CompatMode.setForTest(null);
+                    Gameplay.reset();
+                }
+            }
+        });
+
+        Probe.core("S274 B197: the Mods screen offers the compatibility switch with both costs on it",
+                new Runnable(){
+            @Override
+            public void run() {
+                // B197 (user 2026-11-19, "放在主界面的mod点进去，自己mod的config里"): main menu ->
+                // Mods -> Spire Pilot -> Config. The gate cannot click the screen, so it checks what
+                // the screen is built from: a registered panel, the toggle, and the lines that say
+                // what each mode buys and costs.
+                basemod.ModPanel panel = sts1solver.ui.ModConfig.panel();
+                basemod.ModLabeledToggleButton toggle = sts1solver.ui.ModConfig.toggle();
+                Probe.check(panel != null, "the Mods screen has a registered config panel", "");
+                int labels = 0;
+                StringBuilder text = new StringBuilder();
+                if (panel != null) {
+                    java.util.List<basemod.IUIElement> elements = panel.getUIElements();
+                    for (int i = 0; i < elements.size(); i++) {
+                        Object e = elements.get(i);
+                        if (e instanceof basemod.ModLabel) {
+                            ++labels;
+                            String line = ((basemod.ModLabel) e).text;
+                            if (line != null) {
+                                text.append(line).append('\n');
+                            }
+                        }
+                    }
+                }
+                String all = text.toString();
+                Probe.check(labels >= 8 && all.contains("默认模式") && all.contains("兼容实验模式"),
+                        "the panel names both modes", "labels=" + labels);
+                Probe.check(all.contains("钩子里的效果也算进路线") && all.contains("整个游戏会卡死"),
+                        "default mode: both the benefit and the freeze risk are written on it", "");
+                Probe.check(all.contains("卡不死游戏") && all.contains("只看作参考"),
+                        "compat mode: both the isolation and the fidelity cost are written on it", "");
+                Probe.check(toggle != null && toggle.toggle != null,
+                        "a toggle exists for the switch", "");
+                Probe.check(toggle != null && toggle.toggle.enabled
+                                == sts1solver.mirror.CompatMode.isolation(),
+                        "the toggle shows the stored mode at startup", "");
+            }
+        });
+
+        Probe.core("S275 B197: every BaseMod publish method is either muted in a window or proven unreachable",
+                new Runnable(){
+            @Override
+            public void run() {
+                // BaseMod exposes 50 publish* methods. The guard must cover exactly the ones a
+                // sandbox window can reach, and the pair (muted, unreachable) must cover the whole
+                // set -- so a BaseMod update that adds a dispatch fails here instead of silently
+                // widening what a search can set off in other mods. @SpirePatch is CLASS-retained
+                // (not visible to reflection at runtime), so the binding itself is checked by the
+                // loader: a patch that names a method BaseMod does not have fails the game at load.
+                // What the gate can check here is that the classification is total, current, and
+                // that every guard is a real class in the list.
+                try {
+                    int patchClasses = sts1solver.mirror.HookQuiet.class.getDeclaredClasses().length;
+                    java.util.Set<String> declared = new java.util.TreeSet<String>();
+                    java.lang.reflect.Method[] methods = basemod.BaseMod.class.getDeclaredMethods();
+                    for (int i = 0; i < methods.length; i++) {
+                        if (java.lang.reflect.Modifier.isStatic(methods[i].getModifiers())
+                                && methods[i].getName().startsWith("publish")) {
+                            declared.add(methods[i].getName());
+                        }
+                    }
+                    java.util.Set<String> guarded = new java.util.TreeSet<String>();
+                    java.util.Collections.addAll(guarded, sts1solver.mirror.HookQuiet.GUARDED);
+                    java.util.Set<String> unreachable = new java.util.TreeSet<String>();
+                    java.util.Collections.addAll(unreachable, sts1solver.mirror.HookQuiet.UNREACHABLE);
+                    java.util.Set<String> overlap = new java.util.TreeSet<String>(guarded);
+                    overlap.retainAll(unreachable);
+                    java.util.Set<String> unclassified = new java.util.TreeSet<String>(declared);
+                    unclassified.removeAll(guarded);
+                    unclassified.removeAll(unreachable);
+                    java.util.Set<String> unknown = new java.util.TreeSet<String>(guarded);
+                    unknown.addAll(unreachable);
+                    unknown.removeAll(declared);
+                    Log.info("  S275 publish=" + declared.size() + " guarded=" + guarded.size()
+                            + " unreachable=" + unreachable.size() + " unclassified="
+                            + unclassified + " unknown=" + unknown
+                            + " patchClasses=" + patchClasses);
+                    Probe.check(patchClasses == guarded.size(),
+                            "one patch class per guarded publish method",
+                            "classes=" + patchClasses + " listed=" + guarded.size());
+                    Probe.check(overlap.isEmpty(),
+                            "no method is listed as both muted and unreachable",
+                            String.valueOf(overlap));
+                    Probe.check(unknown.isEmpty(),
+                            "no listed method has disappeared from BaseMod",
+                            String.valueOf(unknown));
+                    Probe.check(unclassified.isEmpty(),
+                            "no BaseMod publish method is left unclassified",
+                            String.valueOf(unclassified));
+                    Probe.check(sts1solver.mirror.HookQuiet.GUARDED_METHODS == guarded.size(),
+                            "the pinned count equals the audited set", "");
+                } catch (Throwable t) {
+                    Probe.check(false, "S275 ran without throwing", String.valueOf(t));
+                }
+            }
+        });
+
         Probe.core("S100 m16202-4: the panel shows card and potion NAMES, not engine ids",
                 new Runnable(){
             @Override
@@ -19164,6 +19464,41 @@ private static void s78Write(File file, String text, long modified) {
             }
         }
         return null;
+    }
+
+    /** S273: a subscriber that only counts, so the gate can see whether a dispatch happened. */
+    public static final class HookCounter implements basemod.interfaces.OnPlayerDamagedSubscriber,
+            basemod.interfaces.PreMonsterTurnSubscriber,
+            basemod.interfaces.MaxHPChangeSubscriber,
+            basemod.interfaces.PostDeathSubscriber {
+        int damaged;
+        int turns;
+        int maxHp;
+        int deaths;
+
+        @Override
+        public int receiveOnPlayerDamaged(int amount,
+                com.megacrit.cardcrawl.cards.DamageInfo info) {
+            ++damaged;
+            return amount + 1;
+        }
+
+        @Override
+        public boolean receivePreMonsterTurn(com.megacrit.cardcrawl.monsters.AbstractMonster monster) {
+            ++turns;
+            return false;
+        }
+
+        @Override
+        public int receiveMapHPChange(int amount) {
+            ++maxHp;
+            return amount + 1;
+        }
+
+        @Override
+        public void receivePostDeath() {
+            ++deaths;
+        }
     }
 
     static {

@@ -128,6 +128,9 @@ public final class SolverMod implements PostInitializeSubscriber, PostUpdateSubs
             sts1solver.util.SilentInstance.arm("probe request present at startup");
         }
         sts1solver.ui.Hud.install();
+        // The Mods screen's Config button (B197): default mode vs 兼容实验模式, with both costs
+        // written on the panel. A failed registration only loses the screen, never the solver.
+        sts1solver.ui.ModConfig.install();
         // B47: if the render thread ever stops returning, leave a thread dump behind instead of a
         // silent freeze. Probe instances run blocking suites on that thread on purpose, so they are
         // disarmed (see the request block below).

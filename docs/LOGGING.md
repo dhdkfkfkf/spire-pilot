@@ -36,8 +36,9 @@ round 0: 7.5 us/line    round 1: 4.6 us/line    round 2: 4.8 us/line
 ### 能：这个 mod 到底进来了什么
 
 - 启动：`content surface: accepted (no whitelist); hook profiles=[…]`
-- 进战斗：`content: 来源: 含 mod 内容（按真实引擎模拟）: 类名…` 或 `来源: 原版 + N 个 mod 战斗钩子: demoMod.ninjaMod#postDrawSubscribers…`
+- 进战斗：`content: 来源: 含 mod 内容（按真实引擎模拟）: 类名…` 或 `来源: 原版 + N 个 mod 战斗钩子（模拟时照常运行）: demoMod.ninjaMod#postDrawSubscribers…`（开「兼容实验模式」后括号里变成「模拟时不运行」）
 - 静态镜像：`mod statics: 395 field(s) in 779 class(es) from 20 jar(s), 1 not loadable, 2063 final (52ms)`
+- 模拟期间被隔离的第三方事件（B197，仅「兼容实验模式」）：`sandbox: N BaseMod hook dispatch(es) not sent to other mods (兼容实验模式; …)`——本次搜索里沙盒没有广播出去的战斗事件数。卡死排查先看它：N > 0 说明当时有 mod 在监听这些事件，而它们的代码没有在沙盒里运行。
 
 ### 能：mod 代码抛异常（带完整栈，栈里就有 mod 的类名）
 
@@ -84,6 +85,7 @@ Select-String -Path $p -Pattern "ERROR|expand failed|engine update threw|replay 
 | 这一场判了什么 | `solve:` / `plan :` / `route:` |
 | 预算/档位 | `quick search: started` / `deep search: started`（含 `boss=x2`） |
 | 有没有 mod 内容/钩子 | `content:` / `content surface` / `mod statics:` |
+| 点计算整帧卡死（B197） | `sandbox: N BaseMod hook` / `content:` 里的钩子名单 / `hang-*.txt` 的栈（默认模式下没有 sandbox 行，先看 `content:` 和栈） |
 | 和预测不一致 | `PREDICTION DRIFT` 后两行 `expected` / `actual` |
 | 为什么没出计划 | `solve refused:` / `plan stale:` / `expand failed` |
 | 自动出牌为什么停 | `autopilot stopped:` / `plan exhausted` / `pending action did not settle` |
