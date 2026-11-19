@@ -1042,6 +1042,25 @@ public final class Solver {
      * Action itself or walks screens an action already queued in the manager opened (the probe's
      * test doubles do the latter, because a mod action cannot be named by the core gates).
      */
+    /** A normal action must settle or hand control to the existing selection-chain walker. */
+    private static boolean drainAllowsExpansion(Driver.Drain drain) {
+        if (drain == null || drain.refused || drain.timedOut || drain.stalled || drain.discardMissing) {
+            return false;
+        }
+        return drain.settled || drain.awaitingSelection || drain.combatOver;
+    }
+
+    private static String drainSummary(Driver.Drain drain) {
+        if (drain == null) {
+            return "null";
+        }
+        return "steps=" + drain.steps + " settled=" + drain.settled
+                + " awaitingSelection=" + drain.awaitingSelection
+                + " timedOut=" + drain.timedOut + " stalled=" + drain.stalled
+                + " refused=" + drain.refused + " discardMissing=" + drain.discardMissing
+                + " turnAdvanced=" + drain.turnAdvanced + " combatOver=" + drain.combatOver;
+    }
+
     private static List<Choice> expandCore(World world, Action action, int n, boolean applyNow) {
         ArrayList<Choice> out = new ArrayList<Choice>();
         java.util.List<java.util.List<String>> ids = new java.util.ArrayList<java.util.List<String>>();
@@ -1084,8 +1103,14 @@ public final class Solver {
             java.util.List<String> playedBefore = Solver.cardsPlayedNames();
             if (applyNow && action != null) {
                 long applyStart = System.nanoTime();
-                Legal.apply(action);
+                Driver.Drain applied = Legal.apply(action);
                 Solver.profile.apply += System.nanoTime() - applyStart;
+                if (!Solver.drainAllowsExpansion(applied)) {
+                    IllegalStateException failure = new IllegalStateException(
+                            "action drain did not settle: " + Solver.drainSummary(applied));
+                    Solver.noteExpandFailure(failure);
+                    return out;
+                }
             }
             complete = expandScreens(ids, displays, uuids, prints, kinds, n);
             if (applyNow && action != null) {
@@ -1160,7 +1185,13 @@ public final class Solver {
                 // probe's all-first run (which is what withChoice used to copy onto every branch).
                 java.util.List<String> branchPlayedBefore = Solver.cardsPlayedNames();
                 if (applyNow && action != null) {
-                    Legal.apply(action);
+                    Driver.Drain branchDrain = Legal.apply(action);
+                    if (!Solver.drainAllowsExpansion(branchDrain)) {
+                        Log.warnEvery("screens-drain", 5000L,
+                                "discarding branch whose action drain did not settle: "
+                                        + Solver.drainSummary(branchDrain));
+                        continue;
+                    }
                 }
                 boolean answered = true;
                 java.util.List<String> branchKinds = new java.util.ArrayList<String>();
