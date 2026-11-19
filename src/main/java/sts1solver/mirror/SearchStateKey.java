@@ -36,12 +36,17 @@ public final class SearchStateKey {
         this.canonicalBytes = canonicalBytes.clone();
         this.exact = exact;
         List<String> reasons = unknownReasons == null
-                ? Collections.<String>emptyList() : new ArrayList<String>(unknownReasons);
+                ? new ArrayList<String>() : new ArrayList<String>(unknownReasons);
+        if (!exact && reasons.isEmpty()) {
+            reasons.add("unspecified inexact state");
+        }
         this.unknownReasons = Collections.unmodifiableList(reasons);
         if (exact && !reasons.isEmpty()) {
             throw new IllegalArgumentException("An exact key cannot have unknown-state reasons");
         }
-        byte[] hash = sha256(this.canonicalBytes);
+        CanonicalStateWriter hashInput = new CanonicalStateWriter();
+        hashInput.putInt(0, schemaVersion).putCanonical(1, this.canonicalBytes);
+        byte[] hash = sha256(hashInput.toByteArray());
         this.hashHi = readLong(hash, 0);
         this.hashLo = readLong(hash, 8);
         this.hashCode = 31 * schemaVersion + Arrays.hashCode(this.canonicalBytes);
