@@ -3422,7 +3422,15 @@ public final class Solver {
                 TurnPlan.classify(waiting);
                 return waiting;
             }
-            List<Action> list = Legal.actions();
+            ActionGenerationResult generated = Legal.actionsResult();
+            if (!generated.complete()) {
+                String reason = generated.failure.isEmpty()
+                        ? "unknown action-generation failure" : generated.failure;
+                Log.warn("search stopped: incomplete legal action set; " + reason);
+                throw new IllegalStateException("Incomplete legal action set: " + reason,
+                        generated.cause);
+            }
+            List<Action> list = generated.actions;
             // 1.0.5 (B6): opt-in. Signatures are read while the sandbox is installed, so they are
             // consistent with the very list the actions were built from.
             List<Action> out = Solver.canonicalCandidates(list,
