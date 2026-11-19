@@ -17,10 +17,12 @@ public final class StateKey {
 
     public final long hi;
     public final long lo;
+    private final String canonicalKey;
 
-    private StateKey(long hi, long lo) {
+    private StateKey(long hi, long lo, String canonicalKey) {
         this.hi = hi;
         this.lo = lo;
+        this.canonicalKey = canonicalKey;
     }
 
     public static StateKey of(String key) {
@@ -36,7 +38,7 @@ public final class StateKey {
         }
         long hi = mix64(h1 + h2);
         long lo = mix64(h2 ^ (h1 << 1) ^ 0x2545f4914f6cdd1dL);
-        return new StateKey(hi, lo);
+        return new StateKey(hi, lo, key);
     }
 
     /** splitmix64 finalizer: every input bit affects every output bit. */
@@ -55,7 +57,9 @@ public final class StateKey {
             return false;
         }
         StateKey other = (StateKey) o;
-        return hi == other.hi && lo == other.lo;
+        return hi == other.hi && lo == other.lo
+                && (canonicalKey == null ? other.canonicalKey == null
+                        : canonicalKey.equals(other.canonicalKey));
     }
 
     @Override
