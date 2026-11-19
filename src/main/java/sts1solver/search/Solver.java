@@ -2592,7 +2592,11 @@ public final class Solver {
         if (digest == null) {
             return "";
         }
-        return settled ? Digest.stable(digest) : digest;
+        // The board digest alone is not a complete future-behavior identity: two visually identical
+        // boards at different RNG positions can produce different draws, intents or random effects.
+        // Keep the existing settled/raw distinction, but include all thirteen engine RNG counters.
+        String board = settled ? Digest.stable(digest) : digest;
+        return board + " | rng=" + sts1solver.mirror.RngStamp.of();
     }
 
     private static String potionStepDesc(Step s) {
