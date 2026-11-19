@@ -27,6 +27,11 @@ public final class Legal {
     }
 
     public static List<Action> actions() {
+        return actionsResult().actions;
+    }
+
+    /** Enumerates candidates without hiding a partially failed scan. */
+    public static ActionGenerationResult actionsResult() {
         List<Action> out = new ArrayList<Action>();
         try {
             // B125 (m03996 #2): a decided fight has no decisions. The game itself skips the turn
@@ -34,7 +39,7 @@ public final class Legal {
             // so an end turn there is a no-op that still LOOKS like a branch; the search used to
             // chain those and the panel showed several end turns inside one turn row.
             if (Driver.combatOver()) {
-                return out;
+                return ActionGenerationResult.complete(out);
             }
             List<AbstractMonster> alive = Driver.aliveMonsters();
             List<AbstractCard> hand = AbstractDungeon.player.hand.group;
@@ -125,9 +130,11 @@ public final class Legal {
             }
             out.add(Action.endTurn());
         } catch (Throwable t) {
-            // An unreadable decision point yields no candidates; the caller treats that as terminal.
+            return ActionGenerationResult.incomplete(out,
+                    "Legal action enumeration failed: " + t.getClass().getName()
+                            + (t.getMessage() == null ? "" : ": " + t.getMessage()), t);
         }
-        return out;
+        return ActionGenerationResult.complete(out);
     }
 
     /**
