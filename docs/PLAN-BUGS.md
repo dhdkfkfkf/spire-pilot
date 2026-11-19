@@ -4764,3 +4764,26 @@ pending 被清空后，`planIsStale()` 的 `pending == null` 分支只看 `curre
 **验证（2026-11-19，1.6.8）**：构建 `BUILD OK`（151 源文件、615 entries、`mod\spire-pilot.jar` 1,413,033 B）；`install.ps1 -SkipBuild` 装进游戏，sha256 `2EE41BE0…3FCD`，与构建产物一致。聚焦门禁 `-Gates "S47,S268,S269,S270,S271,S272,S273,S274,S275"` → `passed=60 failed=0`；S273 四窗口证据 `default: damage=8 turn=true hp=10 seen=1/1/1/1 muted=0 | combat: damage=7 turn=false hp=10 seen=0/0/1/1 muted=2 | other: damage=8 turn=true hp=9 seen=1/1/0/0 muted=2 | both: damage=7 turn=false hp=9 seen=0/0/0/0 muted=4 | live: damage=8 seen=1 mutedAfter=0`，S275 `publish=50 guarded=21 combat=15 other=6 unreachable=29 unclassified=[] unknown=[] patchClasses=21`。再用本机 20 个 jar（含 GuFu、MLOnmyojiMod）跑 `-AllMods -Gates "S273,S274,S275"` → `passed=22 failed=0`。默认核心套件在本机仍受 180 s 超时限制（1.6.3 起的已知环境问题），本次以聚焦门禁取证。面板不写「卡死多半来自哪一组」：用户 2026-11-19 明确说无法确定，已删。
 
 
+#### B199 「计收益时优先杀小偷」没生效：打分读的是实时盘面，不是这条推演（2026-11-19，用户报告）
+
+**现象**：用户报告「我发现之前那个有小偷而且收益计时，优先杀死它没生效，刚刚遇到能打死结果不打死，结束回合等人家逃跑」。实际战斗是第一章小偷（Looter）与第二章「抢劫的」（Mugger）同场，`growth.count=1`（局外: 计）开着，小偷 20 HP、这一刀就能收掉。
+
+**证据**：`%USERPROFILE%\spire-pilot\solver.log` 15:35–15:36 那一场。局面 `M0=Looter:20/45 | M1=Mugger:37/48`；交付的路线是 `兵俑 → 抢劫的 | 结束回合 | 雷帝召来+ | 麓铭大岳丸+ | 防御 | 防御 | 结束回合 | 结束回合 | 结束回合`，9 步 `trace` 里 `mhp=57` 始终不变，第 4 回合两人一起逃跑才判胜（`QUICK win … hpLoss=12 complete=true turns=1 nodes=256`）。也就是说：能杀而不杀，全线的「怪物 HP」没有任何一步下降。
+
+**根因**：1.6.6 的 B195 规则在 `Solver.score(...)` 里按节点扣 `KILL_FIRST_POINTS`，判断「场上还有没有小偷」调的是 `Solver.looterStanding()`——读的是 `AbstractDungeon.getMonsters()`。但两套搜索引擎都是**先 `expand()` 把子世界卸掉、再给节点打分**（旧版 `solve()` 1778–1806、切片 `Session.expandAndRecord` 5306–5409），所以打分时 `AbstractDungeon` 指向的是**真实战斗**；真实战斗在整个搜索期间都站着那只 20 HP 的小偷。结果：凡是「赢了但场上有怪物 HP」的节点，不管它是刚把小偷打死、还是刚放它跑，统一被扣 1,000,000；两条线只差在挨不挨打，0 伤害的逃跑线必然赢。偏好等于空转，这正是 B195 上线后用户仍看到「结束回合等它跑」的原因。另外 `looterStanding()` 的注释写着「Mugger 不会逃跑」——用发布包反查 `city.Mugger`，它与 `Looter` 一样有 SMOKE_BOMB/ESCAPE 移动、`EscapeAction`、`stolenGold`，并在 `die()` 里返还赃款，所以注释是错的，规则也漏了这一类。
+
+**修法**：
+
+- `Solver.readChoice` 在**节点自己的沙盒里**记录 `choice.looter`（`Solver.looterStanding()`，与 `mhp`/`alive` 同一时机）；`Choice` 增加该字段。
+- `Solver.score` 拆成两个重载：10 参版保留「读当前安装盘面」的语义，只给确实在自己盘面里打分的调用方（`rolloutScore`、门禁）用；新增 11 参版由调用方把 `looterLeft` 传进来。旧 `solve()`（1806）与 `Session.expandAndRecord`（5409）改传 `choice.looter`/`choice2.looter`。
+- `looterStanding()` 纳入 `city.Mugger`（同属「会逃跑、死后还赃」的小偷家族），并改正注释：判断按类名，不解析面板上的本地化名字。
+- 规则仍只作用于胜利节点、仍有 `monsterHp > 0` 前提、仍只在「局外: 计」下生效；评分公式的其他项、`letFlee`/`preferKill` 的合并顺序、回放校验与出牌路径未改。
+
+**门禁**：新增 S276，三段取证——
+1. 11 参评分：同一组盘面数字下，`looterLeft=true` 比 `false` 恰低 `KILL_FIRST_POINTS`；「局外: 不计」下两者相等。
+2. 旧读法：合成一只 Looter 后读实时盘面，`liveScore == left`——证明旧代码会把「打死」和「放任」扣成同一个分（这就是被替换的行为）。
+3. 接线：把小偷压到 3 HP，由节点自己回答——打击节点 `kill=clear`、结束回合节点 `flee=left`，且两次读数之后实时盘面里的小偷仍在（`liveAfter=true`）；另建一只 `city.Mugger`，`looterStanding()` 为真。
+
+**验证（2026-11-19，1.6.9）**：构建 `BUILD OK`（151 源文件、616 entries、`mod\spire-pilot.jar` 1,416,702 B、sha256 `1A331099…D6D2`）；`install.ps1 -SkipBuild` 装进游戏，sha256 一致。聚焦门禁（与最终包同一份代码、仅版本字符串不同）`-Gates "S47,S268,S269,S270,S271,S272,S273,S274,S275,S276"` → **passed=69 failed=0**，证据行 `S276 score: left=8999600 clear=9999600 diff=1000000 leftOff=9999600 clearOff=9999600`、`S276 live: looter=true liveScore=8999600 left=8999600`、`S276 node: strike=打击 → 抢劫的 kill=clear flee=left liveAfter=true`、`S276 mugger: standing=true`；S270 仍全绿，`looterScore=8999600 wormScore=9999600 diff=1000000`。`-AllMods -Gates "S273,S274,S275,S276"` → passed=31 failed=0。最终 1.6.9 包重跑 `-Gates "S270,S276"` → passed=16 failed=0。默认核心套件在本机仍受 180 s 超时限制（1.6.3 起的已知环境问题），本次以聚焦门禁取证。
+
+**教训**：一个事实要在「它所属的那块盘面」里读。沙盒卸载之后再问「场上还有谁」，回答的是另一场战斗；而注释里的引擎事实（“Mugger 不会逃跑”）必须用发布包反查，不能沿用直觉。

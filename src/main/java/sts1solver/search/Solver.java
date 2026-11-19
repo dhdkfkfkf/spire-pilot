@@ -1569,6 +1569,7 @@ public final class Solver {
         choice.energy = Solver.energyNow();
         choice.powers = Solver.powersNow();
         choice.alive = Solver.aliveCount();
+        choice.looter = Solver.looterStanding();
         // B64: the engine's own death flag, not the HP number -- a corpse can be healed back above
         // zero (Bird Faced Urn), so hp alone "revived" a dead branch.
         choice.dead = sts1solver.drive.Driver.playerDead() || choice.hp <= 0;
@@ -1802,7 +1803,7 @@ public final class Solver {
                             int growthHp = GrowthBook.credit(arrayList3, now2, startGrowth);
                             int n20s = Math.max(0, n20 - growthHp);
                             int saves2 = DeathSaves.used(fairies0, choice2.fairies, choice2.lizardTail);
-                            int n22 = Solver.score(n20s, n21, choice2.win, choice2.dead, n5 + 1, choice2.mhp, choice2.block, choice2.alive, saves2, choice2.gold - startGold) + (choice2.win ? Solver.lootPoints(choice2.loot) : 0) + (choice2.win ? Solver.healPoints(choice2.postHeal) : 0) + (choice2.win ? GrowthCredit.valueOf(arrayList3) : 0);
+                            int n22 = Solver.score(n20s, n21, choice2.win, choice2.dead, n5 + 1, choice2.mhp, choice2.block, choice2.alive, saves2, choice2.gold - startGold, choice2.looter) + (choice2.win ? Solver.lootPoints(choice2.loot) : 0) + (choice2.win ? Solver.healPoints(choice2.postHeal) : 0) + (choice2.win ? GrowthCredit.valueOf(arrayList3) : 0);
                             Node node4 = new Node(choice2.child, arrayList3, n22, Solver.rankOf(n22, choice2.block, choice2.energy, choice2.powers), n20, GameActionManager.turn, choice2.win, choice2.dead, choice2.monsters, saves2, choice2.digest);
                             node4.actKind = action.actionClass;
                             node4.postHeal = choice2.postHeal;
@@ -2769,8 +2770,31 @@ public final class Solver {
      * B146 (user m11490): the same formula plus the gold term. {@code goldDelta} is the node's gold
      * minus the fight's opening gold, so it is negative when the line spent gold. A dead line keeps
      * its flat -50M penalty: no amount of gold rescues it.
+     *
+     * <p>B199: "is a thief still standing" is read from the board installed RIGHT NOW. That is only
+     * correct for a caller that scored inside the board it means (the rollout, the gates). Search
+     * nodes must use the overload below with the flag they read inside their own world -- the search
+     * scores after the child's world is uninstalled, so this overload sees the LIVE fight, which
+     * still has the thief on it. That is exactly how the kill preference became a no-op.
      */
     private static int score(int n, int n2, boolean bl, boolean bl2, int n3, int n4, int n5, int n6, int deathSaves, int goldDelta) {
+        return score(n, n2, bl, bl2, n3, n4, n5, n6, deathSaves, goldDelta,
+                Solver.looterStanding());
+    }
+
+    /**
+     * B199: the same formula, with the thief fact handed in by the caller.
+     *
+     * <p>{@code looterLeft} must be read inside the node's own world ({@link Choice#looter}); the
+     * node's board decides whether that line let the thief run. Reading the live board here instead
+     * (B195's first cut) meant every winning node with any monster HP left was penalised by
+     * KILL_FIRST_POINTS -- including the node that had just killed the thief -- because the search
+     * scores after the child's world is uninstalled and the live fight still holds the thief. The
+     * kill and the flee then scored the same 1,000,000 points apart on HP alone, and the cheaper
+     * flee line won. Observed in the user's Looter+Mugger fight (2026-11-19): the delivered plan
+     * ended turns and let both run while a 20 HP Looter was killable.
+     */
+    private static int score(int n, int n2, boolean bl, boolean bl2, int n3, int n4, int n5, int n6, int deathSaves, int goldDelta, boolean looterLeft) {
         if (bl2) {
             return -50000000 - n * 100;
         }
@@ -2800,10 +2824,11 @@ public final class Solver {
         // reference's route-quality tuple. 1,000,000 points = 500 HP, so it is effectively a
         // lexicographic tier that still stays far below the 10,000,000 victory bonus.
         //
-        // B195: n4 > 0 on a WIN means the fight ended with a monster still on the board. Only the
-        // Looter (the fleeing thief) can do that in vanilla, and user 2026-11-19 scoped the rule to
-        // exactly it: with 局外: 计, killing the Looter outranks letting it run.
-        int leftAlive = bl && n4 > 0 && Solver.looterStanding() && goldRate() > 0
+        // B195/B199: n4 > 0 on a WIN means the fight ended with a monster still on the board. Only a
+        // fleeing thief (Looter, or the Act-2 Mugger, which runs the same EscapeAction) can do that
+        // in vanilla, and user 2026-11-19 scoped the rule to it: with 局外: 计, killing the thief
+        // outranks letting it run. The fact comes from the node (see the overload's comment).
+        int leftAlive = bl && n4 > 0 && looterLeft && goldRate() > 0
                 ? KILL_FIRST_POINTS : 0;
         return n7 - deficit * sts1solver.search.StrategicDeficit.POINTS_PER_HP - board
                 - DeathSaves.points(deathSaves) + goldDelta * goldRate() - leftAlive;
@@ -2943,6 +2968,57 @@ public final class Solver {
     }
 
     /**
+     * B199: gate hook -- the node score with the thief fact handed in. The search passes
+     * {@link Choice#looter}; a gate needs to show that flag, not the live board, drives the penalty.
+     */
+    public static int scoreNodeForTest(int hpLoss, int potionHp, boolean win, boolean dead, int layer,
+                                       int monsterHp, int block, int alive, int deathSaves,
+                                       int goldDelta, boolean looterLeft) {
+        return Solver.score(hpLoss, potionHp, win, dead, layer, monsterHp, block, alive,
+                deathSaves, goldDelta, looterLeft);
+    }
+
+    /**
+     * B199: gate hook -- apply one action in a fork of {@code root} and read the child exactly the
+     * way a search node does ({@link #readChoice}). Returns "none" for no action, "left" when a
+     * thief still stood in the CHILD, "clear" when none did. The live board is untouched: the
+     * caller can still see its own thief while this says "clear", which is the bug this pins.
+     */
+    public static String choiceLooterForTest(World root, Action action) {
+        if (action == null) {
+            return "none";
+        }
+        Choice probe = new Choice();
+        probe.child = root.fork();
+        boolean installed = false;
+        try {
+            probe.child.install();
+            installed = true;
+            Legal.apply(action);
+            try {
+                Driver.drain(4000, 1500L);
+            } catch (Throwable ignored) {
+                // a sandbox that cannot settle still answers what its board says
+            }
+            probe.child.readBack();
+            Solver.readChoice(probe);
+            return probe.looter ? "left" : "clear";
+        }
+        catch (Throwable t) {
+            return "error";
+        }
+        finally {
+            if (installed) {
+                try {
+                    probe.child.uninstall();
+                } catch (Throwable ignored) {
+                    // the caller's world is still the live one; nothing to restore
+                }
+            }
+        }
+    }
+
+    /**
      * B195: gate hook -- a winning result whose last step saw these monster HP, so a gate can pin
      * the "killed vs let it run" reading without a search.
      */
@@ -3022,19 +3098,21 @@ public final class Solver {
     }
 
     /**
-     * B195: is a Looter (the fleeing thief) still on the board?
+     * B195/B199: is a fleeing gold thief (Looter, Act-2 Mugger) still on the board?
      *
      * <p>Read the same way {@link #monsterHp()} is: with this node's world installed, an escaped
-     * Looter stays in the monster list with positive HP while the room is already over. The check is
+     * thief stays in the monster list with positive HP while the room is already over. The check is
      * the class, not a label -- the panel's names are localized ("小偷") and a label is never parsed
-     * back into a decision. Mugger extends AbstractMonster and never flees, so it does not count.
+     * back into a decision. Both classes carry SMOKE_BOMB/ESCAPE and EscapeAction with stolenGold
+     * returned in die(); the rule is the thief family, not one room.
      */
     private static boolean looterStanding() {
         try {
             ArrayList arrayList = AbstractDungeon.getMonsters().monsters;
             for (int i = 0; i < arrayList.size(); ++i) {
                 Object m = arrayList.get(i);
-                if (m instanceof com.megacrit.cardcrawl.monsters.exordium.Looter) {
+                if (m instanceof com.megacrit.cardcrawl.monsters.exordium.Looter
+                        || m instanceof com.megacrit.cardcrawl.monsters.city.Mugger) {
                     AbstractMonster am = (AbstractMonster)m;
                     if (!am.isDying && am.currentHealth > 0) {
                         return true;
@@ -3043,7 +3121,7 @@ public final class Solver {
             }
         }
         catch (Throwable ignored) {
-            // no monster group (menu, hand-built result) means no Looter either
+            // no monster group (menu, hand-built result) means no thief either
         }
         return false;
     }
@@ -3792,6 +3870,12 @@ public final class Solver {
         int energy;
         int powers;
         int alive;
+        /**
+         * B199: a fleeing thief (Looter/Mugger) still stands in THIS node. Read inside the node's
+         * world like {@link #mhp} -- the B195 kill preference needs the child's fact, and the live
+         * board the search runs against always still has the thief on it.
+         */
+        boolean looter;
         boolean win;
         boolean dead;
         boolean escaped;
@@ -5322,7 +5406,7 @@ public final class Solver {
                 // still charged once by netHpLoss/compareRoutes when the tiers are merged, so the
                 // final route ranking is unchanged in scale.
                 int n2Score = this.deferPotionCost ? 0 : n2;
-                int n3 = Solver.score(n2s, n2Score, choice.win, choice.dead, this.layer + 1, choice.mhp, choice.block, choice.alive, saves, choice.gold - this.startGold) + (choice.win ? Solver.lootPoints(choice.loot) : 0) + (choice.win ? Solver.healPoints(choice.postHeal) : 0) + (choice.win ? GrowthCredit.valueOf(arrayList) : 0);
+                int n3 = Solver.score(n2s, n2Score, choice.win, choice.dead, this.layer + 1, choice.mhp, choice.block, choice.alive, saves, choice.gold - this.startGold, choice.looter) + (choice.win ? Solver.lootPoints(choice.loot) : 0) + (choice.win ? Solver.healPoints(choice.postHeal) : 0) + (choice.win ? GrowthCredit.valueOf(arrayList) : 0);
                 Node node3 = new Node(choice.child, arrayList, n3, Solver.rankOf(n3, choice.block, choice.energy, choice.powers), n, GameActionManager.turn, choice.win, choice.dead, choice.monsters, saves, choice.digest);
                 node3.positionKey = choice.positionKey;
                 node3.actKind = action.actionClass;

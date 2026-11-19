@@ -3225,6 +3225,120 @@ public final class Probe {
             }
         });
 
+        Probe.core("S276 B199: the kill preference reads the node's own board, not the live fight",
+                new Runnable(){
+            @Override
+            public void run() {
+                // B199 (user 2026-11-19): with 局外: 计 on, the panel handed out "end turn ... end
+                // turn" until the thief ran, while a 20 HP Looter was killable. B195's per-node
+                // penalty called looterStanding() AFTER expand() uninstalled the child, so EVERY
+                // node read the LIVE fight -- which still holds the thief for the whole search.
+                // Kill and flee were penalised the same and the cheaper (no hits taken) flee line
+                // won. The fact now travels with the node: readChoice stores it, both node scores
+                // pass it. This gate pins the flag, the live read it replaced, and the wiring.
+                sts1solver.search.GrowthBook.overrideCountingForTest(Boolean.TRUE);
+                try {
+                    int left = Solver.scoreNodeForTest(0, 0, true, false, 0, 20, 0, 0, 0, 0, true);
+                    int clear = Solver.scoreNodeForTest(0, 0, true, false, 0, 20, 0, 0, 0, 0, false);
+                    sts1solver.search.GrowthBook.overrideCountingForTest(Boolean.FALSE);
+                    int leftOff = Solver.scoreNodeForTest(0, 0, true, false, 0, 20, 0, 0, 0, 0, true);
+                    int clearOff = Solver.scoreNodeForTest(0, 0, true, false, 0, 20, 0, 0, 0, 0, false);
+                    sts1solver.search.GrowthBook.overrideCountingForTest(Boolean.TRUE);
+                    Log.info("  S276 score: left=" + left + " clear=" + clear
+                            + " diff=" + (clear - left) + " leftOff=" + leftOff
+                            + " clearOff=" + clearOff);
+                    Probe.check(clear - left == Solver.KILL_FIRST_POINTS,
+                            "a thief left in the node costs exactly KILL_FIRST_POINTS",
+                            "diff=" + (clear - left));
+                    Probe.check(leftOff == clearOff,
+                            "with 局外: 不计 the flag costs nothing",
+                            "left=" + leftOff + " clear=" + clearOff);
+
+                    Synthetic.Spec looterSpec = new Synthetic.Spec();
+                    looterSpec.seed = 9267L;
+                    looterSpec.maxHealth = 80;
+                    looterSpec.deck = new String[]{"Strike_R", "Strike_R", "Defend_R",
+                            "Defend_R", "Bash"};
+                    looterSpec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.Looter"};
+                    Synthetic.build(looterSpec, new Synthetic.SyntheticStep());
+                    boolean liveLooter = Solver.looterStandingForTest();
+                    int liveScore = Solver.scoreOf(0, 0, true, false, 0, 20, 0, 0, 0);
+                    Log.info("  S276 live: looter=" + liveLooter + " liveScore=" + liveScore
+                            + " left=" + left);
+                    Probe.check(liveLooter, "the live fight still holds the thief", "");
+                    Probe.check(liveScore == left,
+                            "the live read penalises every node with monster HP left, kill or flee"
+                                    + " alike -- the old behaviour this fix replaced",
+                            "live=" + liveScore + " left=" + left);
+
+                    // Put the thief on 3 HP, then let the node itself answer: a Strike kills it in
+                    // the child, an end turn leaves it standing. The live fight must not move.
+                    com.megacrit.cardcrawl.monsters.AbstractMonster thief =
+                            AbstractDungeon.getMonsters().monsters.get(0);
+                    thief.currentHealth = 3;
+                    World root = World.captureLive();
+                    sts1solver.search.Action strike = null;
+                    java.util.List<sts1solver.search.Action> acts =
+                            sts1solver.search.Legal.actions();
+                    for (int i = 0; i < acts.size(); i++) {
+                        sts1solver.search.Action a = acts.get(i);
+                        if (a.isCard() && a.cardId != null && a.cardId.startsWith("Strike")) {
+                            strike = a;
+                            break;
+                        }
+                    }
+                    String kill = strike == null ? "no-strike"
+                            : Solver.choiceLooterForTest(root, strike);
+                    String flee = Solver.choiceLooterForTest(root,
+                            sts1solver.search.Action.endTurn());
+                    boolean liveAfter = Solver.looterStandingForTest();
+                    Log.info("  S276 node: strike=" + (strike == null ? "-" : strike.label)
+                            + " kill=" + kill + " flee=" + flee + " liveAfter=" + liveAfter);
+                    Probe.check(strike != null, "the fixture offers a Strike", "");
+                    Probe.check("clear".equals(kill),
+                            "the node that kills the thief carries no thief", "kill=" + kill);
+                    Probe.check("left".equals(flee),
+                            "the node that just ends the turn still carries the thief",
+                            "flee=" + flee);
+                    Probe.check(liveAfter,
+                            "the node reads never disturbed the live fight (its thief is still"
+                                    + " there)", "");
+                } finally {
+                    sts1solver.search.GrowthBook.overrideCountingForTest(null);
+                    try { World.forceRestore(); } catch (Throwable t) { }
+                    try { Driver.end(); } catch (Throwable t) { }
+                    Gameplay.clearPendingForTest();
+                    Gameplay.reset();
+                }
+
+                // B199: the rule is the thief family, not one room. The user's fight had an Act-2
+                // Mugger next to the Looter; it carries the same smoke bomb, EscapeAction and
+                // stolenGold, so it must count as a fleeing thief too.
+                try {
+                    Synthetic.Spec mugger = new Synthetic.Spec();
+                    mugger.seed = 9268L;
+                    mugger.maxHealth = 80;
+                    mugger.deck = new String[]{"Strike_R", "Strike_R", "Defend_R",
+                            "Defend_R", "Bash"};
+                    mugger.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.city.Mugger"};
+                    Synthetic.build(mugger, new Synthetic.SyntheticStep());
+                    boolean muggerBoard = Solver.looterStandingForTest();
+                    Log.info("  S276 mugger: standing=" + muggerBoard);
+                    Probe.check(muggerBoard,
+                            "an Act-2 Mugger counts as the fleeing thief", "");
+                } catch (Throwable t) {
+                    Probe.check(false, "the Mugger board was built", String.valueOf(t));
+                } finally {
+                    try { World.forceRestore(); } catch (Throwable t) { }
+                    try { Driver.end(); } catch (Throwable t) { }
+                    Gameplay.clearPendingForTest();
+                    Gameplay.reset();
+                }
+            }
+        });
+
         Probe.core("S100 m16202-4: the panel shows card and potion NAMES, not engine ids",
                 new Runnable(){
             @Override
