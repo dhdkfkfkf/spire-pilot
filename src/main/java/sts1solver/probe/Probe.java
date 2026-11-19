@@ -221,9 +221,24 @@ public final class Probe {
                 Probe.check(Gameplay.decideEndTurnRisk(endTurnRisk, 80, false) == Gameplay.EndTurnDecision.STOP, "autopilot stops on a lethal end turn", endTurnRisk.describe());
                 Probe.check(Gameplay.decideEndTurnRisk(endTurnRisk, 80, true) == Gameplay.EndTurnDecision.CONFIRM, "manual play needs a second press for a lethal end turn", endTurnRisk.describe());
                 Probe.check(Gameplay.decideEndTurnRisk(endTurnRisk2, 80, false) == Gameplay.EndTurnDecision.STOP, "autopilot stops at the near-death margin", endTurnRisk2.describe());
-                Probe.check(Gameplay.decideEndTurnRisk(endTurnRisk2, 80, true) == Gameplay.EndTurnDecision.WARN, "manual play warns at the near-death margin", endTurnRisk2.describe());
+                Probe.check(Gameplay.decideEndTurnRisk(endTurnRisk2, 80, true) == Gameplay.EndTurnDecision.CONFIRM, "manual play needs a second press at the near-death margin too", endTurnRisk2.describe());
                 Probe.check(Gameplay.decideEndTurnRisk(endTurnRisk3, 80, false) == Gameplay.EndTurnDecision.ALLOW, "safe end turn is allowed", endTurnRisk3.describe());
                 Probe.check(Gameplay.decideEndTurnRisk(endTurnRisk4, 80, false) == Gameplay.EndTurnDecision.STOP, "an unmeasured risk stops autopilot", endTurnRisk4.describe());
+                // The warning row is read BEFORE the press; a safe end turn keeps the panel quiet
+                // instead of printing bookkeeping.
+                String lethalText = endTurnRisk.displayText(80);
+                String marginText = endTurnRisk2.displayText(80);
+                Probe.check(lethalText.contains("结束回合风险过高") && lethalText.contains("归零"),
+                        "a lethal end turn warns in plain words", lethalText);
+                Probe.check(marginText.contains("结束回合风险过高") && marginText.contains("只剩 3 HP"),
+                        "the near-death margin warns with the HP it leaves", marginText);
+                Probe.check(endTurnRisk3.displayText(80).isEmpty(),
+                        "a safe end turn prints no risk row", endTurnRisk3.displayText(80));
+                Probe.check(endTurnRisk4.displayText(80).contains("没算出来"),
+                        "an unmeasured risk says so instead of reading as safe", endTurnRisk4.displayText(80));
+                Probe.check(endTurnRisk.stopText().contains("风险过高")
+                                && endTurnRisk.stopText().indexOf("已停止") < 0,
+                        "the autopilot stop note fits after '已停：'", endTurnRisk.stopText());
             }
         });
         Probe.step("P0-2b a forced lethal end turn is measured", new Runnable(){
@@ -2564,6 +2579,344 @@ public final class Probe {
                         "the line shortens the node count", line);
                 Probe.check(line.indexOf("深度 7") >= 0, "the line carries the depth", line);
                 Probe.check(line.indexOf("900/s") >= 0, "the line carries the node rate", line);
+            }
+        });
+
+        Probe.core("S268 B195: a protective stop says why on the panel, while its plan stays",
+                new Runnable(){
+            @Override
+            public void run() {
+                // B195 (user 2026-11-19): every protective stop KEEPS the plan, and the title row
+                // prints `status` only when there is NO plan -- so a stopped autopilot looked like a
+                // frozen panel with no reason on it. The reason now has its own row, and the next
+                // 计算 clears it (the note belongs to the run it stopped, not to the new line).
+                Synthetic.Spec spec = new Synthetic.Spec();
+                spec.seed = 17L;
+                spec.maxHealth = 80;
+                spec.deck = new String[]{"Strike_R", "Strike_R", "Defend_R", "Defend_R", "Bash"};
+                spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                Synthetic.build(spec, new Synthetic.SyntheticStep());
+                PlanCache.clear();
+                Gameplay.reset();
+                Gameplay.solveLive();
+                Solver.Result line = Gameplay.currentPlan();
+                boolean haveLine = line != null && line.plan != null && !line.plan.isEmpty();
+                Gameplay.installPlanForTest(line, 0);
+
+                String reason = "S268 测试停因";
+                Gameplay.stopForTest(reason);
+                String note = Gameplay.stopNoteForTest();
+                boolean stopped = !Gameplay.autopilot();
+                java.util.List<String> rows = Gameplay.lines();
+                boolean rowShown = false;
+                for (int i = 0; i < rows.size(); i++) {
+                    if (("已停：" + reason).equals(rows.get(i))) {
+                        rowShown = true;
+                    }
+                }
+                Log.info("  S268 stop: haveLine=" + haveLine + " note=" + note + " stopped="
+                        + stopped + " row=" + rowShown + " rows=" + rows.size());
+
+                // 计算 is the player's answer to "why did it stop": the note must go.
+                Gameplay.startQuickSolve();
+                Gameplay.stopQuickSolve();
+                String cleared = Gameplay.stopNoteForTest();
+                java.util.List<String> after = Gameplay.lines();
+                boolean rowGone = true;
+                for (int i = 0; i < after.size(); i++) {
+                    if (after.get(i).indexOf("已停：") == 0) {
+                        rowGone = false;
+                    }
+                }
+                Log.info("  S268 clear: note='" + cleared + "' rowGone=" + rowGone
+                        + " searching=" + Gameplay.quickSearching());
+
+                Probe.check(haveLine && reason.equals(note) && stopped,
+                        "the stop path keeps the plan and records why", "note=" + note);
+                Probe.check(rowShown, "the panel shows the stop reason while the plan is on screen",
+                        rows.toString());
+                Probe.check(cleared.isEmpty() && rowGone,
+                        "starting a new search clears the note instead of borrowing it",
+                        "cleared='" + cleared + "' rowGone=" + rowGone);
+                Gameplay.reset();
+            }
+        });
+
+        Probe.core("S269 B195: a budget stop still names its best line instead of 'not found'",
+                new Runnable(){
+            @Override
+            public void run() {
+                // B195 (user 2026-11-19): the search always hands back the best line it has, and
+                // the panel prints it right under the headline. "未找到胜线" next to a step budget
+                // read as "there is no result"; only a search with no line (or a proven death) may
+                // say that. The raw boolean overload stays untouched (S47 pins it).
+                String time = sts1solver.search.PlanText.limitLine("time", 7, 1, 14, 5, true);
+                String nodes = sts1solver.search.PlanText.limitLine("nodes", 7, 0, 0, 5, false);
+                String stopped = sts1solver.search.PlanText.limitLine("stopped", 3, 0, 0, 4, false);
+                String layers = sts1solver.search.PlanText.limitLine("layers", 0, 0, 0, 4, false);
+                String drained = sts1solver.search.PlanText.limitLine(
+                        "no-live-branches", 7, 0, 0, 5, false);
+                String horizon = sts1solver.search.PlanText.limitLine("horizon", 7, 0, 0, 5, false);
+                Log.info("  S269 time: " + time);
+                Log.info("  S269 stopped: " + stopped + " | layers: " + layers);
+
+                Probe.check(time.indexOf("当前最好的线") == 0 && time.indexOf("预算用完") >= 0
+                                && time.indexOf("没算到胜利；可以再算") >= 0
+                                && time.indexOf("未找到胜线") < 0,
+                        "a budget stop offers the best line it has, not 'not found'", time);
+                Probe.check(time.indexOf("给最长生存线 5 步") >= 0,
+                        "and a deepest-route notice still rides along", time);
+                Probe.check(nodes.indexOf("预算用完") >= 0
+                                && nodes.indexOf("给最长生存线") < 0,
+                        "a node-cap stop names the same budget without the deepest tail", nodes);
+                Probe.check(stopped.indexOf("手动停止") >= 0,
+                        "a manual stop says the player stopped it", stopped);
+                Probe.check(layers.indexOf("到层数上限") >= 0,
+                        "a layer-cap stop names the cap", layers);
+                Probe.check(drained.isEmpty() && horizon.isEmpty(),
+                        "a drained frontier and a horizon stop keep their own wording",
+                        "drained='" + drained + "' horizon='" + horizon + "'");
+
+                // And the wiring: the panel's own headline calls it when a plan is held.
+                Solver.Result limited = Solver.resultWithPlanForTest(false, "time", 3, false);
+                String headline = sts1solver.search.PlanText.headline(limited);
+                Log.info("  S269 headline: " + headline);
+                Probe.check(headline.indexOf("当前最好的线") >= 0
+                                && headline.indexOf("未找到胜线") < 0,
+                        "the panel's headline uses it once a line exists", headline);
+                Solver.Result noLine = Solver.resultWithPlanForTest(false, "time", 0, false);
+                String fallback = sts1solver.search.PlanText.headline(noLine);
+                Log.info("  S269 noLine: " + fallback);
+                Probe.check(fallback.indexOf("当前最好的线") < 0,
+                        "an empty search still falls through to the old wording", fallback);
+            }
+        });
+
+        Probe.core("S270 B195: with 局外: 计 a kill outranks letting the Looter run",
+                new Runnable(){
+            @Override
+            public void run() {
+                // B195 (user 2026-11-19, item 4): gold is already priced (80 per gold), but at the
+                // Looter's 15-33 gold a flee is always cheaper than the hits a kill takes. The rule
+                // the player asked for is scoped to the thief: with 局外: 计 on, a line that kills the
+                // Looter outranks a line that lets it leave -- a preference, not a promise.
+                sts1solver.search.GrowthBook.overrideCountingForTest(Boolean.TRUE);
+                try {
+                    int fleeVsKill = Solver.preferKill(true, true, true, true, false);
+                    int killVsFlee = Solver.preferKill(true, true, false, true, true);
+                    int off = Solver.preferKill(false, true, true, true, false);
+                    int notWin = Solver.preferKill(true, true, true, false, false);
+                    int same = Solver.preferKill(true, true, false, true, false);
+
+                    Solver.Result leaving = Solver.resultLeavingForTest(true, true, 0, true,
+                            new int[]{0, 12});
+                    Solver.Result killed = Solver.resultLeavingForTest(true, true, 0, false,
+                            new int[]{0, 0});
+                    Solver.Result unverified = Solver.resultLeavingForTest(true, false, 0, true,
+                            new int[]{0, 12});
+                    Solver.Result lost = Solver.resultLeavingForTest(false, true, 0, true,
+                            new int[]{0, 12});
+                    // A monster left standing, but no Looter was there: the rule must stand aside.
+                    Solver.Result otherLeft = Solver.resultLeavingForTest(true, true, 0, false,
+                            new int[]{0, 12});
+                    boolean fled = Solver.letFleeForTest(leaving);
+                    boolean clean = Solver.letFleeForTest(killed);
+                    boolean unverifiedFled = Solver.letFleeForTest(unverified);
+                    boolean lostFled = Solver.letFleeForTest(lost);
+                    boolean otherFled = Solver.letFleeForTest(otherLeft);
+                    Log.info("  S270 prefer: fleeVsKill=" + fleeVsKill + " killVsFlee=" + killVsFlee
+                            + " off=" + off + " notWin=" + notWin + " same=" + same);
+                    Log.info("  S270 letFlee: fled=" + fled + " clean=" + clean
+                            + " unverified=" + unverifiedFled + " lost=" + lostFled
+                            + " otherLeft=" + otherFled);
+
+                    Probe.check(fleeVsKill == 1 && killVsFlee == -1,
+                            "counting on: the kill line wins and the flee line loses", "");
+                    Probe.check(off == 0 && notWin == 0 && same == 0,
+                            "counting off, no shared win, or the same shape: the rule stands aside",
+                            "");
+                    Probe.check(fled && !clean && !unverifiedFled && !lostFled && !otherFled,
+                            "only a replayed winning line with a Looter left standing counts as a flee",
+                            "");
+
+                    // The merge reads the rule BEFORE the HP ruler: the kill line that lost 20 HP
+                    // still beats the free flee line while 局外: 计 is on.
+                    Solver.Result dearKill = Solver.resultLeavingForTest(true, true, 20, false,
+                            new int[]{0, 0});
+                    Solver.Result freeFlee = Solver.resultLeavingForTest(true, true, 0, true,
+                            new int[]{0, 12});
+                    boolean killWins = Solver.betterForTest(dearKill, freeFlee);
+                    boolean fleeWinsWhenOff;
+                    sts1solver.search.GrowthBook.overrideCountingForTest(Boolean.FALSE);
+                    try {
+                        fleeWinsWhenOff = Solver.betterForTest(freeFlee, dearKill);
+                    } finally {
+                        sts1solver.search.GrowthBook.overrideCountingForTest(Boolean.TRUE);
+                    }
+                    Log.info("  S270 merge: killWins=" + killWins
+                            + " fleeWinsWhenOff=" + fleeWinsWhenOff);
+                    Probe.check(killWins,
+                            "a kill is preferred even when the flee line is cheaper on HP", "");
+                    Probe.check(fleeWinsWhenOff,
+                            "counting off hands the same pair back to the HP ruler", "");
+
+                    // And the live board: the class check sees a Looter, and only a Looter. The
+                    // fabricated monster-HP argument is identical on both boards, so the score
+                    // difference is exactly the Looter preference.
+                    boolean looterBoard = false;
+                    boolean wormBoard = false;
+                    int looterScore = 0;
+                    int wormScore = 0;
+                    try {
+                        Synthetic.Spec looter = new Synthetic.Spec();
+                        looter.seed = 5L;
+                        looter.maxHealth = 80;
+                        looter.deck = new String[]{"Strike_R", "Strike_R", "Defend_R",
+                                "Defend_R", "Bash"};
+                        looter.monsters = new String[]{
+                                "com.megacrit.cardcrawl.monsters.exordium.Looter"};
+                        Synthetic.build(looter, new Synthetic.SyntheticStep());
+                        World board = World.captureLive();
+                        board.install();
+                        looterBoard = Solver.looterStandingForTest();
+                        looterScore = Solver.scoreOf(0, 0, true, false, 0, 20, 0, 0, 0);
+                    } finally {
+                        try { World.forceRestore(); } catch (Throwable t) { }
+                        try { Driver.end(); } catch (Throwable t) { }
+                    }
+                    try {
+                        Synthetic.Spec worm = new Synthetic.Spec();
+                        worm.seed = 5L;
+                        worm.maxHealth = 80;
+                        worm.deck = new String[]{"Strike_R", "Strike_R", "Defend_R",
+                                "Defend_R", "Bash"};
+                        worm.monsters = new String[]{
+                                "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                        Synthetic.build(worm, new Synthetic.SyntheticStep());
+                        World board2 = World.captureLive();
+                        board2.install();
+                        wormBoard = Solver.looterStandingForTest();
+                        wormScore = Solver.scoreOf(0, 0, true, false, 0, 20, 0, 0, 0);
+                    } finally {
+                        try { World.forceRestore(); } catch (Throwable t) { }
+                        try { Driver.end(); } catch (Throwable t) { }
+                        Gameplay.clearPendingForTest();
+                        Gameplay.reset();
+                    }
+                    Log.info("  S270 boards: looter=" + looterBoard + " worm=" + wormBoard
+                            + " looterScore=" + looterScore + " wormScore=" + wormScore
+                            + " diff=" + (wormScore - looterScore));
+                    Probe.check(looterBoard && !wormBoard,
+                            "the live check finds the Looter and not an ordinary monster", "");
+                    Probe.check(wormScore - looterScore == Solver.KILL_FIRST_POINTS,
+                            "the score prefers the kill by exactly KILL_FIRST_POINTS", "");
+                } finally {
+                    sts1solver.search.GrowthBook.overrideCountingForTest(null);
+                }
+            }
+        });
+
+        Probe.core("S271 B196: the end-turn risk is on screen BEFORE the press, in plain words",
+                new Runnable(){
+            @Override
+            public void run() {
+                // B196 (user 2026-11-19): the warning used to be computed only when the player
+                // pressed, and then only in `status`, which the panel does not print while a plan is
+                // on screen. The prediction now happens when the cursor reaches the end-turn step,
+                // and the row says what the end turn costs and what to do instead.
+                Synthetic.Spec spec = new Synthetic.Spec();
+                spec.seed = 17L;
+                spec.maxHealth = 80;
+                spec.deck = new String[]{"Strike_R", "Strike_R", "Defend_R", "Defend_R", "Bash"};
+                spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                Synthetic.build(spec, new Synthetic.SyntheticStep());
+                PlanCache.clear();
+                Gameplay.reset();
+                Gameplay.solveLive();
+                Solver.Result line = Gameplay.currentPlan();
+                boolean haveLine = line != null && line.plan != null && !line.plan.isEmpty();
+                Gameplay.installPlanForTest(line, 0);
+
+                Gameplay.riskForTest(new Gameplay.EndTurnRisk(40, 37, 12, true, null));
+                boolean quietWhenSafe = !hasRow(Gameplay.lines(), "\u7ed3\u675f\u56de\u5408\u98ce\u9669\u8fc7\u9ad8");
+
+                Gameplay.EndTurnRisk lethal = new Gameplay.EndTurnRisk(10, 0, 18, true, null);
+                Gameplay.riskForTest(lethal);
+                java.util.List<String> rows = Gameplay.lines();
+                String riskRow = rowWith(rows, "\u7ed3\u675f\u56de\u5408\u98ce\u9669\u8fc7\u9ad8");
+                boolean noConfirmHintYet = riskRow == null
+                        || riskRow.indexOf("\u518d\u70b9\u4e00\u6b21") < 0;
+                Gameplay.confirmRiskForTest();
+                boolean confirmHint = rowWith(Gameplay.lines(), "\u518d\u70b9\u4e00\u6b21\u8fd9\u4e00\u6b65") != null;
+
+                // The autopilot stop note is the same sentence, and it has to read right after
+                // the "已停：" prefix the panel adds.
+                Gameplay.stopForTest(lethal.stopText());
+                String stopNote = Gameplay.stopNoteForTest();
+                boolean stopRow = hasRow(Gameplay.lines(), "\u5df2\u505c\uff1a" + stopNote);
+                Log.info("  S271 rows: haveLine=" + haveLine + " quiet=" + quietWhenSafe
+                        + " riskRow='" + riskRow + "' hint=" + confirmHint
+                        + " stop='" + stopNote + "' stopRow=" + stopRow);
+
+                Probe.check(haveLine, "a real plan is on screen for the row to sit under", "");
+                Probe.check(quietWhenSafe, "a safe end turn adds no risk row", "");
+                Probe.check(riskRow != null && riskRow.contains("\u5f52\u96f6") && noConfirmHintYet,
+                        "a lethal end turn warns before the press", String.valueOf(riskRow));
+                Probe.check(confirmHint,
+                        "after the blocked press the row says the next press really ends the turn", "");
+                Probe.check(stopNote.indexOf("\u5df2\u505c\u6b62") < 0 && stopRow,
+                        "the autopilot stop reason sits after its own prefix", stopNote);
+                Gameplay.reset();
+            }
+        });
+
+        Probe.core("S272 B196: a blocked lethal end turn cannot retry itself on the next frame",
+                new Runnable(){
+            @Override
+            public void run() {
+                // B196: a click on a route step runs until `stepTarget`. Without clearing it, the
+                // tick loop would call executeStepInternal again on the very next frame, see the
+                // confirmation already armed, and end the turn anyway -- the warning would be one
+                // frame long. The first press must leave nothing running.
+                Synthetic.Spec spec = new Synthetic.Spec();
+                spec.seed = 17L;
+                spec.maxHealth = 80;
+                spec.deck = new String[]{"Strike_R", "Strike_R", "Defend_R", "Defend_R", "Bash"};
+                spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                Synthetic.build(spec, new Synthetic.SyntheticStep());
+                PlanCache.clear();
+                Gameplay.reset();
+                Gameplay.solveLive();
+                Solver.Result line = Gameplay.currentPlan();
+                int end = -1;
+                if (line != null && line.plan != null) {
+                    for (int i = 0; i < line.plan.size(); ++i) {
+                        Solver.Step step = line.plan.get(i);
+                        if (step != null && step.action != null && step.action.isEndTurn()) {
+                            end = i;
+                            break;
+                        }
+                    }
+                }
+                Gameplay.installPlanForTest(line, end < 0 ? 0 : end);
+                Gameplay.markAutopilotOffForTest();
+                int cursor = Gameplay.currentStep();
+                Gameplay.riskAtCursorForTest(new Gameplay.EndTurnRisk(10, 0, 18, true, null));
+                boolean ran = Gameplay.executeStep();
+                boolean armed = Gameplay.riskConfirmArmedForTest();
+                boolean targetCleared = Gameplay.stepTarget() == -1;
+                boolean stayedPut = Gameplay.currentStep() == cursor && !Gameplay.pendingForTest();
+                boolean clickAgain = end >= 0 && Gameplay.requestStep(end)
+                        && Gameplay.stepTarget() == end + 1;
+                Log.info("  S272: end=" + end + " cursor=" + cursor + " ran=" + ran
+                        + " armed=" + armed + " target=" + Gameplay.stepTarget()
+                        + " stayed=" + stayedPut + " again=" + clickAgain);
+                Probe.check(end >= 0, "the fixture plan has an end-turn step", "end=" + end);
+                Probe.check(!ran && armed, "the first press warns and does not end the turn", "");
+                Probe.check(targetCleared, "the first press cancels the step-by-step run", "");
+                Probe.check(stayedPut, "the cursor did not move and nothing was submitted", "");
+                Probe.check(clickAgain, "clicking the step again is accepted", "");
+                Gameplay.reset();
             }
         });
 
@@ -18793,6 +19146,24 @@ private static void s78Write(File file, String text, long modified) {
             ++failed;
         }
         Log.check(bl, string, string2);
+    }
+
+    private static boolean hasRow(java.util.List<String> rows, String start) {
+        for (int i = 0; i < rows.size(); ++i) {
+            if (rows.get(i) != null && rows.get(i).startsWith(start)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String rowWith(java.util.List<String> rows, String part) {
+        for (int i = 0; i < rows.size(); ++i) {
+            if (rows.get(i) != null && rows.get(i).contains(part)) {
+                return rows.get(i);
+            }
+        }
+        return null;
     }
 
     static {

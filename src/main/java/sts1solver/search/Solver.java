@@ -689,6 +689,18 @@ public final class Solver {
      * gold, so a line that gains 50 gold is worth +4000 and a line that pays 30 gold loses 2400.
      */
     public static final int GOLD_POINTS = 80;
+
+    /**
+     * B195 (user 2026-11-19, the 局外: 计 rule): when the board holds a Looter (the fleeing thief)
+     * and the switch is on, a winning line that lets it run is pushed below any line that kills it.
+     * The rule is scoped to the Looter -- a monster leaving the room is not, by itself, a reason to
+     * prefer a kill. Without this the Looter decision was pure arithmetic -- 15-33 gold is 0.6-1.3
+     * HP at {@link #GOLD_POINTS}, never enough to pay for the hits a kill takes -- so "wait for it to
+     * leave" won and the player read that as "gold is not counted". 1,000,000 = 500 HP, the same tier
+     * as a death save and far below the 10,000,000 victory bonus: it is a preference, not a promise
+     * (fleeing still beats dying).
+     */
+    public static final int KILL_FIRST_POINTS = 1000000;
     public static final int MAX_SEARCH_LAYERS = 400;
 
     /**
@@ -771,6 +783,15 @@ public final class Solver {
         if (result == null) {
             return false;
         }
+        // B195: with 局外: 计 and a Looter on the board, a line that kills it outranks a line that
+        // lets it leave, before the HP ruler below is read. The in-rung score already prices this;
+        // this keeps a narrower rung (or a potion tier) from handing the final answer back to the
+        // flee line on net HP.
+        int kill = Solver.preferKill(GrowthBook.counting(), result.win, Solver.letFlee(result),
+                result2.win, Solver.letFlee(result2));
+        if (kill != 0) {
+            return kill < 0;
+        }
         // B173 (user m21300): both sides of the merge now speak the same number the panel prints
         // (net HP), through the same {@link #compareRoutes}; passing net as the deficit and zeroing
         // postHeal/potionHp keeps that method's order untouched instead of duplicating it here.
@@ -779,6 +800,45 @@ public final class Solver {
                 result2.win, result2.escaped, result2.deathSaves,
                 Solver.netOf(result2), 0, 0, result2.predictedTurns,
                 result2.layersRun) < 0;
+    }
+
+    /**
+     * B195: did this winning line end with the Looter still standing -- i.e. it ran instead of dying?
+     *
+     * <p>Two pieces of evidence, both from the replay: the last step saw a Looter on the board
+     * ({@link Step#looterStanding}, read live while that step ran), and the last step still sees its
+     * HP (the sandbox reads the board before the room clears, the same evidence B192's leaving note
+     * uses). A line that did not replay is not evidence of anything, and a monster that left is not
+     * enough on its own -- the rule is the Looter's.
+     */
+    static boolean letFlee(Result result) {
+        if (result == null || !result.win || !result.planVerified
+                || result.plan == null || result.plan.isEmpty()) {
+            return false;
+        }
+        Step last = result.plan.get(result.plan.size() - 1);
+        if (last == null || !last.looterStanding || last.monsterHp == null) {
+            return false;
+        }
+        for (int i = 0; i < last.monsterHp.length; ++i) {
+            if (last.monsterHp[i] > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * B195: the 局外: 计 rule as a pure comparison. -1 = a is better, 1 = b is better, 0 = the rule
+     * has nothing to say (counting off, not both wins, or both sides are the same shape) and the
+     * caller falls through to the HP ruler.
+     */
+    public static int preferKill(boolean counting, boolean winA, boolean leftA,
+                                 boolean winB, boolean leftB) {
+        if (!counting || !winA || !winB || leftA == leftB) {
+            return 0;
+        }
+        return leftA ? 1 : -1;
     }
 
     /**
@@ -2141,11 +2201,13 @@ public final class Solver {
                     action.turnAfter = Solver.turnAfterOf(turnBefore);
                     world2.trimPresentation();
                     world2.readBack();
-                    arrayList.add(new Step(action, Digest.ofCurrent(),
+                    Step step = new Step(action, Digest.ofCurrent(),
                             sts1solver.mirror.RngStamp.of(),
                             sts1solver.mirror.PlayTrace.describe(traceMark),
                             turnBefore, Solver.hp(), Solver.block(), EnergyPanel.totalCount,
-                            Solver.monsterHps(), Solver.monsterMaxHps(), Solver.monsterNames()));
+                            Solver.monsterHps(), Solver.monsterMaxHps(), Solver.monsterNames());
+                    step.looterStanding = Solver.looterStanding();
+                    arrayList.add(step);
                 }
             }
             finally {
@@ -2243,11 +2305,13 @@ public final class Solver {
                     action.turnAfter = Solver.turnAfterOf(turnBefore);
                     world2.trimPresentation();
                     world2.readBack();
-                    arrayList.add(new Step(action, Digest.ofCurrent(),
+                    Step step = new Step(action, Digest.ofCurrent(),
                             sts1solver.mirror.RngStamp.of(),
                             sts1solver.mirror.PlayTrace.describe(traceMark),
                             turnBefore, Solver.hp(), Solver.block(), EnergyPanel.totalCount,
-                            Solver.monsterHps(), Solver.monsterMaxHps(), Solver.monsterNames()));
+                            Solver.monsterHps(), Solver.monsterMaxHps(), Solver.monsterNames());
+                    step.looterStanding = Solver.looterStanding();
+                    arrayList.add(step);
                 }
                 // P3-A: this is the only place the end board exists -- read it before uninstall().
                 endDigest = Digest.ofCurrent();
@@ -2735,8 +2799,14 @@ public final class Solver {
         // that did not, even at lower HP -- "fewer death saves" outranks "less HP lost" in the
         // reference's route-quality tuple. 1,000,000 points = 500 HP, so it is effectively a
         // lexicographic tier that still stays far below the 10,000,000 victory bonus.
+        //
+        // B195: n4 > 0 on a WIN means the fight ended with a monster still on the board. Only the
+        // Looter (the fleeing thief) can do that in vanilla, and user 2026-11-19 scoped the rule to
+        // exactly it: with 局外: 计, killing the Looter outranks letting it run.
+        int leftAlive = bl && n4 > 0 && Solver.looterStanding() && goldRate() > 0
+                ? KILL_FIRST_POINTS : 0;
         return n7 - deficit * sts1solver.search.StrategicDeficit.POINTS_PER_HP - board
-                - DeathSaves.points(deathSaves) + goldDelta * goldRate();
+                - DeathSaves.points(deathSaves) + goldDelta * goldRate() - leftAlive;
     }
 
     /**
@@ -2862,6 +2932,49 @@ public final class Solver {
         return Solver.better(result, result2);
     }
 
+    /** B195: gate hook -- {@link #letFlee} is package-private. */
+    public static boolean letFleeForTest(Result result) {
+        return Solver.letFlee(result);
+    }
+
+    /** B195: gate hook -- {@link #looterStanding} reads the installed world. */
+    public static boolean looterStandingForTest() {
+        return Solver.looterStanding();
+    }
+
+    /**
+     * B195: gate hook -- a winning result whose last step saw these monster HP, so a gate can pin
+     * the "killed vs let it run" reading without a search.
+     */
+    public static Result resultLeavingForTest(boolean win, boolean verified, int hpLoss,
+                                              boolean looterStanding, int[] lastMonsterHp) {
+        ArrayList<Step> steps = new ArrayList<Step>();
+        if (lastMonsterHp != null) {
+            Step step = new Step(null, "test", 3, 60, 0, 3, lastMonsterHp,
+                    new int[lastMonsterHp.length], new String[lastMonsterHp.length]);
+            step.looterStanding = looterStanding;
+            steps.add(step);
+        }
+        Result r = new Result(steps, win, Math.max(0, hpLoss), 0, 0, 0, 0L, "test", 0, 0,
+                new ArrayList<String>(), false, 0, 0, 0, 0, 0, false);
+        r.planVerified = verified;
+        return r;
+    }
+
+    /** B195: gate hook -- a hand-built result with a plan, so the headline wording is pinned. */
+    public static Result resultWithPlanForTest(boolean win, String reason, int steps,
+                                               boolean deepest) {
+        ArrayList<Step> plan = new ArrayList<Step>();
+        for (int i = 0; i < Math.max(0, steps); ++i) {
+            plan.add(new Step(null, "test", 1 + i, 60, 0, 3, new int[0], new int[0],
+                    new String[0]));
+        }
+        Result r = new Result(plan, win, 5, 0, 0, 0, 0L, reason, 0, 0,
+                new ArrayList<String>(), false, 0, 0, 0, 0, 0, deepest);
+        r.planVerified = true;
+        return r;
+    }
+
     private static int monsterCount() {
         try {
             return AbstractDungeon.getMonsters() == null ? 0 : AbstractDungeon.getMonsters().monsters.size();
@@ -2906,6 +3019,33 @@ public final class Solver {
     private static int block() {
         AbstractPlayer abstractPlayer = AbstractDungeon.player;
         return abstractPlayer == null ? 0 : abstractPlayer.currentBlock;
+    }
+
+    /**
+     * B195: is a Looter (the fleeing thief) still on the board?
+     *
+     * <p>Read the same way {@link #monsterHp()} is: with this node's world installed, an escaped
+     * Looter stays in the monster list with positive HP while the room is already over. The check is
+     * the class, not a label -- the panel's names are localized ("小偷") and a label is never parsed
+     * back into a decision. Mugger extends AbstractMonster and never flees, so it does not count.
+     */
+    private static boolean looterStanding() {
+        try {
+            ArrayList arrayList = AbstractDungeon.getMonsters().monsters;
+            for (int i = 0; i < arrayList.size(); ++i) {
+                Object m = arrayList.get(i);
+                if (m instanceof com.megacrit.cardcrawl.monsters.exordium.Looter) {
+                    AbstractMonster am = (AbstractMonster)m;
+                    if (!am.isDying && am.currentHealth > 0) {
+                        return true;
+                    }
+                }
+            }
+        }
+        catch (Throwable ignored) {
+            // no monster group (menu, hand-built result) means no Looter either
+        }
+        return false;
     }
 
     private static int[] monsterHps() {
@@ -4162,6 +4302,12 @@ public final class Solver {
         public final int[] monsterHp;
         public final int[] monsterMaxHp;
         public final String[] monsterNames;
+        /**
+         * B195: a Looter was still on the board when this step ended -- it is the only vanilla
+         * monster that can end a fight by leaving. Set by the replay walk (the one place a Step is
+         * built from live reads); false for hand-built test steps and for steps outside a fight.
+         */
+        public boolean looterStanding;
         /**
          * B126 (user m04653): the turn this step STARTED in and the turn it LEFT the fight in, as the
          * sandbox measured them around the action. They differ by more than one when the fight skips

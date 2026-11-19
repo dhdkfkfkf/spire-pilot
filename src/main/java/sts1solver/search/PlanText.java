@@ -82,10 +82,54 @@ public final class PlanText {
             return "最近几回合的尽力线" + PlanText.costText(r.hpLoss, r.potionsUsed, r.potionHpSpent)
                     + "（预算不够，只推了最近几回合；调大「秒数」可继续）";
         }
+        // B195 (user 2026-11-19): a search that stopped on its budget still HAS an answer -- the
+        // best line it found -- and the panel prints that line right under this row. "未找到胜线"
+        // next to "只往前看 1 回合" read as "there is no result", which is the one thing that was
+        // not true. Only a search with no line at all (or a proven death) may say "not found".
+        if (r.plan != null && !r.plan.isEmpty()) {
+            String limited = PlanText.limitLine(r.reason, r.hpLoss, r.potionsUsed, r.potionHpSpent,
+                    r.plan.size(), r.deepestRoute);
+            if (!limited.isEmpty()) {
+                return limited;
+            }
+        }
         // P2-11b: the whole job searched more than this one pass did, and the panel shows that
         // total. Quoting only the last pass would read as a contradiction (panel: 20602, text: 256).
         return headline(r.win, r.escaped, r.reason, r.splitStates, r.plan.size(),
                 r.deepestRoute, r.layersRun, r.maxLayers, r.expansions, r.totalExpansions);
+    }
+
+    /**
+     * B195: the headline for a limit stop that still holds a best line ("预算用完" / "手动停止" /
+     * "到层数上限"). Empty for every other reason, so the caller can fall through to the death and
+     * no-limit wording. Pure, so a gate can pin each case without building a search result.
+     */
+    public static String limitLine(String reason, int hpLoss, int potionsUsed, int potionHpSpent,
+                                   int steps, boolean deepest) {
+        String why = limitStop(reason);
+        if (why.isEmpty()) {
+            return "";
+        }
+        StringBuilder b = new StringBuilder("当前最好的线");
+        b.append(PlanText.costText(hpLoss, potionsUsed, potionHpSpent));
+        b.append("（").append(why).append("，没算到胜利；可以再算）");
+        if (deepest && steps > 0) {
+            b.append(" · 给最长生存线 ").append(steps).append(" 步");
+        }
+        return b.toString();
+    }
+
+    private static String limitStop(String reason) {
+        if ("time".equals(reason) || "nodes".equals(reason)) {
+            return "预算用完";
+        }
+        if ("stopped".equals(reason)) {
+            return "手动停止";
+        }
+        if ("layers".equals(reason)) {
+            return "到层数上限";
+        }
+        return "";
     }
 
     /**

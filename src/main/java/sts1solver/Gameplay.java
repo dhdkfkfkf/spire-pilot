@@ -41,6 +41,13 @@ public final class Gameplay {
     private static Solver.Result plan;
     private static int step;
     private static String status;
+    /**
+     * B195 (user 2026-11-19): why the last autopilot run stopped, kept apart from {@link #status}
+     * because the frame loop overwrites that one constantly. Every protective stop KEEPS the plan,
+     * and the title row only prints status when {@code plan == null}, so before this a stopped run
+     * looked like a frozen panel with no reason on it. Shown as its own row in {@link #lines()}.
+     */
+    private static String stopNote = "";
     private static int drift;
     private static int renderRepairs;
     private static String renderRepairDetail;
@@ -172,6 +179,16 @@ public final class Gameplay {
     private static long planBuiltAt = -1L;
     private static EndTurnRisk lastRisk;
     private static boolean lethalConfirmed;
+    /**
+     * The board {@link #lastRisk} was measured on. The prediction is taken when the cursor reaches an
+     * end-turn step, BEFORE the press, so the warning is on screen while the player still has cards
+     * to play. It is only valid for that plan, that step, that turn and that HP; anything else means
+     * the board moved and the number would describe a different fight.
+     */
+    private static Solver.Result riskPlan;
+    private static int riskStep = -1;
+    private static int riskTurn = -1;
+    private static int riskHp = -1;
 
     // ---- B51 (m15336-2): 自动出牌 = 先「计算」再执行，只有一条求解路径 --------------------------
     // Pressing 自动出牌 used to run a SECOND, blocking solve (solveLive) with its own budget ladder
@@ -530,6 +547,9 @@ public final class Gameplay {
         // B81 (m22687): one search, one summary line about the skipped cursor -- not one per node.
         sts1solver.mirror.InputMute.resetSkipLog();
         autoplayArmed = armAutoplay;
+        // B195: a new search is the player's answer to "why did it stop"; the note has served its
+        // purpose and must not sit under the new line as if it were about this one.
+        stopNote = "";
         if (deep != null) {
             autoplayArmed = false;
             status = "深度搜索进行中：点「计算」停止";
@@ -1426,10 +1446,13 @@ public final class Gameplay {
                 // the survival line as if it were the answer -- stop, say why, and let the player deepen.
                 autopilot = false;
                 status = replanReason + "：预算用尽仍未算到胜利（不代表打不过）；点「计算」再给一轮预算";
+                // B195: these two stops keep the plan, so `status` alone never reached the panel.
+                stopNote = status;
                 Log.warn("replan search hit its limit without a win: the line shown is a survival line, autopilot stopped");
             } else {
                 autopilot = false;
                 status = replanReason + "：" + sts1solver.search.PlanText.headline(r) + "；走完就停";
+                stopNote = status;
             }
         }
         // B51: the line is adopted -- if 自动出牌 asked for it, start playing now (a survival line
@@ -1653,6 +1676,11 @@ public final class Gameplay {
             // later) still has to be answered -- but only from the plan, never by guessing.
             Gameplay.answerLatentSelection();
             Gameplay.startQueuedSolve();
+            // Measure the end turn while it is still the next step: the panel warns BEFORE the
+            // press, on a settled board, once per end-turn step (the result is cached).
+            if (quick == null && pending == null && plan != null && Gameplay.engineSettled()) {
+                Gameplay.predictCursorRisk();
+            }
             if (stepTarget > step && pending == null && !autopilot && plan != null) {
                 Gameplay.executeStepInternal();
             } else if (stepTarget >= 0 && step >= stepTarget) {
@@ -1670,6 +1698,7 @@ public final class Gameplay {
                     plan = null;
                     step = 0;
                     status = "idle";
+                    stopNote = "";
                     hintShown = false;
                     // B147: the divergence replan allowance is per COMBAT -- a new fight starts with a
                     // fresh one, so one bad simulation cannot silently eat the allowance of the next.
@@ -1679,6 +1708,7 @@ public final class Gameplay {
                     plan = null;
                     step = 0;
                     status = "idle";
+                    stopNote = "";
                     hintShown = false;
                     pending = null;
                     autopilot = false;
@@ -2014,6 +2044,7 @@ public final class Gameplay {
         plan = null;
         planBuiltAt = -1L;
         step = 0;
+        stopNote = "";
         // P3-A: reset is "forget everything about this fight", and a prediction is part of it.
         Prefetch.drop();
         // B119: a new fight starts with a clean clock (the menu state itself is the game's).
@@ -2039,6 +2070,10 @@ public final class Gameplay {
         lethalConfirmed = false;
         weakConfirmed = false;
         lastRisk = null;
+        riskPlan = null;
+        riskStep = -1;
+        riskTurn = -1;
+        riskHp = -1;
         // P2-27: the text caches belong to a plan that no longer exists.
         sts1solver.ui.Panel.clearCaches();
     }
@@ -2093,6 +2128,7 @@ public final class Gameplay {
         step = 0;
         stepTarget = -1;
         pending = null;
+        stopNote = "";
         sts1solver.ui.Panel.clearCaches();
         autopilot = false;
         autoplayArmed = false;
@@ -2444,6 +2480,13 @@ public final class Gameplay {
         rows.add("Spire Pilot" + (plan == null && !statusText(status).isEmpty()
                         ? "  [" + statusText(status) + "]" : "")
                 + (Hud.failures() > 0 ? "   HUD ERRORS: " + Hud.failures() : ""));
+        // B195 (user 2026-11-19): every protective stop keeps the plan on purpose, and the title row
+        // above only prints status when there is NO plan -- so "why did it stop" was invisible in
+        // exactly the case the player needed it. This row is the stop reason, shown while the plan
+        // it stopped on is still on screen; pressing 计算 or 自动 clears it.
+        if (plan != null && !stopNote.isEmpty()) {
+            rows.add("已停：" + stopNote);
+        }
         if (!Solver.expandFailures().isEmpty()) {
             rows.add("引擎异常（搜索分支被丢弃）: " + Solver.expandFailures());
         }
@@ -2470,7 +2513,14 @@ public final class Gameplay {
             rows.add(escapeNote);
         }
         if (lastRisk != null) {
-            rows.add(lastRisk.describe());
+            // The prediction is taken when the cursor reaches the end-turn step, so this row is the
+            // advance warning the player acts on, not a report of something already done. Safe end
+            // turns print nothing: the number would only be bookkeeping.
+            String riskRow = lastRisk.displayText(Gameplay.playerMaxHp());
+            if (!riskRow.isEmpty()) {
+                rows.add(riskRow + (lethalConfirmed
+                        ? "\uff1b\u518d\u70b9\u4e00\u6b21\u8fd9\u4e00\u6b65\u5c31\u771f\u7684\u4f1a\u7ed3\u675f\u56de\u5408" : ""));
+            }
         }
         // Every mod is accepted (m11229), so there is no "uncertified" wording any more; the panel
         // still says when the fight contains mod content, because that is worth knowing.
@@ -2969,14 +3019,22 @@ public final class Gameplay {
         if (risk == null || !risk.ok) {
             return manual ? EndTurnDecision.ALLOW : EndTurnDecision.STOP;
         }
-        int margin = Math.max(5, playerMaxHp / 10);
         if (risk.wouldDie) {
             return manual ? EndTurnDecision.CONFIRM : EndTurnDecision.STOP;
         }
-        if (risk.hpAfter <= margin) {
-            return manual ? EndTurnDecision.WARN : EndTurnDecision.STOP;
+        if (risk.hpAfter <= Gameplay.riskMargin(playerMaxHp)) {
+            return manual ? EndTurnDecision.CONFIRM : EndTurnDecision.STOP;
         }
         return EndTurnDecision.ALLOW;
+    }
+
+    /** Below this HP after an end turn the player is one hit from death; used by gate and panel. */
+    public static int riskMargin(int playerMaxHp) {
+        return Math.max(5, playerMaxHp / 10);
+    }
+
+    private static int playerMaxHp() {
+        return AbstractDungeon.player == null ? 80 : AbstractDungeon.player.maxHealth;
     }
 
     /*
@@ -3025,7 +3083,54 @@ public final class Gameplay {
         }
     }
 
-    /** B159: the answers the plan recorded for the end-turn step at the cursor (null when none). */
+    /**
+     * Measures the end turn while it is still the NEXT step, so the panel can warn before the player
+     * presses anything. One sandbox end turn per end-turn step is nothing next to a search, and the
+     * result is reused by {@link #executeStepInternal()} when the press actually comes.
+     */
+    private static void predictCursorRisk() {
+        Solver.Step current = null;
+        if (plan != null && plan.plan != null && step >= 0 && step < plan.plan.size()) {
+            current = plan.plan.get(step);
+        }
+        if (current == null || current.action == null || !current.action.isEndTurn()
+                || Gameplay.planIsStale()) {
+            Gameplay.clearEndTurnRisk();
+            return;
+        }
+        int turn = GameActionManager.turn;
+        int hp = Gameplay.currentHp();
+        if (!Gameplay.riskFresh(turn, hp)) {
+            lastRisk = Gameplay.predictEndTurnRisk();
+            Gameplay.rememberRisk(turn, hp);
+        }
+    }
+
+    private static boolean riskFresh(int turn, int hp) {
+        return lastRisk != null && plan == riskPlan && step == riskStep
+                && turn == riskTurn && hp == riskHp;
+    }
+
+    private static void rememberRisk(int turn, int hp) {
+        riskPlan = plan;
+        riskStep = step;
+        riskTurn = turn;
+        riskHp = hp;
+    }
+
+    /** Forgets a prediction measured on a board the cursor has left. */
+    private static void clearEndTurnRisk() {
+        lastRisk = null;
+        lethalConfirmed = false;
+        riskPlan = null;
+        riskStep = -1;
+        riskTurn = -1;
+        riskHp = -1;
+    }
+
+    /**
+     * B159: the answers the plan recorded for the end-turn step at the cursor (null when none).
+     */
     private static Action endTurnStepAnswers() {
         try {
             if (!Gameplay.hasPlan() || Gameplay.plan.plan == null
@@ -3133,6 +3238,7 @@ public final class Gameplay {
         autoplayArmed = false;
         nextActionAtMs = 0L;
         status = reason;
+        stopNote = reason;
         Log.warn("autopilot stopped: " + reason);
     }
 
@@ -3208,23 +3314,31 @@ public final class Gameplay {
             return false;
         }
         if (step.action.isEndTurn()) {
-            lastRisk = Gameplay.predictEndTurnRisk();
-            int playerMaxHp = AbstractDungeon.player == null ? 80 : AbstractDungeon.player.maxHealth;
+            int turn = GameActionManager.turn;
+            int hp = Gameplay.currentHp();
+            if (!Gameplay.riskFresh(turn, hp)) {
+                lastRisk = Gameplay.predictEndTurnRisk();
+                Gameplay.rememberRisk(turn, hp);
+            }
+            int playerMaxHp = Gameplay.playerMaxHp();
             EndTurnDecision endTurnDecision = Gameplay.decideEndTurnRisk(lastRisk, playerMaxHp, !autopilot);
             Log.info("end-turn risk: " + lastRisk.describe() + " -> " + (Object)((Object)endTurnDecision));
             if (endTurnDecision == EndTurnDecision.STOP) {
-                Gameplay.stopAutopilot("\u5df2\u505c\u6b62\u81ea\u52a8\u6267\u884c\uff1a" + lastRisk.describe());
+                Gameplay.stopAutopilot(lastRisk.stopText());
                 return false;
             }
             if (endTurnDecision == EndTurnDecision.CONFIRM) {
                 if (!lethalConfirmed) {
                     lethalConfirmed = true;
-                    status = lastRisk.describe() + "\uff1b\u518d\u70b9\u300c\u6267\u884c\u4e00\u6b65\u300d\u5f3a\u5236\u6267\u884c";
+                    // A click on a route step runs until `stepTarget`; without this the confirm
+                    // would re-enter executeStepInternal on the very next frame and end the turn
+                    // anyway. The player has to click the step again -- that IS the second press.
+                    stepTarget = -1;
+                    status = lastRisk.displayText(playerMaxHp)
+                            + "\uff1b\u518d\u70b9\u4e00\u6b21\u8fd9\u4e00\u6b65\u624d\u4f1a\u771f\u7684\u7ed3\u675f\u56de\u5408";
                     return false;
                 }
                 lethalConfirmed = false;
-            } else if (endTurnDecision == EndTurnDecision.WARN) {
-                status = lastRisk.describe() + "\uff08\u6fd2\u6b7b\uff09";
             } else {
                 lethalConfirmed = false;
             }
@@ -4500,6 +4614,7 @@ public final class Gameplay {
         nextActionAtMs = AutoPace.nextAt(now(), AutoPace.delayMs());
         weakConfirmed = false;
         autoplayArmed = false;
+        stopNote = "";
         status = "\u81ea\u52a8\u6267\u884c\u4e2d\uff08\u518d\u70b9\u300c\u81ea\u52a8\u51fa\u724c\u300d\u505c\u6b62\uff09";
         Log.info("autopilot on");
     }
@@ -4510,6 +4625,7 @@ public final class Gameplay {
         autopilotFailures = 0;
         nextActionAtMs = 0L;
         weakConfirmed = false;
+        stopNote = "";
         status = "\u81ea\u52a8\u6267\u884c\u5df2\u505c\u6b62";
         Log.info("autopilot off");
     }
@@ -4694,6 +4810,41 @@ public final class Gameplay {
         }
     }
 
+    /** Probe hook (S268): take the protective stop path without a live fight. */
+    public static void stopForTest(String reason) {
+        Gameplay.stopAutopilot(reason);
+    }
+
+    /** Probe hook (S268): the note the panel's stop row is built from. */
+    public static String stopNoteForTest() {
+        return stopNote;
+    }
+
+    /** Probe hook (S271): put a measured risk on the panel without a live end turn. */
+    public static void riskForTest(EndTurnRisk risk) {
+        lastRisk = risk;
+        riskPlan = null;
+        riskStep = -1;
+        riskTurn = -1;
+        riskHp = -1;
+    }
+
+    /** Probe hook (S271): the "press again to really end the turn" state. */
+    public static void confirmRiskForTest() {
+        lethalConfirmed = true;
+    }
+
+    /** Probe hook (S272): a risk that counts as measured at the current cursor. */
+    public static void riskAtCursorForTest(EndTurnRisk risk) {
+        lastRisk = risk;
+        Gameplay.rememberRisk(GameActionManager.turn, Gameplay.currentHp());
+    }
+
+    /** Probe hook (S272): whether the blocked end turn is waiting for its second press. */
+    public static boolean riskConfirmArmedForTest() {
+        return lethalConfirmed;
+    }
+
     public static boolean autoplayArmed() {
         return autoplayArmed;
     }
@@ -4725,7 +4876,7 @@ public final class Gameplay {
             boolean wasArmed = autoplayArmed;
             autoplayArmed = false;
             if (autopilot) {
-                Gameplay.stopAutopilot("已切回半自动：路线走完就停");
+                Gameplay.stopAutopilot("已切回半自动，路线走完就停");
                 return;
             }
             if (wasArmed) {
@@ -4767,6 +4918,7 @@ public final class Gameplay {
         Log.info("escape policy: " + mode.label);
         if (plan != null) {
             plan = null;
+            stopNote = "";
             status = "\u9003\u8dd1\u7b56\u7565\u5df2\u6539\u4e3a\u300c" + mode.label + "\u300d\uff1b\u70b9\u300c\u8ba1\u7b97\u300d\u91cd\u7b97";
         } else {
             status = "\u9003\u8dd1\u7b56\u7565\uff1a \u300c" + mode.label + "\u300d";
@@ -4900,13 +5052,50 @@ public final class Gameplay {
             }
             return "\u7ed3\u675f\u56de\u5408\u9884\u8ba1 -" + this.damage + " HP \u2192 HP " + this.hpAfter + (this.incoming > 0 ? "\uff08\u6765\u88ad \u2265" + this.incoming + "\uff09" : "") + (this.wouldDie ? "\uff08\u4f1a\u6b7b\uff09" : "");
         }
+
+        /**
+         * The panel row for an end turn that is about to be taken: empty when the end turn is safe,
+         * so an ordinary turn stays quiet. Written in the player's terms -- what it costs, where HP
+         * lands, and what to do instead -- because this row is the one place the warning is seen
+         * BEFORE the press.
+         */
+        public String displayText(int playerMaxHp) {
+            if (!this.ok) {
+                return "\u7ed3\u675f\u56de\u5408\u7684\u98ce\u9669\u6ca1\u7b97\u51fa\u6765\uff0c\u4e0d\u80fd\u786e\u5b9a\u8fd9\u4e00\u6b65\u5b89\u5168"
+                        + "\uff08\u7ec6\u8282\u5728 solver.log\uff09\uff1b\u5148\u51fa\u724c\uff0c\u6216\u70b9\u300c\u8ba1\u7b97\u300d\u6362\u4e00\u6761\u7ebf";
+            }
+            if (this.wouldDie) {
+                return "\u7ed3\u675f\u56de\u5408\u98ce\u9669\u8fc7\u9ad8\uff1a\u9884\u8ba1\u6389 " + this.damage
+                        + " \u8840\uff0cHP \u4f1a\u5f52\u96f6" + this.pressure()
+                        + "\uff1b\u5148\u51fa\u724c\u6321\u4f4f\uff0c\u6216\u70b9\u300c\u8ba1\u7b97\u300d\u6362\u4e00\u6761\u7ebf";
+            }
+            if (this.hpAfter <= Gameplay.riskMargin(playerMaxHp)) {
+                return "\u7ed3\u675f\u56de\u5408\u98ce\u9669\u8fc7\u9ad8\uff1a\u9884\u8ba1\u6389 " + this.damage
+                        + " \u8840\uff0c\u53ea\u5269 " + this.hpAfter + " HP" + this.pressure()
+                        + "\uff1b\u4e0b\u4e00\u51fb\u5c31\u53ef\u80fd\u5012\u4e0b\uff0c\u5148\u51fa\u724c";
+            }
+            return "";
+        }
+
+        /** Why the autopilot stopped. The numbers live in {@link #displayText(int)} beside it. */
+        public String stopText() {
+            if (!this.ok) {
+                return "\u7ed3\u675f\u56de\u5408\u7684\u98ce\u9669\u6ca1\u7b97\u51fa\u6765\uff1b\u5148\u51fa\u724c\uff0c\u6216\u70b9\u300c\u8ba1\u7b97\u300d\u6362\u4e00\u6761\u7ebf";
+            }
+            return "\u7ed3\u675f\u56de\u5408\u98ce\u9669\u8fc7\u9ad8\uff1b\u5148\u51fa\u724c\uff0c\u6216\u70b9\u300c\u8ba1\u7b97\u300d\u6362\u4e00\u6761\u7ebf";
+        }
+
+        private String pressure() {
+            return this.incoming > 0
+                    ? "\uff08\u73b0\u5728 " + this.hpBefore + "\uff0c\u6765\u88ad\u81f3\u5c11 " + this.incoming + "\uff09"
+                    : "";
+        }
     }
 
     public static enum EndTurnDecision {
         ALLOW,
         CONFIRM,
-        STOP,
-        WARN;
+        STOP;
 
     }
 }

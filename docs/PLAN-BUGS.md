@@ -4669,3 +4669,49 @@ pending 被清空后，`planIsStale()` 的 `pending == null` 分支只看 `curre
 **验证**：`tools/build.ps1 -Jdk …\jdk8u512-b09` BUILD OK（1.6.4：148 源文件、579 entries、1,355,011 B、sha256 `B256A07A7D0DE9B6DB9A686162E3058C38392FDDCB8F661E05137EF65E30BF86`，包内版本 1.6.4）；`tools/install.ps1 -SkipBuild` INSTALL OK（游戏 mods 目录哈希一致）。未跑门禁（用户 m00778 减少测试）；验收＝半自动算完后左侧显示「自动 关」，点开能按节奏连续执行并在路线尽头停下；全自动下左侧同为「自动 开/关」，右侧保持「全自动 ✓」。
 
 **教训**：两种模式的差异要落在**唯一一个真实行为**上，不要为了“看起来不同”在操作方式上分叉——多出来的按钮如果只是另一条路径的第一步，它就不该存在。B193 的半自动部分由本条收回。
+
+### B195 停止原因看不见 / 预算停止说「未找到胜线」/ 局外计时放跑小偷更划算（2026-11-19，用户报告 4 条）
+
+**现象**（用户原文四条）：①全自动有时出牌会停，特殊停止原因要能显示在左侧文字区；②出牌期间「后台计算」是否真的在工作；③设了回合数后「未找到胜线，只向前看一回合」不该以没找到胜线为由不返还结果；④面对小偷时「收益不计」可以放跑无伤，但「收益计」应尽力在逃跑前击杀——怀疑收益没算金币。用户补充纠正：④的规则是**局面里有小偷（Looter）时**，击杀它的线优先于放跑线，不是“任何怪离场”都触发。
+
+**取证**（`solver.log` + 代码）：
+
+- ①`stopAutopilot(reason)` 只写 `status`；标题行 `Gameplay.lines()` 的 status 只在 `plan == null` 时打印，而几乎所有保护性停止都**故意保留路线**，所以停下来的原因恰好永远不显示。
+- ②日志 `prefetch={started=0 adopted=0}`、`pace=0ms wait=0`。P3-A 预取只在**节奏等待帧**（`AutoPace.due()==false`）推进；节奏=0 时 `nextAt(now,0)=now`，`due()` 永远为真，等待帧数量为 0。它不是真实线程并行：切片会安装/卸载全局静态，只能在引擎空闲的等待帧跑，不能在结算中插队。
+- ③`PlanText.headline(Result)` 在 `horizon` 之后落到 `headline(false,…)` 的「未找到胜线」；但 `Result.plan` 一直是搜索交回的最好线，面板下一行也一直在显示它——文案与事实相反。
+- ④金币**已在**评分里：`GOLD_POINTS = 80`（25 金 ≈ 1 HP），`score(…)=…+goldDelta*goldRate()`。小偷只带 15–33 金（约 0.6–1.3 HP），永远抵不过击杀吃到的伤害，所以“等它跑”是算术上的最优；`PostCombatLoot` 文件头（20–26 行）早已记录这一现象。问题不是漏算金币，而是缺一条显式规则。
+
+**修法**
+
+- ①`Gameplay.java`：新增 `stopNote`；`stopAutopilot` 与 `finishQuick` 的两个重算停止分支写入原因；`lines()` 在保留路线时多一行「已停：<原因>」；`startQuickSolve` / `startAutoplay` / `markAutopilotOff` / 战斗开始与结束 / `reset` / 切世界 / 逃跑策略变更时清空。
+- ③`PlanText.java`：新增 `limitLine(reason,…)`（`time|nodes`→预算用完、`stopped`→手动停止、`layers`→到层数上限；其余返回空），`headline(Result)` 在**有非空 plan** 且原因为上述三种时改说「当前最好的线…（…，没算到胜利；可以再算）」；`horizon`、`converged`、`no-live-branches` 与「没有线」的路径保持原措辞；RAW `headline(boolean…)` 重载不动（S47 钉住）。
+- ④`Solver.java`：`KILL_FIRST_POINTS = 1_000_000`；新增 `looterStanding()`，按**类**识别 `exordium.Looter`（`javap` 确认 Act 2 的 `city.Mugger` 直接继承 `AbstractMonster`、不会逃跑，所以不误伤），只认 `!isDying && currentHealth>0`；`score` 在**胜利且 `n4>0` 且场上有小偷且 `goldRate()>0`** 时扣该分；`Step` 新增 `looterStanding`，由 replay 在每步结束时现场读取；`letFlee(Result)` = 最后一步 `looterStanding` 且 `monsterHp[]` 仍有 >0（与 B192「放跑提示」同一证据）；`better(Result,Result)` 先过 `preferKill(counting, winA, letFleeA, winB, letFleeB)`。1,000,000 分 = 500 HP：低于胜利 10,000,000、高于任何掉血差、低于死亡，是**偏好**不是承诺——放跑仍好过死；别的怪离场不触发。
+- ②不代码改动：预取按设计只在节奏等待帧跑；想让它工作把「节奏」调到 ≥250ms。在引擎结算帧里强跑切片会踩真实静态，故不做。
+
+**门禁**：S268（保护性停止后原因可见、路线仍在、下次计算清空；`Gameplay.stopForTest` / `stopNoteForTest` / `lines()`）；S269（`limitLine` 四种原因措辞 + `headline(Result)` 在有线/无线两种情况的分流；S47 的旧重载不变）；S270（`preferKill` 真值表、`letFlee` 五态（含“有怪离场但没有小偷”不算）、以及「贵 20 HP 的击杀线仍胜过免费放跑线、开关关掉后回到 HP 尺」；另用合成 Looter / 大颚虫两块实机局面钉 `looterStanding()` 只认小偷，并验证两块的分数差恰好是 `KILL_FIRST_POINTS`）。
+
+**验证**：`tools/build.ps1 -Jdk …\jdk8u512-b09` BUILD OK（1.6.5：148 源文件、582 entries、1,362,912 B、sha256 `CF47534A8301141D5345AF039CB4C4C1DF361D6ADF5D11DCED4C1089C8FC6D8B`，包内版本 1.6.5）；`tools/install.ps1 -SkipBuild` **REFUSING**——替换时游戏正在运行、jar 被占用（按设计未写入），关掉游戏与 ModTheSpire 后重跑即可。未跑门禁（用户 m00778 减少测试）；验收＝全自动保护性停止后左侧出现「已停：…」且路线未丢，点「计算」后该行消失；预算/手动/层数停止时头行不再出现「未找到胜线」；「局外: 计」下同一个 Looter 局面优先给击杀线，关掉开关后可以回到放跑线，且没有小偷的战斗不因“有怪离场”改变排序。
+
+**教训**：**状态保留与状态解释是两件事**——“保留路线”是为了让玩家还能打，但必须同时把停止原因说出来，否则保留就成了沉默的冻结。另外，评分里“有价格”不等于“选择会按玩家的意图走”：价格低于现实差额时，需要一条显式的优先级规则，而不是继续调价。
+
+### B196 结束回合的风险只有按下才测，提示又看不见（2026-11-19，用户反馈）
+
+**现象**：用户看完 1.6.5 的三条改动后说「预算/手动/层数停止不再说『未找到胜线』这里我没有懂，不过我认为，最有用的是**结束回合风险过高**这个的提醒」。复核现状：风险确实算，但只在真正执行的那一瞬算；算完的提示写进 `status`，而 `lines()` 在 `plan != null` 时不打印 `status`。半自动在濒死边缘（结束后 HP ≤ 最大生命 1/10）只写一句「（濒死）」就真的提交了结束回合，这句话还当场被「执行中」覆盖——玩家看不到任何警告，除非自动模式直接停下。
+
+**根因**：①**计算时机**：警告应当发生在“还能出牌”的时候，而不是按下之后；②**呈现通道**：`status` 只属于没有路线的时候，有路线时唯一的文字通道是 `rows`；③**策略不一致**：会死要二次确认，濒死却只要一句立刻消失的提示。
+
+**修法**
+
+- `Gameplay.tick()`：新增 `predictCursorRisk()`。引擎空闲（`engineSettled()`）、无 `pending`、无进行中的搜索时，若路线当前步是「结束回合」，提前在沙盒里完整重放这一回合；结果按（plan 对象、step、回合、HP）缓存（`riskPlan/riskStep/riskTurn/riskHp`），同一步只算一次。`executeStepInternal()` 命中缓存直接复用，否则现算。
+- `EndTurnRisk.displayText(playerMaxHp)`：玩家语言的警告行——会死写「预计掉 N 血，HP 会归零（现在 X，来袭至少 Y）；先出牌挡住，或点「计算」换一条线」，濒死写「只剩 Y HP……下一击就可能倒下，先出牌」；安全返回空串（不打印记账数字）；`!ok` 写「结束回合的风险没算出来，不能确定这一步安全（细节在 solver.log）」，不冒充安全。`stopText()` 是自动模式停下的短原因，配合面板的「已停：」前缀；`describe()` 保留给日志与门禁。
+- `Gameplay.riskMargin()` 统一阈值 `max(5, maxHp/10)`；`decideEndTurnRisk` 半自动在濒死边缘从 `WARN` 改为 `CONFIRM`：第一次点只警告、不执行，第二次才真的结束回合。`WARN` 枚举删除。
+- `lines()`：有风险时在路线下方打印 `displayText`；处于待确认态时追加「再点一次这一步就真的会结束回合」。点路线上的步骤时，第一次点击只警告并把 `stepTarget` 归零（否则 tick 的“执行到第 N 步”循环会在下一帧自己重试，确认就形同虚设），第二次点击才真的结束回合。光标离开结束回合步时 `clearEndTurnRisk()`，旧预测不会带到下一回合。
+- 面板之外的账：预测不触碰实战（沿用 P0-2b 的“预测不改局面摘要”保证）。
+
+**门禁**：P0-2a 扩为决策真值表 + 文案（会死 / 濒死 / 安全 / 未知 / 停止短句）；S271——真实合成战斗算出一条路线并装到面板上，证明安全时无风险行、会死时按下之前就有「结束回合风险过高……归零」、待确认态追加二次确认句、自动停止短句放在「已停：」后面且不重复“已停止”；S272——第一次点击被拦下后 `stepTarget` 被清掉、光标不动、没有提交，再次点击仍被接受（否则 tick 的“执行到第 N 步”会在下一帧自己重试，确认形同虚设）。
+
+**验证**：`tools/build.ps1 -Jdk …\jdk8u512-b09` BUILD OK（1.6.6：148 源文件、584 entries、1,369,255 B、sha256 `06531B37ABA894200BE7A809F6DAF76892221E672035F4F909C0E454C1F6BDF4`，包内版本 1.6.6）；`tools/install.ps1 -SkipBuild` INSTALL OK（mods 目录哈希一致）。门禁：`tools/run.ps1 -Gates S47,S268,S269,S270,S271,S272` → **AUTOTEST PASSED passed=38 failed=0**（287 个未点名的门禁跳过），其中 S271 的实际输出为 `riskRow='结束回合风险过高：预计掉 10 血，HP 会归零（现在 10，来袭至少 18）；先出牌挡住，或点「计算」换一条线'`，S272 为 `end=2 cursor=2 ran=false armed=true target=-1 stayed=true again=true`。这一版同时把 B195 的“只认 Looter”修正真正装进游戏。
+
+另：默认核心套件在本机跑满 180s 仍未结束（超时被杀）。已完成部分里 S93 / S258 / S260 及若干“搜索应该在跑”的门禁失败，日志都停在 `solve queued (怪物意图还没确定)`——这是 1.6.3 的「计算等怪物意图确定」上线后，这些门禁夹具没有推动一帧让意图滚出来，与本版改动路径无关；恢复核心套件全绿需要给这些夹具补帧或显式给怪一个非 DEBUG 意图，列为下一步。
+
+**教训**：安全提示的**时机**和措辞一样重要——在玩家还有选择的时候出现才叫提醒，在执行之后出现只能叫记录；而只写进 `status` 的记录，在有路线时根本不会显示。
