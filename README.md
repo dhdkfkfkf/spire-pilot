@@ -234,11 +234,20 @@ never seen is *more* likely to work here than in a hand-written model, not less.
 
 ## Limits (current build)
 
-* **Card-choice prompts** (discard / search / Scry style) are detected and the branch is refused
-  ("a screen is open" blocks a solve), not modelled. A branch that would open one is dropped by the
-  search rather than guessed.
-* **Potion targeting** picks the first living monster for targeted potions.
-* **Search horizon** is actions, not turns, with a wall-clock budget (3 s in game).
+* **Card-choice screens are real search branches**, not refusals: the picker's options are
+  enumerated (hand, grid and reward screens; a scry answers with the best cards kept and the worst
+  discarded; a hand picker also gets a few "move to the end" reorder answers), and a plan may start
+  while a screen is already waiting. The per-screen branch count and the screen chain length are
+  budget tiers (`limits.choiceBranches`, `limits.screens`). A screen whose options the walk cannot
+  record (a custom screen kind, an empty picker, a chain past the cap) still drops that branch
+  rather than guessing.
+* **Targeted potions are a decision**: every living monster is enumerated as a target and the
+  chosen one is recorded in the step; the first-living fallback only applies to a caller that
+  passes no target.
+* **Search horizon** is turns, not actions: by default the walk runs to the end of the fight,
+  `search.horizonTurns` can cap it, and a wall-clock/node budget (ladder 自动 / 6 / 12 / 18 / 30 /
+  60 s / 无限; a fresh settings file starts at 12 s, an upgraded one at 无限) stops it with the
+  best line it has. The deep search has its own 60 s budget.
 * **No map/pre-combat planning**: this solves the fight that is running, like the reference project's
   in-combat overlay (its pre-combat forecast needed a headless worker process, which STS1's asset
   chain does not allow -- documented in the predecessor's notes and not attempted here).
