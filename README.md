@@ -298,6 +298,9 @@ never seen is *more* likely to work here than in a hand-written model, not less.
 * Multi-threaded search is not implemented; the sandbox swaps global statics, which must be
   single-threaded by definition.
 
+Known player reports and their status (fixed / waiting for a reproduction / by design):
+[docs/USER-FEEDBACK.md](docs/USER-FEEDBACK.md).
+
 ---
 
 ## Layout
