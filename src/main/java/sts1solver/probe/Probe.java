@@ -226,6 +226,14 @@ public final class Probe {
                     "com.megacrit.cardcrawl.monsters.exordium.Cultist",
                     "com.megacrit.cardcrawl.monsters.exordium.JawWorm",
                     "com.megacrit.cardcrawl.monsters.exordium.LouseNormal"};
+        } else if ("F7".equals(fixture)) {
+            // F7 (Task J): a single GremlinNob (its built-in 85 HP) plus F6's 12-card deck.
+            // The Nobel's retaliatory skill punishes careless play. Fixed once, never tuned.
+            spec.deck = new String[]{"Strike_R", "Strike_R", "Strike_R", "Strike_R",
+                    "Defend_R", "Defend_R", "Defend_R", "Defend_R",
+                    "Bash", "Shrug It Off", "Pommel Strike", "Feed"};
+            spec.monsters = new String[]{
+                    "com.megacrit.cardcrawl.monsters.exordium.GremlinNob"};
         } else { // F5
             spec.deck = new String[]{"Strike_R", "Strike_R", "Strike_R", "Strike_R",
                     "Defend_R", "Defend_R", "Defend_R",
@@ -237,7 +245,7 @@ public final class Probe {
         }
         Synthetic.build(spec, new Synthetic.SyntheticStep());
         Driver.drain(4000, 800L);
-        if ("F5".equals(fixture) || "F6".equals(fixture)) {
+        if ("F5".equals(fixture) || "F6".equals(fixture) || "F7".equals(fixture)) {
             AbstractDungeon.player.potions.set(0, PotionHelper.getPotion("Fire Potion"));
         }
         return World.captureLive();
@@ -4354,9 +4362,10 @@ public final class Probe {
         });
 
         /*
-         * S292 (2026-11-20, Task H + I): hardness gate. F4 and F6 must each be hard enough to be
-         * worth a variant matrix. F5 is kept as a flee-control and only logged (never asserted),
-         * because a fleeing Looter ends the fight early. Per hard fixture, >=2 of 3 seeds must
+         * S292 (2026-11-20, Task H+I+J): hardness gate. F4 and F7 must each be hard enough to be
+         * worth a variant matrix. F5 (flee control) and F6 (known 1/3, too easy) only log and are
+         * never asserted: a fleeing Looter ends the fight early, and Fire Potion + Feed made F6
+         * shorter/easier (main-brain run 17:41-17:44). Per hard fixture, >=2 of 3 seeds must
          * simultaneously show:
          *   (1) best found after 8000 nodes (bestAt > 8000);
          *   (2) score at the 8000-node threshold is below the final score (still improving);
@@ -4364,24 +4373,26 @@ public final class Probe {
          *       versus V0 on that same seed.
          * If a hard fixture is not hard enough, report the count honestly; never re-tune it.
          */
-        Probe.core("S292 hard fixtures: F4/F6 must be hard enough; F5 flee-control logged only",
+        Probe.core("S292 hard fixtures: F4/F7 hard; F5 flee + F6 easy controls logged only",
                 new Runnable(){
             @Override
             public void run() {
-                String[] fixtures = {"F4", "F5", "F6"};
+                String[] fixtures = {"F4", "F5", "F6", "F7"};
                 long[] seedsF4 = {9401L, 9402L, 9403L};
                 long[] seedsF5 = {9501L, 9502L, 9503L};
                 long[] seedsF6 = {9601L, 9602L, 9603L};
+                long[] seedsF7 = {9701L, 9702L, 9703L};
                 String[] sideVariants = {"V4", "V5"};
                 int[] sideIndex = {4, 5};
                 try {
                     for (int f = 0; f < fixtures.length; f++) {
                         String fixture = fixtures[f];
                         long[] seeds = "F4".equals(fixture) ? seedsF4
-                                : ("F6".equals(fixture) ? seedsF6 : seedsF5);
+                                : ("F6".equals(fixture) ? seedsF6
+                                : ("F7".equals(fixture) ? seedsF7 : seedsF5));
                         int hardSeeds = 0;
                         for (int s = 0; s < seeds.length; s++) {
-                            if ("F5".equals(fixture) || "F6".equals(fixture)) {
+                            if ("F5".equals(fixture) || "F6".equals(fixture) || "F7".equals(fixture)) {
                                 Limits.forcePotionsForTest(Boolean.TRUE);
                             }
                             World root = buildHardFixture(fixture, seeds[s]);
@@ -4431,10 +4442,14 @@ public final class Probe {
                                     "mono=" + cs[0] + " last=" + cs[1] + " final=" + finalScore);
                         }
                         Log.info("  S292 fixture=" + fixture + " hardSeeds=" + hardSeeds + "/3");
-                        if ("F5".equals(fixture)) {
-                            // F5 is a flee-control: the Looter ends the fight early, so V4/V5
-                            // cannot differ. Log the count but DO NOT assert hardness on it.
-                            Log.info("  S292 fixture=F5 flee-control (expected 0/3), no hardness assert");
+                        if ("F5".equals(fixture) || "F6".equals(fixture)) {
+                            // F5 flee control (Looter ends early -> expected 0/3) and F6 known-easy
+                            // (main-brain 1/3: Fire Potion + Feed shorten the fight) are logged only;
+                            // DO NOT assert hardness on either.
+                            Log.info("  S292 fixture=" + fixture
+                                    + ("F5".equals(fixture)
+                                        ? " flee-control (expected 0/3), no hardness assert"
+                                        : " known-easy control (main-brain 1/3), no hardness assert"));
                         } else {
                             Probe.check(hardSeeds >= 2,
                                     "S292 " + fixture + " hard enough (>=2/3 seeds)",
@@ -4509,27 +4524,27 @@ public final class Probe {
         });
 
         /*
-         * S294 (Task I): F6 variant matrix (same shape as S293) plus a report-only keyExtras
-         * comparison on F6 V0. No algorithm/default change; numbers are for the main brain.
+         * S294 (Task J): F7 variant matrix (same shape as S293) plus a report-only keyExtras
+         * comparison on F7 V0. No algorithm/default change; numbers are for the main brain.
          */
-        Probe.core("S294 F6 matrix + keyExtras report: 3 seeds x V0-V5 at an 80k-node cap",
+        Probe.core("S294 F7 matrix + keyExtras report: 3 seeds x V0-V5 at an 80k-node cap",
                 new Runnable(){
             @Override
             public void run() {
                 String[] variants = {"V0", "V1", "V2", "V3", "V4", "V5"};
                 int[] vIndex = {0, 1, 2, 3, 4, 5};
-                long[] seeds = {9601L, 9602L, 9603L};
+                long[] seeds = {9701L, 9702L, 9703L};
                 try {
                     Limits.forcePotionsForTest(Boolean.TRUE);
                     for (int s = 0; s < seeds.length; s++) {
-                        World root = buildHardFixture("F6", seeds[s]);
+                        World root = buildHardFixture("F7", seeds[s]);
                         String[] base = null;
                         int baseScore = 0;
                         for (int v = 0; v < variants.length; v++) {
                             Solver.setCurveForTest(true);
                             String[] cell;
                             try {
-                                cell = matrixCellCapped("S294", "F6", variants[v], seeds[s], root,
+                                cell = matrixCellCapped("S294", "F7", variants[v], seeds[s], root,
                                         vIndex[v], base == null ? null : base[1], 80000, 240000L);
                             } finally {
                                 Solver.setCurveForTest(false);
@@ -4550,7 +4565,7 @@ public final class Probe {
                             Probe.check(cs[0] == 1 && cs[1] <= score,
                                     "S294 seed=" + seeds[s] + " " + variants[v] + " curve monotonic",
                                     "mono=" + cs[0] + " last=" + cs[1] + " score=" + score);
-                            Log.info("  S294 cmp fixture=F6 seed=" + seeds[s] + " " + variants[v]
+                            Log.info("  S294 cmp fixture=F7 seed=" + seeds[s] + " " + variants[v]
                                     + " score=" + score + " steps=" + cell[8]
                                     + " bestAt=" + cell[2] + " nodes=" + nodes
                                     + " proven=" + cell[7]
@@ -4558,10 +4573,10 @@ public final class Probe {
                                     + " curve=" + cell[6]);
                         }
                     }
-                    // ---- §4.1 keyExtras on F6 V0, report-only (no must-be-better assertion) ----
-                    long[] keySeeds = {9601L, 9602L};
+                    // ---- §4.1 keyExtras on F7 V0, report-only (no must-be-better assertion) ----
+                    long[] keySeeds = {9701L, 9702L};
                     for (int s = 0; s < keySeeds.length; s++) {
-                        World root = buildHardFixture("F6", keySeeds[s]);
+                        World root = buildHardFixture("F7", keySeeds[s]);
                         for (int e = 0; e < 2; e++) {
                             boolean extras = e == 1;
                             Limits.overrideForTest("search.keyExtras", extras ? "on" : "off");
