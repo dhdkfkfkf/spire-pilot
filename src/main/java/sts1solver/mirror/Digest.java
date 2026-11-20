@@ -31,6 +31,17 @@ public final class Digest {
     private Digest() {
     }
 
+    /**
+     * G2 (task G): when true, {@link #ofCurrent()} folds potion slots, relic counters and orb
+     * amounts into the digest. Off by default, so production output is byte-identical to before.
+     * Set from {@code search.keyExtras} at each search entry; gates may set it directly.
+     */
+    private static boolean keyExtras;
+
+    public static void setKeyExtras(boolean on) {
+        keyExtras = on;
+    }
+
     public static String ofCurrent() {
         StringBuilder sb = new StringBuilder(256);
         try {
@@ -53,6 +64,10 @@ public final class Digest {
                         .append(" pw=").append(powers(p.powers))
                         .append(" rl=").append(relics(p.relics))
                         .append(" or=").append(orbs(p.orbs));
+                // G2: potion slots only enter the key when keyExtras is on. Off => byte-identical.
+                if (keyExtras) {
+                    sb.append(" ep=").append(potionSlots(p.potions));
+                }
                 sb.append(" H=").append(pile(p.hand));
                 sb.append(" D=").append(pile(p.drawPile));
                 sb.append(" X=").append(pile(p.discardPile));
@@ -319,7 +334,14 @@ public final class Digest {
             if (i > 0) {
                 sb.append(',');
             }
-            sb.append(r == null ? "?" : r.relicId);
+            if (r == null) {
+                sb.append("?");
+            } else if (keyExtras) {
+                // G2: fold the relic's counter in so a Nunchaku at 0 and at 7 differ.
+                sb.append(r.relicId).append('#').append(r.counter);
+            } else {
+                sb.append(r.relicId);
+            }
         }
         return sb.toString();
     }
@@ -334,7 +356,45 @@ public final class Digest {
             if (i > 0) {
                 sb.append(',');
             }
-            sb.append(o == null ? "?" : o.ID);
+            if (o == null) {
+                sb.append("?");
+            } else if (keyExtras) {
+                // G2: append evoke/passive amounts; a field we cannot read is "-".
+                String evoke;
+                String passive;
+                try {
+                    evoke = String.valueOf(o.evokeAmount);
+                    passive = String.valueOf(o.passiveAmount);
+                } catch (Throwable t) {
+                    evoke = "-";
+                    passive = "-";
+                }
+                sb.append(o.ID).append('/').append(evoke).append('/').append(passive);
+            } else {
+                sb.append(o.ID);
+            }
+        }
+        return sb.toString();
+    }
+
+    /** G2: fixed-order potion slot IDs; empty slots use a stable placeholder. */
+    private static String potionSlots(java.util.ArrayList<com.megacrit.cardcrawl.potions.AbstractPotion> ps) {
+        if (ps == null || ps.isEmpty()) {
+            return "-";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < ps.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            com.megacrit.cardcrawl.potions.AbstractPotion potion = ps.get(i);
+            String id;
+            try {
+                id = potion == null || potion.ID == null ? "Potion Slot" : potion.ID;
+            } catch (Throwable t) {
+                id = "Potion Slot";
+            }
+            sb.append(id);
         }
         return sb.toString();
     }

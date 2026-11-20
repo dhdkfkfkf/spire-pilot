@@ -1762,6 +1762,8 @@ public final class Solver {
      * WARNING - Removed try catching itself - possible behaviour change.
      */
     private static Result solveInternal(World world, int n, int n2, long l, int n3) {
+        // G2: set the digest extras switch once at search entry, not per node.
+        Digest.setKeyExtras(Limits.keyExtras());
         Object object;
         int n4;
         Object object2;
@@ -1924,7 +1926,7 @@ public final class Solver {
                                 if (bestWinLayer < 0) {
                                     bestWinLayer = n5 + 1;
                                 }
-                                if (provenStopForTest && n20 == 0 && n21 == 0) {
+                                if (provenStopForTest && Limits.provenStop() && n20 == 0 && n21 == 0) {
                                     provenOptimal = true;
                                 }
                                 // A finished battle has no children: never put a win back into the frontier.
@@ -2147,7 +2149,7 @@ public final class Solver {
                     if (bestWinLayer < 0) {
                         bestWinLayer = entry.layer;
                     }
-                    if (combinedHp == 0 && sub.provenOptimal && provenStopForTest) {
+                    if (combinedHp == 0 && sub.provenOptimal && provenStopForTest && Limits.provenStop()) {
                         provenOptimal = true;
                         break;
                     }
@@ -4885,6 +4887,8 @@ public final class Solver {
          */
         public Session(World world, int n, int n2, long l, int n3, int n4) {
             Node node;
+            // G2: set the digest extras switch once at search entry, not per node.
+            Digest.setKeyExtras(Limits.keyExtras());
             this.root = world;
             this.beamWidth = n;
             this.maxLayer = n2;
@@ -5621,7 +5625,7 @@ public final class Solver {
                     if (this.bestWinLayer < 0) {
                         this.bestWinLayer = this.layer + 1;
                     }
-                    if (provenStopForTest && n == 0 && n2 == 0) {
+                    if (provenStopForTest && Limits.provenStop() && n == 0 && n2 == 0) {
                         this.provenOptimal = true;
                     }
                 }

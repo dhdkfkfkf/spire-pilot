@@ -179,6 +179,22 @@ public final class Probe {
         return session.result();
     }
 
+    /** S291 report rows: capped search with keyExtras pinned through settings (Session reads it at entry). */
+    private static Solver.Result searchCappedExtras(World root, int capNodes, long deadlineMs,
+                                                    boolean extras) {
+        Limits.overrideForTest("search.keyExtras", extras ? "on" : "off");
+        try {
+            Solver.Session session = new Solver.Session(root, 24, 96, Long.MAX_VALUE / 8L, capNodes, 0);
+            long deadline = System.currentTimeMillis() + deadlineMs;
+            while (!session.finished() && System.currentTimeMillis() < deadline) {
+                session.advance(50L);
+            }
+            return session.result();
+        } finally {
+            Limits.overrideForTest("search.keyExtras", null);
+        }
+    }
+
     public static void autoTest() {
         Log.setRunId(String.valueOf(System.currentTimeMillis()));
         // B112: remember the player's own run saves, so anything the suite writes on exit can be
@@ -4008,6 +4024,243 @@ public final class Probe {
                     Probe.check(false, "S289 ran without throwing", String.valueOf(t));
                 } finally {
                     Solver.setProvenStopForTest(true);
+                    try { World.forceRestore(); } catch (Throwable t) { }
+                }
+            }
+        });
+
+        /*
+         * S290 (2026-11-20, task G): the search.provenStop switch. Same Feed fixture as S289, once
+         * with the zero-cost stop on (must reproduce S289's stop-on row) and once with it off via
+         * search.provenStop=off (must reproduce S289's stop-off row). Only score / nodes / steps /
+         * proven are asserted -- a plan hash contains per-process UUIDs (task book §0).
+         */
+        Probe.core("S290 search.provenStop: the zero-cost stop switches off without changing its default",
+                new Runnable(){
+            @Override
+            public void run() {
+                String[] deck = {"Strike_R", "Strike_R", "Strike_R", "Strike_R", "Feed",
+                        "Defend_R", "Defend_R", "Defend_R"};
+                String[] monsters = {"com.megacrit.cardcrawl.monsters.exordium.LouseNormal"};
+                long[] seeds = {9301L, 9302L, 9303L};
+                int[] expOnScore = {10023597, 10023038, 10023277};
+                int[] expOnNodes = {14, 5, 21};
+                int[] expOffScore = {10035593, 10035032, 10035271};
+                int[] expOffNodes = {30000, 30000, 26409};
+                int[] expOffSteps = {7, 8, 9};
+                try {
+                    for (int s = 0; s < seeds.length; s++) {
+                        Synthetic.Spec spec = new Synthetic.Spec();
+                        spec.seed = seeds[s];
+                        spec.maxHealth = 80;
+                        spec.deck = deck;
+                        spec.monsters = monsters;
+                        Synthetic.build(spec, new Synthetic.SyntheticStep());
+                        Driver.drain(4000, 800L);
+                        World root = World.captureLive();
+
+                        // Default arm: no override, provenStopForTest true -> zero-cost stop on.
+                        Limits.clearOverridesForTest();
+                        Solver.setProvenStopForTest(true);
+                        Solver.Result on = searchCapped(root, 30000, 120000L);
+                        int onScore = Solver.lastBestScoreForTest();
+
+                        // Opt-in arm: only the settings switch turns the stop off.
+                        Limits.overrideForTest("search.provenStop", "off");
+                        Solver.Result off = searchCapped(root, 30000, 120000L);
+                        int offScore = Solver.lastBestScoreForTest();
+                        Limits.overrideForTest("search.provenStop", null);
+                        try { World.forceRestore(); } catch (Throwable t) { }
+
+                        int onNodes = on == null ? -1 : on.nodes;
+                        boolean onProven = on != null && on.provenOptimal;
+                        int offNodes = off == null ? -1 : off.nodes;
+                        int offSteps = off == null || off.plan == null ? -1 : off.plan.size();
+                        boolean offProven = off != null && off.provenOptimal;
+                        Log.info("  S290 seed=" + seeds[s]
+                                + "|on: score=" + onScore + " nodes=" + onNodes
+                                + " proven=" + onProven
+                                + "|off: score=" + offScore + " nodes=" + offNodes
+                                + " steps=" + offSteps + " proven=" + offProven);
+
+                        Probe.check(on != null && off != null,
+                                "S290 seed=" + seeds[s] + " both arms produced a line", "");
+                        Probe.check(onScore == expOnScore[s] && onNodes == expOnNodes[s] && onProven,
+                                "S290 seed=" + seeds[s] + " default reproduces S289 stop-on row",
+                                "score=" + onScore + " nodes=" + onNodes + " proven=" + onProven);
+                        Probe.check(offScore == expOffScore[s] && offNodes == expOffNodes[s]
+                                        && offSteps == expOffSteps[s] && !offProven,
+                                "S290 seed=" + seeds[s] + " provenStop=off reproduces S289 stop-off row",
+                                "score=" + offScore + " nodes=" + offNodes + " steps=" + offSteps
+                                        + " proven=" + offProven);
+                    }
+                } catch (Throwable t) {
+                    Probe.check(false, "S290 ran without throwing", String.valueOf(t));
+                } finally {
+                    Limits.overrideForTest("search.provenStop", null);
+                    Solver.setProvenStopForTest(true);
+                    try { World.forceRestore(); } catch (Throwable t) { }
+                }
+            }
+        });
+
+        /*
+         * S291 (2026-11-20, task G): the search.keyExtras switch. Default must keep the S287
+         * collisions (potion slot / relic counter) invisible to the digest and reproduce the F2/V0
+         * 20k control; keyExtras=on must make both collisions visible. The F2 report rows are only
+         * logged, never asserted (task book §3).
+         */
+        Probe.core("S291 search.keyExtras: on makes potion slots and relic counters change the key",
+                new Runnable(){
+            @Override
+            public void run() {
+                String[] deck = {"Strike_R", "Strike_R", "Strike_R", "Strike_R",
+                        "Strike_R", "Defend_R", "Defend_R", "Defend_R", "Defend_R", "Bash"};
+                String[] monsters = {"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                String[] f2deck = {"Strike_R", "Strike_R", "Strike_R", "Strike_R",
+                        "Defend_R", "Defend_R", "Defend_R", "Defend_R", "Bash", "Shrug It Off"};
+                String[] f2monsters = {"com.megacrit.cardcrawl.monsters.exordium.Cultist",
+                        "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                long[] seeds = {9301L, 9302L, 9303L};
+                int[] expScore = {10013559, 10015001, 10001248};
+                int[] expNodes = {2400, 19199, 8848};
+                World a = null;
+                World b = null;
+                try {
+                    // --- default (keyExtras off): S287 collisions stay invisible ---
+                    Digest.setKeyExtras(false);
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9301L;
+                    spec.maxHealth = 80;
+                    spec.deck = deck;
+                    spec.monsters = monsters;
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+                    World root = World.captureLive();
+
+                    a = root.fork();
+                    a.install();
+                    String plainA = Digest.stable(Digest.ofCurrent());
+                    a.player().potions.set(0, PotionHelper.getPotion("Fire Potion"));
+                    String withPotion = Digest.stable(Digest.ofCurrent());
+                    a.uninstall();
+                    a = null;
+
+                    b = root.fork();
+                    b.install();
+                    com.megacrit.cardcrawl.relics.Nunchaku n0 =
+                            new com.megacrit.cardcrawl.relics.Nunchaku();
+                    n0.counter = 0;
+                    b.player().relics.add(n0);
+                    String relic0 = Digest.stable(Digest.ofCurrent());
+                    n0.counter = 7;
+                    String relic7 = Digest.stable(Digest.ofCurrent());
+                    b.uninstall();
+                    b = null;
+
+                    Probe.check(plainA.equals(withPotion) && relic0.equals(relic7),
+                            "S291 default keeps S287 collisions invisible", "");
+
+                    // --- keyExtras on: the same two boards must now differ ---
+                    Limits.overrideForTest("search.keyExtras", "on");
+                    Digest.setKeyExtras(Limits.keyExtras());
+                    a = root.fork();
+                    a.install();
+                    String plainAOn = Digest.stable(Digest.ofCurrent());
+                    a.player().potions.set(0, PotionHelper.getPotion("Fire Potion"));
+                    String withPotionOn = Digest.stable(Digest.ofCurrent());
+                    a.uninstall();
+                    a = null;
+
+                    b = root.fork();
+                    b.install();
+                    com.megacrit.cardcrawl.relics.Nunchaku n7 =
+                            new com.megacrit.cardcrawl.relics.Nunchaku();
+                    n7.counter = 0;
+                    b.player().relics.add(n7);
+                    String relic0On = Digest.stable(Digest.ofCurrent());
+                    n7.counter = 7;
+                    String relic7On = Digest.stable(Digest.ofCurrent());
+                    b.uninstall();
+                    b = null;
+
+                    Probe.check(!plainAOn.equals(withPotionOn) && !relic0On.equals(relic7On),
+                            "S291 keyExtras=on makes S287 collisions visible",
+                            "potion " + plainAOn.length() + "/" + withPotionOn.length()
+                                    + " relic " + relic0On.length() + "/" + relic7On.length());
+
+                    // --- off restores equality ---
+                    Limits.overrideForTest("search.keyExtras", "off");
+                    Digest.setKeyExtras(Limits.keyExtras());
+                    a = root.fork();
+                    a.install();
+                    String plainAOff = Digest.stable(Digest.ofCurrent());
+                    a.player().potions.set(0, PotionHelper.getPotion("Fire Potion"));
+                    String withPotionOff = Digest.stable(Digest.ofCurrent());
+                    a.uninstall();
+                    a = null;
+                    Probe.check(plainAOff.equals(withPotionOff),
+                            "S291 keyExtras=off restores digest equality", "");
+                    Limits.overrideForTest("search.keyExtras", null);
+                    Digest.setKeyExtras(false);
+                    try { World.forceRestore(); } catch (Throwable t) { }
+
+                    // --- F2/V0/3seed 20k control (default keyExtras off) ---
+                    for (int s = 0; s < seeds.length; s++) {
+                        Synthetic.Spec f2 = new Synthetic.Spec();
+                        f2.seed = seeds[s];
+                        f2.maxHealth = 80;
+                        f2.deck = f2deck;
+                        f2.monsters = f2monsters;
+                        Synthetic.build(f2, new Synthetic.SyntheticStep());
+                        Driver.drain(4000, 800L);
+                        World f2root = World.captureLive();
+                        Digest.setKeyExtras(false);
+                        String[] cell = matrixCellCapped("S291", "F2", "V0", seeds[s], f2root,
+                                0, null, 20000, 240000L);
+                        int nodes = Integer.parseInt(cell[4]);
+                        int score = Integer.parseInt(cell[5]);
+                        Log.info("  S291 control seed=" + seeds[s] + " nodes=" + nodes
+                                + " score=" + score);
+                        Probe.check("ok".equals(cell[0]) && score == expScore[s] && nodes == expNodes[s],
+                                "S291 seed=" + seeds[s] + " F2/V0 20k control unchanged",
+                                "nodes=" + nodes + " score=" + score);
+                        try { World.forceRestore(); } catch (Throwable t) { }
+                    }
+
+                    // --- report-only rows: F2 + Fire Potion slot 0, 3 seeds x 80k, extras off/on ---
+                    Limits.forcePotionsForTest(Boolean.TRUE);
+                    for (int s = 0; s < seeds.length; s++) {
+                        Synthetic.Spec f2 = new Synthetic.Spec();
+                        f2.seed = seeds[s];
+                        f2.maxHealth = 80;
+                        f2.deck = f2deck;
+                        f2.monsters = f2monsters;
+                        Synthetic.build(f2, new Synthetic.SyntheticStep());
+                        Driver.drain(4000, 800L);
+                        com.megacrit.cardcrawl.dungeons.AbstractDungeon.player.potions.set(0,
+                                PotionHelper.getPotion("Fire Potion"));
+                        World f2root = World.captureLive();
+                        for (int e = 0; e < 2; e++) {
+                            boolean extras = e == 1;
+                            Solver.Result r = searchCappedExtras(f2root, 80000, 240000L, extras);
+                            int score = Solver.lastBestScoreForTest();
+                            int nodes = r == null ? -1 : r.nodes;
+                            int trans = Solver.lastTranspositions();
+                            int steps = r == null || r.plan == null ? -1 : r.plan.size();
+                            Log.info("  S291 report seed=" + seeds[s] + " extras=" + extras
+                                    + " score=" + score + " nodes=" + nodes
+                                    + " transpositions=" + trans + " steps=" + steps);
+                        }
+                        try { World.forceRestore(); } catch (Throwable t) { }
+                    }
+                } catch (Throwable t) {
+                    Probe.check(false, "S291 ran without throwing", String.valueOf(t));
+                } finally {
+                    Limits.overrideForTest("search.keyExtras", null);
+                    Digest.setKeyExtras(false);
+                    try { if (a != null) a.uninstall(); } catch (Throwable t) { }
+                    try { if (b != null) b.uninstall(); } catch (Throwable t) { }
                     try { World.forceRestore(); } catch (Throwable t) { }
                 }
             }
@@ -20129,6 +20382,9 @@ private static void s78Write(File file, String text, long modified) {
             // gate has to see the real policy again, not the previous gate's pin.
             sts1solver.search.Limits.forcePotionsForTest(null);
             sts1solver.search.Limits.forceBeamForTest(null);
+            sts1solver.search.Limits.clearOverridesForTest();
+            sts1solver.mirror.Digest.setKeyExtras(sts1solver.search.Limits.keyExtras());
+            sts1solver.search.Solver.setProvenStopForTest(true);
             Driver.setScreenDeltaForTest(null);
             Driver.setFastDeltaForTest(null);
             Driver.setEndTurnSmallFramesForTest(null);

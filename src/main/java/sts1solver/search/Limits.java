@@ -468,6 +468,28 @@ public final class Limits {
     }
 
     /**
+     * G1 (2026-11-20, task G): the zero-cost win stop that marks a line "proven optimal".
+     *
+     * <p>On by default so today's behaviour is byte-identical. When {@code search.provenStop=off},
+     * a zero-cost win no longer sets {@code provenOptimal}, so the search uses its full budget and
+     * can find a higher-scoring line that first loses HP then earns it back via post-fight heal,
+     * loot or growth. Cost: the search runs to the budget/boundary instead of stopping early.
+     */
+    public static boolean provenStop() {
+        return yes("search.provenStop", true);
+    }
+
+    /**
+     * G2 (2026-11-20, task G): fold potion slots, relic counters and orb amounts into the search
+     * key so two boards that differ only in those fields are no longer merged.
+     *
+     * <p>Off by default so today's digest is byte-identical. {@code search.keyExtras=on} opts in.
+     */
+    public static boolean keyExtras() {
+        return yes("search.keyExtras", false);
+    }
+
+    /**
      * 1.0.15 (user): true while the player's budget came from 自动. Only that mode may extend its
      * own wait as the sandbox hand grows -- a number the player picked (6s, 12s, ...) is a promise.
      */
