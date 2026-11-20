@@ -69,7 +69,9 @@ final class BuiltInStateFingerprint {
             return tag;
         }
         ReadResult groupResult = readNamed(value, "group");
-        recordReadFailure(label + ".group", groupResult, unknown);
+        if (groupResult.status == ReadStatus.INACCESSIBLE) {
+            recordReadFailure(label + ".group", groupResult, unknown);
+        }
         Object group = groupResult.value;
         if (group instanceof Iterable<?>) {
             return appendValue(writer, tag, label, group, unknown);
