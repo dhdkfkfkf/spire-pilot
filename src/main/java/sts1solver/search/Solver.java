@@ -4871,6 +4871,11 @@ public final class Solver {
             return this.reason;
         }
 
+        /** Detailed cause when search stopped because legal-action enumeration was incomplete. */
+        public String actionGenerationFailure() {
+            return this.actionGenerationFailure;
+        }
+
         public int bestActions() {
             return this.best.path.size();
         }
