@@ -8,7 +8,7 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Deterministic, conservative inventory of scalar fields on the built-in combat actors.
+ * Deterministic, conservative inventory of built-in combat actors and mirrored static roots.
  *
  * <p>This deliberately does not claim completeness: object-valued fields may contain behavior
  * state, and mod code can keep state in statics or external services. It is an additional diagnostic
