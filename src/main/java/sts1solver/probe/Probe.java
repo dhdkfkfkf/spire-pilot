@@ -64,6 +64,94 @@ public final class Probe {
     private Probe() {
     }
 
+    /*
+     * F-task (2026-11-20): the search-efficiency matrix behind S283/S284. Every cell is one
+     * capped search (20000 nodes, clock far away so the NODE cap is what ends the search) on a
+     * board captured once per fixture+seed, so the six variants of one seed start from the same
+     * state. Nothing here touches a production default: the variant switches live in test hooks.
+     */
+
+    /** Test-only switch table: one variant per row of the matrix. */
+    private static void matrixApplyVariant(int variant) {
+        Limits.clearOverridesForTest();
+        Solver.setRngKeyForTest(false);
+        if (variant == 1) {
+            Solver.setRngKeyForTest(true);
+        } else if (variant == 2) {
+            Limits.overrideForTest("search.dominance", "on");
+        } else if (variant == 3) {
+            Limits.overrideForTest("search.turnPlan", "off");
+        } else if (variant == 4) {
+            Limits.overrideForTest("search.targetFocus", "off");
+        } else if (variant == 5) {
+            Limits.overrideForTest("search.diversity", "off");
+        }
+    }
+
+    /** A plan's identity: language-independent ids and positions, never labels. */
+    private static String matrixPlanDigest(java.util.List<Solver.Step> plan) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < plan.size(); i++) {
+            Action a = plan.get(i).action;
+            sb.append(a.kind).append('/').append(a.cardId).append('/').append(a.cardUuid)
+                    .append('/').append(a.targetIndex).append('/').append(a.choice)
+                    .append('/').append(a.energyOnUse).append('/').append(a.potionSlot).append(';');
+        }
+        return sb.toString();
+    }
+
+    /**
+     * One matrix cell. Returns {status, plan}; prints the per-cell row before the caller
+     * compares it with V0. A cell that does not finish inside 90 s is marked and left alone --
+     * the next cell starts from the same captured board.
+     */
+    private static String[] matrixCell(String fixture, String variant, long seed, World root,
+                                       int variantIndex, String baselinePlan) {
+        matrixApplyVariant(variantIndex);
+        long started = System.currentTimeMillis();
+        Solver.Session session = null;
+        Solver.Result result = null;
+        String status = "ok";
+        try {
+            session = new Solver.Session(root, 24, 96, Long.MAX_VALUE / 8L, 20000, 0);
+            long deadline = started + 90000L;
+            while (!session.finished() && System.currentTimeMillis() < deadline) {
+                session.advance(50L);
+            }
+            if (!session.finished()) {
+                status = "timeout";
+            }
+            result = session.result();
+            if (result == null && "ok".equals(status)) {
+                status = "no-result";
+            }
+        } catch (Throwable t) {
+            status = "fail:" + t.getClass().getSimpleName();
+        } finally {
+            try {
+                World.forceRestore();
+            } catch (Throwable t) {
+                // the next cell captures its own board; a failed restore is not hidden, it is
+                // simply not this cell's measurement to report
+            }
+        }
+        boolean ok = "ok".equals(status);
+        String plan = result == null ? "" : matrixPlanDigest(result.plan);
+        int nodes = session == null ? -1 : session.nodes();
+        Log.info("  S283 " + fixture + "|" + variant + "|seed=" + seed
+                + "|nodes=" + nodes
+                + "|transpositions=" + (ok ? String.valueOf(Solver.lastTranspositions()) : "-")
+                + "|" + (ok ? Solver.lastB176ForTest() : "b176=unavailable")
+                + "|ms=" + (System.currentTimeMillis() - started)
+                + "|bestScore=" + (ok ? String.valueOf(Solver.lastBestScoreForTest()) : "-")
+                + "|win=" + (result != null && result.win)
+                + "|plan=" + (plan.isEmpty() ? "-"
+                        : Integer.toHexString(plan.hashCode()) + "/" + plan.length())
+                + "|sameAsV0=" + (baselinePlan == null ? "-" : String.valueOf(baselinePlan.equals(plan)))
+                + "|status=" + status);
+        return new String[]{status, plan};
+    }
+
     public static void autoTest() {
         Log.setRunId(String.valueOf(System.currentTimeMillis()));
         // B112: remember the player's own run saves, so anything the suite writes on exit can be
@@ -3433,6 +3521,100 @@ public final class Probe {
                             "equal hi/lo with different canonical strings are NOT equal", "");
                 } catch (Throwable t) {
                     Probe.check(false, "S278 ran without throwing", String.valueOf(t));
+                }
+            }
+        });
+
+        Probe.core("S283 search efficiency matrix: V0-V5 x 3 fixtures x 3 seeds at a 20000-node cap",
+                new Runnable(){
+            @Override
+            public void run() {
+                String[][] decks = {
+                        {"Strike_R", "Strike_R", "Strike_R", "Strike_R", "Strike_R",
+                                "Defend_R", "Defend_R", "Defend_R", "Defend_R", "Bash"},
+                        {"Strike_R", "Strike_R", "Strike_R", "Strike_R",
+                                "Defend_R", "Defend_R", "Defend_R", "Defend_R",
+                                "Bash", "Shrug It Off"},
+                        {"Strike_R", "Strike_R", "Strike_R", "Defend_R", "Defend_R",
+                                "Bash", "Pommel Strike", "Pommel Strike",
+                                "Shrug It Off", "Battle Trance"}};
+                String[][] monsters = {
+                        {"com.megacrit.cardcrawl.monsters.exordium.JawWorm"},
+                        {"com.megacrit.cardcrawl.monsters.exordium.Cultist",
+                                "com.megacrit.cardcrawl.monsters.exordium.JawWorm"},
+                        {"com.megacrit.cardcrawl.monsters.exordium.LouseNormal",
+                                "com.megacrit.cardcrawl.monsters.exordium.LouseDefensive"}};
+                String[] fixtures = {"F1", "F2", "F3"};
+                String[] variants = {"V0", "V1", "V2", "V3", "V4", "V5"};
+                long[] seeds = {9301L, 9302L, 9303L};
+                try {
+                    for (int f = 0; f < fixtures.length; f++) {
+                        for (int s = 0; s < seeds.length; s++) {
+                            Synthetic.Spec spec = new Synthetic.Spec();
+                            spec.seed = seeds[s];
+                            spec.maxHealth = 80;
+                            spec.deck = decks[f];
+                            spec.monsters = monsters[f];
+                            Synthetic.build(spec, new Synthetic.SyntheticStep());
+                            Driver.drain(4000, 800L);
+                            World root = World.captureLive();
+                            Log.info("  S283 fixture=" + fixtures[f] + " seed=" + seeds[s]
+                                    + " deck=" + java.util.Arrays.toString(decks[f])
+                                    + " monsters=" + java.util.Arrays.toString(monsters[f]));
+                            String baseline = null;
+                            for (int v = 0; v < variants.length; v++) {
+                                String[] cell = matrixCell(fixtures[f], variants[v], seeds[s],
+                                        root, v, baseline);
+                                if (v == 0) {
+                                    baseline = cell[1];
+                                }
+                                Probe.check("ok".equals(cell[0]),
+                                        "S283 " + fixtures[f] + " " + variants[v] + " seed=" + seeds[s]
+                                                + " produced a row",
+                                        cell[0]);
+                                Probe.check(cell[1].length() > 0,
+                                        "S283 " + fixtures[f] + " " + variants[v] + " seed=" + seeds[s]
+                                                + " has a plan",
+                                        "len=" + cell[1].length());
+                            }
+                        }
+                    }
+                } catch (Throwable t) {
+                    Probe.check(false, "S283 ran without throwing", String.valueOf(t));
+                } finally {
+                    Solver.setRngKeyForTest(false);
+                    Limits.clearOverridesForTest();
+                    try { World.forceRestore(); } catch (Throwable t) { }
+                }
+            }
+        });
+
+        Probe.core("S284 RNG-in-key is opt-in: the default key is byte-identical to 1.6.10",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    Solver.setRngKeyForTest(false);
+                    String settled = Solver.positionKeyForTest("abc123", true);
+                    String raw = Solver.positionKeyForTest("abc123", false);
+                    Probe.check(Digest.stable("abc123").equals(settled),
+                            "the settled key is stable(digest) by default", settled);
+                    Probe.check("abc123".equals(raw),
+                            "the unsettled key is the raw digest by default", raw);
+                    Solver.setRngKeyForTest(true);
+                    String withRng = Solver.positionKeyForTest("abc123", false);
+                    Probe.check(withRng.startsWith("abc123|rng=")
+                                    && withRng.length() > "abc123|rng=".length(),
+                            "only the test switch folds the RNG counters into the key", withRng);
+                    Probe.check(!raw.equals(withRng),
+                            "the RNG key differs from the default key", withRng);
+                    Solver.setRngKeyForTest(false);
+                    Probe.check("abc123".equals(Solver.positionKeyForTest("abc123", false)),
+                            "turning the switch off restores the default key", "");
+                } catch (Throwable t) {
+                    Probe.check(false, "S284 ran without throwing", String.valueOf(t));
+                } finally {
+                    Solver.setRngKeyForTest(false);
                 }
             }
         });
