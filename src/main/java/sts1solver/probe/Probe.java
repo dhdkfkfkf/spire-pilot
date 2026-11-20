@@ -148,6 +148,7 @@ public final class Probe {
         int nodes = session == null ? -1 : session.nodes();
         int bestAt = ok ? Solver.lastBestAtNodeForTest() : -1;
         int bestUpd = ok ? Solver.lastBestUpdatesForTest() : -1;
+        String curve = ok ? Solver.lastCurveForTest() : "";
         Log.info("  " + tag + " " + fixture + "|" + variant + "|seed=" + seed
                 + "|cap=" + capNodes
                 + "|nodes=" + nodes
@@ -157,13 +158,15 @@ public final class Probe {
                 + "|bestScore=" + (ok ? String.valueOf(Solver.lastBestScoreForTest()) : "-")
                 + "|bestAt=" + bestAt
                 + "|bestUpd=" + bestUpd
+                + "|curve=" + (curve.isEmpty() ? "-" : curve)
                 + "|win=" + (result != null && result.win)
                 + "|plan=" + (plan.isEmpty() ? "-"
                         : Integer.toHexString(plan.hashCode()) + "/" + plan.length())
                 + "|sameAsV0=" + (baselinePlan == null ? "-" : String.valueOf(baselinePlan.equals(plan)))
                 + "|status=" + status);
         return new String[]{status, plan, String.valueOf(bestAt), String.valueOf(bestUpd),
-                String.valueOf(nodes), String.valueOf(ok ? Solver.lastBestScoreForTest() : 0)};
+                String.valueOf(nodes), String.valueOf(ok ? Solver.lastBestScoreForTest() : 0),
+                curve};
     }
 
     public static void autoTest() {
@@ -3699,6 +3702,80 @@ public final class Probe {
                 } catch (Throwable t) {
                     Probe.check(false, "S285 ran without throwing", String.valueOf(t));
                 } finally {
+                    Solver.setRngKeyForTest(false);
+                    Limits.clearOverridesForTest();
+                    try { World.forceRestore(); } catch (Throwable t) { }
+                }
+            }
+        });
+
+        Probe.core("S286 score-vs-nodes curve: F2 V0-V5 x 3 seeds at an 80k-node cap",
+                new Runnable(){
+            @Override
+            public void run() {
+                String[] deck = {"Strike_R", "Strike_R", "Strike_R", "Strike_R",
+                        "Defend_R", "Defend_R", "Defend_R", "Defend_R",
+                        "Bash", "Shrug It Off"};
+                String[] monsters = {"com.megacrit.cardcrawl.monsters.exordium.Cultist",
+                        "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                String[] variants = {"V0", "V1", "V2", "V3", "V4", "V5"};
+                long[] seeds = {9301L, 9302L, 9303L};
+                try {
+                    for (int s = 0; s < seeds.length; s++) {
+                        Synthetic.Spec spec = new Synthetic.Spec();
+                        spec.seed = seeds[s];
+                        spec.maxHealth = 80;
+                        spec.deck = deck;
+                        spec.monsters = monsters;
+                        Synthetic.build(spec, new Synthetic.SyntheticStep());
+                        Driver.drain(4000, 800L);
+                        World root = World.captureLive();
+                        Log.info("  S286 fixture=F2 seed=" + seeds[s] + " cap=80000");
+                        for (int v = 0; v < variants.length; v++) {
+                            Solver.setCurveForTest(true);
+                            String[] cell;
+                            try {
+                                cell = matrixCellCapped("S286", "F2", variants[v], seeds[s], root,
+                                        v, null, 80000, 240000L);
+                            } finally {
+                                Solver.setCurveForTest(false);
+                            }
+                            String curve = cell[6];
+                            String[] points = curve.split(",");
+                            boolean monotonic = true;
+                            int previous = Integer.MIN_VALUE;
+                            for (String p : points) {
+                                int eq = p.indexOf('=');
+                                int value = eq < 0 ? Integer.MIN_VALUE
+                                        : Integer.parseInt(p.substring(eq + 1));
+                                if (value < previous) {
+                                    monotonic = false;
+                                }
+                                previous = value;
+                            }
+                            int finalScore = Integer.parseInt(cell[5]);
+                            Probe.check("ok".equals(cell[0]),
+                                    "S286 seed=" + seeds[s] + " " + variants[v] + " produced a row",
+                                    cell[0]);
+                            Probe.check(cell[1].length() > 0,
+                                    "S286 seed=" + seeds[s] + " " + variants[v] + " has a plan",
+                                    "len=" + cell[1].length());
+                            Probe.check(points.length > 0 && !"-".equals(curve),
+                                    "S286 seed=" + seeds[s] + " " + variants[v] + " crossed a threshold",
+                                    curve);
+                            Probe.check(monotonic,
+                                    "S286 seed=" + seeds[s] + " " + variants[v] + " curve never falls",
+                                    curve);
+                            Probe.check(previous <= finalScore,
+                                    "S286 seed=" + seeds[s] + " " + variants[v]
+                                            + " final score covers the last threshold",
+                                    "last=" + previous + " final=" + finalScore);
+                        }
+                    }
+                } catch (Throwable t) {
+                    Probe.check(false, "S286 ran without throwing", String.valueOf(t));
+                } finally {
+                    Solver.setCurveForTest(false);
                     Solver.setRngKeyForTest(false);
                     Limits.clearOverridesForTest();
                     try { World.forceRestore(); } catch (Throwable t) { }

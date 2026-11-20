@@ -1704,6 +1704,38 @@ public final class Solver {
         return b176BestUpdates;
     }
 
+    /**
+     * F-task: test-only score-vs-nodes curve. Thresholds are expanded-node counts; the value is
+     * the best score known when the search crossed that count (or Integer.MIN_VALUE if the search
+     * ended before reaching it). Off by default, so production pays one boolean check per node.
+     */
+    private static final int[] CURVE_NODES =
+            {100, 250, 500, 1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000};
+    private static boolean curveForTest;
+    private static final int[] curveScores = new int[CURVE_NODES.length];
+
+    public static void setCurveForTest(boolean value) {
+        curveForTest = value;
+        if (value) {
+            java.util.Arrays.fill(curveScores, Integer.MIN_VALUE);
+        }
+    }
+
+    /** F-task: "n=score" pairs for the thresholds the last search actually crossed. */
+    public static String lastCurveForTest() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < CURVE_NODES.length; i++) {
+            if (curveScores[i] == Integer.MIN_VALUE) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(',');
+            }
+            sb.append(CURVE_NODES[i]).append('=').append(curveScores[i]);
+        }
+        return sb.toString();
+    }
+
     /*
      * WARNING - Removed try catching itself - possible behaviour change.
      */
@@ -5470,6 +5502,15 @@ public final class Solver {
                     }
                 }
                 ++this.nodes;
+                // F-task: the score known when this node count was crossed (test-only, default off).
+                if (curveForTest) {
+                    for (int curveIndex = 0; curveIndex < CURVE_NODES.length; ++curveIndex) {
+                        if (this.nodes == CURVE_NODES[curveIndex]) {
+                            curveScores[curveIndex] = this.best == null
+                                    ? Integer.MIN_VALUE : this.best.score;
+                        }
+                    }
+                }
                 if (list.size() > 1) {
                     ++this.choiceBranches;
                 }
