@@ -138,18 +138,23 @@ public final class Probe {
         boolean ok = "ok".equals(status);
         String plan = result == null ? "" : matrixPlanDigest(result.plan);
         int nodes = session == null ? -1 : session.nodes();
+        int bestAt = ok ? Solver.lastBestAtNodeForTest() : -1;
+        int bestUpd = ok ? Solver.lastBestUpdatesForTest() : -1;
         Log.info("  S283 " + fixture + "|" + variant + "|seed=" + seed
                 + "|nodes=" + nodes
                 + "|transpositions=" + (ok ? String.valueOf(Solver.lastTranspositions()) : "-")
                 + "|" + (ok ? Solver.lastB176ForTest() : "b176=unavailable")
                 + "|ms=" + (System.currentTimeMillis() - started)
                 + "|bestScore=" + (ok ? String.valueOf(Solver.lastBestScoreForTest()) : "-")
+                + "|bestAt=" + bestAt
+                + "|bestUpd=" + bestUpd
                 + "|win=" + (result != null && result.win)
                 + "|plan=" + (plan.isEmpty() ? "-"
                         : Integer.toHexString(plan.hashCode()) + "/" + plan.length())
                 + "|sameAsV0=" + (baselinePlan == null ? "-" : String.valueOf(baselinePlan.equals(plan)))
                 + "|status=" + status);
-        return new String[]{status, plan};
+        return new String[]{status, plan, String.valueOf(bestAt), String.valueOf(bestUpd),
+                String.valueOf(nodes)};
     }
 
     public static void autoTest() {
@@ -3576,6 +3581,14 @@ public final class Probe {
                                         "S283 " + fixtures[f] + " " + variants[v] + " seed=" + seeds[s]
                                                 + " has a plan",
                                         "len=" + cell[1].length());
+                                int bestAt = Integer.parseInt(cell[2]);
+                                int bestUpd = Integer.parseInt(cell[3]);
+                                int nodes = Integer.parseInt(cell[4]);
+                                Probe.check((bestAt < 0) == (bestUpd == 0)
+                                                && (bestAt < 0 || bestAt <= nodes),
+                                        "S283 " + fixtures[f] + " " + variants[v] + " seed=" + seeds[s]
+                                                + " bestAt is a real node index",
+                                        "bestAt=" + bestAt + " bestUpd=" + bestUpd + " nodes=" + nodes);
                             }
                         }
                     }

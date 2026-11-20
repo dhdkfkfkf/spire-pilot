@@ -1680,6 +1680,8 @@ public final class Solver {
     private static int b176Dominated;
     private static int b176RevisitedBetter;
     private static int b176BestScore;
+    private static int b176BestAtNode = -1;
+    private static int b176BestUpdates;
 
     public static String lastB176ForTest() {
         return "unsettled=" + b176Unsettled + " mergedByPhase=" + b176MergedByPhase
@@ -1690,6 +1692,16 @@ public final class Solver {
     /** F-task: the best-line score of the last search, for the matrix's bestScore column. */
     public static int lastBestScoreForTest() {
         return b176BestScore;
+    }
+
+    /** F-task: how many expanded nodes had been walked when the final best score was reached. */
+    public static int lastBestAtNodeForTest() {
+        return b176BestAtNode;
+    }
+
+    /** F-task: how many times the best score improved during the last search. */
+    public static int lastBestUpdatesForTest() {
+        return b176BestUpdates;
     }
 
     /*
@@ -4575,6 +4587,9 @@ public final class Solver {
         private int startFairies;
         private String startDigest;
         private Node best;
+        /** F-task (nodes-to-best): expanded-node count when the best score last improved, -1 if never. */
+        private int bestAtNode = -1;
+        private int bestUpdates;
         private List<Node> frontier = new ArrayList<Node>();
         private Map<StateKey, Node> next;
         private int nodeIndex;
@@ -5508,8 +5523,11 @@ public final class Solver {
                 // B173 (user m21300): the in-rung best is still picked by the raw score -- the net
                 // number is only what the panel prints and what the cross-rung merge compares. Trying
                 // to rank by it dropped the board terms and picked zero-damage zero-turn stubs.
-                if (n3 > this.best.score) {
+                int priorBest = this.best.score;
+                if (n3 > priorBest) {
                     this.best = node3;
+                    this.bestAtNode = this.nodes;
+                    ++this.bestUpdates;
                     this.bestEscaped = choice.escaped && !choice.win && EscapePolicy.mayRecommendEscape();
                 }
                 if (choice.win && !choice.dead) {
@@ -5519,6 +5537,10 @@ public final class Solver {
                     // That is intended: user m21969 (2026-11-10) rejected ranking wins by net HP, and
                     // the net number stays free of the loot term (m21803) so it never reads as "free".
                     if (!this.best.win || n3 > this.best.score) {
+                        if (n3 > priorBest) {
+                            this.bestAtNode = this.nodes;
+                            ++this.bestUpdates;
+                        }
                         this.best = node3;
                     }
                     this.reason = "win";
@@ -5885,6 +5907,8 @@ public final class Solver {
             Solver.b176Dominated = this.dominated;
             Solver.b176RevisitedBetter = this.revisitedBetter;
             Solver.b176BestScore = this.best == null ? Integer.MIN_VALUE : this.best.score;
+            Solver.b176BestAtNode = this.bestAtNode;
+            Solver.b176BestUpdates = this.bestUpdates;
             profile.skipped = this.skipped;
             profile.transpositions = this.transpositions;
             // B184: the sliced path never printed the split, so the one place a player actually
