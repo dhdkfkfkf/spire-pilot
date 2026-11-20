@@ -3958,6 +3958,13 @@ public final class Probe {
                         Solver.setProvenStopForTest(false);
                         Solver.Result off = searchCapped(root, 30000, 120000L);
                         int offScore = Solver.lastBestScoreForTest();
+                        // Third arm: growth budgets pinned to zero, stop still off. If the gap is
+                        // growth, this arm lands back on the stop-on score; if it stays near the
+                        // stop-off score, growth is not what the stop is leaving behind.
+                        sts1solver.search.GrowthBook.overrideForTest(new int[0]);
+                        Solver.Result offNoGrowth = searchCapped(root, 30000, 120000L);
+                        int offNoGrowthScore = Solver.lastBestScoreForTest();
+                        sts1solver.search.GrowthBook.overrideForTest(null);
                         Solver.setProvenStopForTest(true);
                         try { World.forceRestore(); } catch (Throwable t) { }
 
@@ -3969,14 +3976,25 @@ public final class Probe {
                                 + "|stopOn: win=" + (on != null && on.win)
                                 + " proven=" + (on != null && on.provenOptimal)
                                 + " nodes=" + (on == null ? -1 : on.nodes)
+                                + " hpLoss=" + (on == null ? -1 : on.hpLoss)
+                                + " potions=" + (on == null ? -1 : on.potionsUsed)
+                                + " turns=" + (on == null ? -1 : on.predictedTurns)
+                                + " steps=" + (on == null || on.plan == null ? -1 : on.plan.size())
                                 + " score=" + onScore
                                 + " plan=" + (onPlan.isEmpty() || "-".equals(onPlan) ? "-"
                                         : Integer.toHexString(onPlan.hashCode()) + "/" + onPlan.length())
                                 + "|stopOff: win=" + (off != null && off.win)
                                 + " nodes=" + (off == null ? -1 : off.nodes)
+                                + " hpLoss=" + (off == null ? -1 : off.hpLoss)
+                                + " potions=" + (off == null ? -1 : off.potionsUsed)
+                                + " turns=" + (off == null ? -1 : off.predictedTurns)
+                                + " steps=" + (off == null || off.plan == null ? -1 : off.plan.size())
                                 + " score=" + offScore
                                 + " plan=" + (offPlan.isEmpty() || "-".equals(offPlan) ? "-"
                                         : Integer.toHexString(offPlan.hashCode()) + "/" + offPlan.length())
+                                + "|stopOffNoGrowth: nodes="
+                                + (offNoGrowth == null ? -1 : offNoGrowth.nodes)
+                                + " score=" + offNoGrowthScore
                                 + "|samePlan=" + String.valueOf(onPlan.equals(offPlan)));
 
                         Probe.check(on != null && off != null && onPlan.length() > 0
