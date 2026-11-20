@@ -97,7 +97,9 @@ final class BuiltInStateFingerprint {
         if (value instanceof Iterable<?>) {
             int index = 0;
             for (Object item : (Iterable<?>) value) {
-                tag = appendObject(writer, tag, label + "[" + index++ + "]", item, unknown);
+                // Elements may themselves be scalars or nested containers (for example a mod-owned
+                // list of UUIDs). Route through appendValue so their actual values are encoded.
+                tag = appendValue(writer, tag, label + "[" + index++ + "]", item, unknown);
             }
             writer.putString(tag++, label + ".size=" + index);
             return tag;
