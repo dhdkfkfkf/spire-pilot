@@ -4570,6 +4570,8 @@ public final class Solver {
         private int nodeIndex;
         private int actionIndex;
         private List<Action> currentActs;
+        /** Diagnostic for a candidate scan that failed before producing a complete action set. */
+        private String actionGenerationFailure = "";
         private int layer;
         private int nodes;
         private int expansions;
@@ -5355,7 +5357,19 @@ public final class Solver {
                 }
                 this.seenBest.put(seenKey, Integer.valueOf(node.score));
                 long candStart = System.nanoTime();
-                this.currentActs = Solver.candidates(node.world);
+                try {
+                    this.currentActs = Solver.candidates(node.world);
+                } catch (IllegalStateException failure) {
+                    // A partial legal-action list is not a valid search frontier. Stop this session
+                    // explicitly instead of treating the node as terminal or crashing the game loop.
+                    this.actionGenerationFailure = failure.getMessage() == null
+                            ? "incomplete legal action enumeration" : failure.getMessage();
+                    this.reason = "incomplete-actions";
+                    Log.warn("search aborted: " + this.actionGenerationFailure);
+                    node.world = null;
+                    this.done = true;
+                    return;
+                }
                 long candUs = (System.nanoTime() - candStart) / 1000L;
                 if (candUs >= Solver.SLOW_STEP_US) {
                     // B170: enumerating actions can open screens and replay choices; that work is
