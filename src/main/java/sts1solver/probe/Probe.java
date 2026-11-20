@@ -107,14 +107,22 @@ public final class Probe {
      */
     private static String[] matrixCell(String fixture, String variant, long seed, World root,
                                        int variantIndex, String baselinePlan) {
+        return matrixCellCapped("S283", fixture, variant, seed, root, variantIndex,
+                baselinePlan, 20000, 90000L);
+    }
+
+    /** Same cell with an explicit node cap, for the budget-sensitivity gate (S285). */
+    private static String[] matrixCellCapped(String tag, String fixture, String variant, long seed,
+                                             World root, int variantIndex, String baselinePlan,
+                                             int capNodes, long deadlineMs) {
         matrixApplyVariant(variantIndex);
         long started = System.currentTimeMillis();
         Solver.Session session = null;
         Solver.Result result = null;
         String status = "ok";
         try {
-            session = new Solver.Session(root, 24, 96, Long.MAX_VALUE / 8L, 20000, 0);
-            long deadline = started + 90000L;
+            session = new Solver.Session(root, 24, 96, Long.MAX_VALUE / 8L, capNodes, 0);
+            long deadline = started + deadlineMs;
             while (!session.finished() && System.currentTimeMillis() < deadline) {
                 session.advance(50L);
             }
@@ -140,7 +148,8 @@ public final class Probe {
         int nodes = session == null ? -1 : session.nodes();
         int bestAt = ok ? Solver.lastBestAtNodeForTest() : -1;
         int bestUpd = ok ? Solver.lastBestUpdatesForTest() : -1;
-        Log.info("  S283 " + fixture + "|" + variant + "|seed=" + seed
+        Log.info("  " + tag + " " + fixture + "|" + variant + "|seed=" + seed
+                + "|cap=" + capNodes
                 + "|nodes=" + nodes
                 + "|transpositions=" + (ok ? String.valueOf(Solver.lastTranspositions()) : "-")
                 + "|" + (ok ? Solver.lastB176ForTest() : "b176=unavailable")
@@ -154,7 +163,7 @@ public final class Probe {
                 + "|sameAsV0=" + (baselinePlan == null ? "-" : String.valueOf(baselinePlan.equals(plan)))
                 + "|status=" + status);
         return new String[]{status, plan, String.valueOf(bestAt), String.valueOf(bestUpd),
-                String.valueOf(nodes)};
+                String.valueOf(nodes), String.valueOf(ok ? Solver.lastBestScoreForTest() : 0)};
     }
 
     public static void autoTest() {
@@ -3628,6 +3637,71 @@ public final class Probe {
                     Probe.check(false, "S284 ran without throwing", String.valueOf(t));
                 } finally {
                     Solver.setRngKeyForTest(false);
+                }
+            }
+        });
+
+        Probe.core("S285 budget sensitivity: F2 at 20k/40k/80k nodes, V0 only",
+                new Runnable(){
+            @Override
+            public void run() {
+                String[] deck = {"Strike_R", "Strike_R", "Strike_R", "Strike_R",
+                        "Defend_R", "Defend_R", "Defend_R", "Defend_R",
+                        "Bash", "Shrug It Off"};
+                String[] monsters = {"com.megacrit.cardcrawl.monsters.exordium.Cultist",
+                        "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                long[] seeds = {9301L, 9302L, 9303L};
+                int[] caps = {20000, 40000, 80000};
+                // The 20k control must reproduce round-2 S283 exactly; a drift here would make
+                // the 40k/80k columns incomparable.
+                int[] expectedScore = {10013559, 10015001, 10001248};
+                int[] expectedBestAt = {2400, 19199, 8848};
+                try {
+                    for (int s = 0; s < seeds.length; s++) {
+                        Synthetic.Spec spec = new Synthetic.Spec();
+                        spec.seed = seeds[s];
+                        spec.maxHealth = 80;
+                        spec.deck = deck;
+                        spec.monsters = monsters;
+                        Synthetic.build(spec, new Synthetic.SyntheticStep());
+                        Driver.drain(4000, 800L);
+                        World root = World.captureLive();
+                        Log.info("  S285 fixture=F2 seed=" + seeds[s]
+                                + " caps=" + java.util.Arrays.toString(caps));
+                        String baseline = null;
+                        for (int c = 0; c < caps.length; c++) {
+                            String[] cell = matrixCellCapped("S285", "F2", "V0", seeds[s], root,
+                                    0, baseline, caps[c], 240000L);
+                            if (c == 0) {
+                                baseline = cell[1];
+                            }
+                            int bestAt = Integer.parseInt(cell[2]);
+                            int nodes = Integer.parseInt(cell[4]);
+                            int score = Integer.parseInt(cell[5]);
+                            Probe.check("ok".equals(cell[0]),
+                                    "S285 seed=" + seeds[s] + " cap=" + caps[c] + " produced a row",
+                                    cell[0]);
+                            Probe.check(cell[1].length() > 0,
+                                    "S285 seed=" + seeds[s] + " cap=" + caps[c] + " has a plan",
+                                    "len=" + cell[1].length());
+                            Probe.check(bestAt >= 0 && bestAt <= nodes && nodes <= caps[c],
+                                    "S285 seed=" + seeds[s] + " cap=" + caps[c]
+                                            + " stayed inside its node cap",
+                                    "bestAt=" + bestAt + " nodes=" + nodes);
+                            if (c == 0) {
+                                Probe.check(score == expectedScore[s] && bestAt == expectedBestAt[s],
+                                        "S285 seed=" + seeds[s] + " 20k control matches round 2",
+                                        "score=" + score + "/" + expectedScore[s]
+                                                + " bestAt=" + bestAt + "/" + expectedBestAt[s]);
+                            }
+                        }
+                    }
+                } catch (Throwable t) {
+                    Probe.check(false, "S285 ran without throwing", String.valueOf(t));
+                } finally {
+                    Solver.setRngKeyForTest(false);
+                    Limits.clearOverridesForTest();
+                    try { World.forceRestore(); } catch (Throwable t) { }
                 }
             }
         });
