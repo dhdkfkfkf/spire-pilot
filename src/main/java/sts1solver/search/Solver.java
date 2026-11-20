@@ -298,7 +298,12 @@ public final class Solver {
             installed = true;
             int hp0 = Solver.hp();
             int gold0 = Solver.playerGold();
-            List<Action> actions = Legal.actions();
+            ActionGenerationResult generated = Legal.actionsResult();
+            if (!generated.complete()) {
+                Log.warn("rollout skipped: incomplete legal action set; " + generated.failure);
+                return Integer.MIN_VALUE;
+            }
+            List<Action> actions = generated.actions;
             Action greedy = Solver.greedyRolloutAction(actions);
             if (greedy != null) {
                 Legal.apply(greedy);
