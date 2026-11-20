@@ -29,19 +29,24 @@ final class BuiltInStateFingerprint {
                 String[] members = {"relics", "potions", "orbs", "powers",
                         "hand", "drawPile", "discardPile", "exhaustPile"};
                 for (String member : members) {
-                    Object value = readNamed(player, member);
-                    tag = appendValue(writer, tag, "player." + member, value, unknown);
+                    ReadResult result = readNamed(player, member);
+                    recordReadFailure("player." + member, result, unknown);
+                    tag = appendValue(writer, tag, "player." + member, result.value, unknown);
                 }
             }
 
             Object group = com.megacrit.cardcrawl.dungeons.AbstractDungeon.getMonsters();
-            Object monsters = readNamed(group, "monsters");
+            ReadResult monstersResult = readNamed(group, "monsters");
+            recordReadFailure("monsters", monstersResult, unknown);
+            Object monsters = monstersResult.value;
             tag = appendValue(writer, tag, "monsters", monsters, unknown);
             if (monsters instanceof Iterable<?>) {
                 int index = 0;
                 for (Object monster : (Iterable<?>) monsters) {
+                    ReadResult powers = readNamed(monster, "powers");
+                    recordReadFailure("monster[" + index + "].powers", powers, unknown);
                     tag = appendValue(writer, tag, "monster[" + index++ + "].powers",
-                            readNamed(monster, "powers"), unknown);
+                            powers.value, unknown);
                 }
             }
         } catch (Throwable t) {
@@ -63,7 +68,9 @@ final class BuiltInStateFingerprint {
             writer.putString(tag++, label + ".size=" + index);
             return tag;
         }
-        Object group = readNamed(value, "group");
+        ReadResult groupResult = readNamed(value, "group");
+        recordReadFailure(label + ".group", groupResult, unknown);
+        Object group = groupResult.value;
         if (group instanceof Iterable<?>) {
             return appendValue(writer, tag, label, group, unknown);
         }
@@ -111,25 +118,51 @@ final class BuiltInStateFingerprint {
         return tag;
     }
 
-    private static Object readNamed(Object owner, String name) {
+    private enum ReadStatus { PRESENT, OWNER_NULL, ABSENT, INACCESSIBLE }
+
+    private static final class ReadResult {
+        final ReadStatus status;
+        final Object value;
+        final String detail;
+
+        ReadResult(ReadStatus status, Object value, String detail) {
+            this.status = status;
+            this.value = value;
+            this.detail = detail;
+        }
+    }
+
+    /** Missing members and inaccessible members are never silently converted into null state. */
+    private static ReadResult readNamed(Object owner, String name) {
         if (owner == null) {
-            return null;
+            return new ReadResult(ReadStatus.OWNER_NULL, null, "owner-null");
         }
         for (Class<?> type = owner.getClass(); type != null && type != Object.class;
              type = type.getSuperclass()) {
+            final Field field;
             try {
-                Field field = type.getDeclaredField(name);
+                field = type.getDeclaredField(name);
+            } catch (NoSuchFieldException ignored) {
+                continue;
+            }
+            try {
                 if (!field.isAccessible()) {
                     field.setAccessible(true);
                 }
-                return field.get(owner);
-            } catch (NoSuchFieldException ignored) {
-                // Continue through the superclass chain.
+                return new ReadResult(ReadStatus.PRESENT, field.get(owner), "");
             } catch (Throwable t) {
-                return null;
+                return new ReadResult(ReadStatus.INACCESSIBLE, null, t.getClass().getName());
             }
         }
-        return null;
+        return new ReadResult(ReadStatus.ABSENT, null, "field-not-found");
+    }
+
+    private static void recordReadFailure(String label, ReadResult result,
+                                          List<String> unknown) {
+        if (result.status == ReadStatus.ABSENT || result.status == ReadStatus.INACCESSIBLE) {
+            unknown.add("named-field-" + result.status.name().toLowerCase()
+                    + ":" + label + ":" + result.detail);
+        }
     }
 
     private static boolean isScalar(Class<?> type) {
