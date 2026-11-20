@@ -144,6 +144,8 @@ public final class Probe {
             }
         }
         boolean ok = "ok".equals(status);
+        boolean proven = ok && result != null && result.provenOptimal;
+        int steps = result == null || result.plan == null ? 0 : result.plan.size();
         String plan = result == null ? "" : matrixPlanDigest(result.plan);
         int nodes = session == null ? -1 : session.nodes();
         int bestAt = ok ? Solver.lastBestAtNodeForTest() : -1;
@@ -163,10 +165,12 @@ public final class Probe {
                 + "|plan=" + (plan.isEmpty() ? "-"
                         : Integer.toHexString(plan.hashCode()) + "/" + plan.length())
                 + "|sameAsV0=" + (baselinePlan == null ? "-" : String.valueOf(baselinePlan.equals(plan)))
+                + "|proven=" + proven
+                + "|steps=" + steps
                 + "|status=" + status);
         return new String[]{status, plan, String.valueOf(bestAt), String.valueOf(bestUpd),
                 String.valueOf(nodes), String.valueOf(ok ? Solver.lastBestScoreForTest() : 0),
-                curve};
+                curve, String.valueOf(proven), String.valueOf(steps)};
     }
 
     /** S289: one plain capped search, no variant switches, result returned as-is. */
@@ -193,6 +197,76 @@ public final class Probe {
         } finally {
             Limits.overrideForTest("search.keyExtras", null);
         }
+    }
+
+    /*
+     * Task H helpers: hard synthetic fixtures and curve readers shared by S292/S293/S294.
+     * Fixture shapes are fixed here and never tuned per seed: if a gate fails it is reported
+     * honestly, not repaired by changing the board.
+     */
+    private static World buildHardFixture(String fixture, long seed) {
+        Synthetic.Spec spec = new Synthetic.Spec();
+        spec.seed = seed;
+        spec.maxHealth = 80;
+        if ("F4".equals(fixture)) {
+            spec.deck = new String[]{"Strike_R", "Strike_R", "Strike_R", "Strike_R", "Strike_R",
+                    "Defend_R", "Defend_R", "Defend_R", "Defend_R",
+                    "Bash", "Shrug It Off", "Pommel Strike"};
+            spec.monsters = new String[]{
+                    "com.megacrit.cardcrawl.monsters.exordium.Cultist",
+                    "com.megacrit.cardcrawl.monsters.exordium.JawWorm",
+                    "com.megacrit.cardcrawl.monsters.exordium.LouseNormal"};
+        } else { // F5
+            spec.deck = new String[]{"Strike_R", "Strike_R", "Strike_R", "Strike_R",
+                    "Defend_R", "Defend_R", "Defend_R",
+                    "Feed", "Shrug It Off", "Pommel Strike"};
+            spec.monsters = new String[]{
+                    "com.megacrit.cardcrawl.monsters.exordium.Looter",
+                    "com.megacrit.cardcrawl.monsters.exordium.LouseNormal"};
+            // F5 pins a Fire Potion in slot 0; the caller arms forcePotionsForTest.
+        }
+        Synthetic.build(spec, new Synthetic.SyntheticStep());
+        Driver.drain(4000, 800L);
+        if ("F5".equals(fixture)) {
+            AbstractDungeon.player.potions.set(0, PotionHelper.getPotion("Fire Potion"));
+        }
+        return World.captureLive();
+    }
+
+    /** {monotonic(0/1), scoreOfLastPoint} for a "node=score,..." curve; empty -> {1, MIN}. */
+    private static int[] curveStats(String curve) {
+        int previous = Integer.MIN_VALUE;
+        int last = Integer.MIN_VALUE;
+        int monotonic = 1;
+        if (curve == null || curve.isEmpty()) {
+            return new int[]{monotonic, last};
+        }
+        String[] points = curve.split(",");
+        for (String p : points) {
+            int eq = p.indexOf('=');
+            int value = eq < 0 ? Integer.MIN_VALUE : Integer.parseInt(p.substring(eq + 1));
+            if (value < previous) {
+                monotonic = 0;
+            }
+            previous = value;
+            last = value;
+        }
+        return new int[]{monotonic, last};
+    }
+
+    /** Score at an exact node threshold in a "node=score,..." curve; MIN_VALUE if not reached. */
+    private static int curveScoreAt(String curve, int node) {
+        if (curve == null || curve.isEmpty()) {
+            return Integer.MIN_VALUE;
+        }
+        String key = String.valueOf(node) + "=";
+        String[] points = curve.split(",");
+        for (String p : points) {
+            if (p.startsWith(key)) {
+                return Integer.parseInt(p.substring(key.length()));
+            }
+        }
+        return Integer.MIN_VALUE;
     }
 
     public static void autoTest() {
@@ -4264,6 +4338,232 @@ public final class Probe {
                     Digest.setKeyExtras(false);
                     try { if (a != null) a.uninstall(); } catch (Throwable t) { }
                     try { if (b != null) b.uninstall(); } catch (Throwable t) { }
+                    try { World.forceRestore(); } catch (Throwable t) { }
+                }
+            }
+        });
+
+        /*
+         * S292 (2026-11-20, Task H): hardness gate. F4 and F5 must each be hard enough to be
+         * worth a variant matrix. Per fixture, >=2 of 3 seeds must simultaneously show:
+         *   (1) best found after 8000 nodes (bestAt > 8000);
+         *   (2) score at the 8000-node threshold is below the final score (still improving);
+         *   (3) V4 (targetFocus off) or V5 (diversity off) changes the final score or step count
+         *       versus V0 on that same seed.
+         * If a fixture is not hard enough, report the count honestly; never re-tune the fixture.
+         */
+        Probe.core("S292 hard fixtures: F4/F5 must be hard enough to host a variant matrix",
+                new Runnable(){
+            @Override
+            public void run() {
+                String[] fixtures = {"F4", "F5"};
+                long[] seedsF4 = {9401L, 9402L, 9403L};
+                long[] seedsF5 = {9501L, 9502L, 9503L};
+                String[] sideVariants = {"V4", "V5"};
+                int[] sideIndex = {4, 5};
+                try {
+                    for (int f = 0; f < fixtures.length; f++) {
+                        String fixture = fixtures[f];
+                        long[] seeds = "F4".equals(fixture) ? seedsF4 : seedsF5;
+                        int hardSeeds = 0;
+                        for (int s = 0; s < seeds.length; s++) {
+                            if ("F5".equals(fixture)) {
+                                Limits.forcePotionsForTest(Boolean.TRUE);
+                            }
+                            World root = buildHardFixture(fixture, seeds[s]);
+                            Solver.setCurveForTest(true);
+                            String[] v0;
+                            try {
+                                v0 = matrixCellCapped("S292", fixture, "V0", seeds[s], root,
+                                        0, null, 80000, 240000L);
+                            } finally {
+                                Solver.setCurveForTest(false);
+                            }
+                            String[][] sides = new String[2][];
+                            for (int k = 0; k < sideVariants.length; k++) {
+                                sides[k] = matrixCellCapped("S292", fixture, sideVariants[k],
+                                        seeds[s], root, sideIndex[k], v0[1], 80000, 240000L);
+                            }
+                            String[] v4 = sides[0];
+                            String[] v5 = sides[1];
+
+                            int nodes = Integer.parseInt(v0[4]);
+                            int bestAt = Integer.parseInt(v0[2]);
+                            int finalScore = Integer.parseInt(v0[5]);
+                            int score8k = curveScoreAt(v0[6], 8000);
+                            int[] cs = curveStats(v0[6]);
+                            boolean c1 = bestAt > 8000;
+                            boolean c2 = score8k != Integer.MIN_VALUE && score8k < finalScore;
+                            boolean c3 = !v4[5].equals(v0[5]) || !v4[8].equals(v0[8])
+                                    || !v5[5].equals(v0[5]) || !v5[8].equals(v0[8]);
+                            if (c1 && c2 && c3) {
+                                hardSeeds++;
+                            }
+                            Log.info("  S292 fixture=" + fixture + " seed=" + seeds[s]
+                                    + " nodes=" + nodes + " bestAt=" + bestAt
+                                    + " proven=" + v0[7] + " finalScore=" + finalScore
+                                    + " score8k=" + score8k
+                                    + " v4Score=" + v4[5] + " v4Steps=" + v4[8]
+                                    + " v5Score=" + v5[5] + " v5Steps=" + v5[8]
+                                    + " c1=" + c1 + " c2=" + c2 + " c3=" + c3);
+                            Probe.check("ok".equals(v0[0]) && "ok".equals(v4[0]) && "ok".equals(v5[0]),
+                                    "S292 " + fixture + " seed=" + seeds[s] + " produced all cells",
+                                    "v0=" + v0[0] + " v4=" + v4[0] + " v5=" + v5[0]);
+                            Probe.check(nodes <= 80000,
+                                    "S292 " + fixture + " seed=" + seeds[s] + " nodes within cap",
+                                    "nodes=" + nodes);
+                            Probe.check(cs[0] == 1 && cs[1] <= finalScore,
+                                    "S292 " + fixture + " seed=" + seeds[s] + " curve monotonic",
+                                    "mono=" + cs[0] + " last=" + cs[1] + " final=" + finalScore);
+                        }
+                        Log.info("  S292 fixture=" + fixture + " hardSeeds=" + hardSeeds + "/3");
+                        Probe.check(hardSeeds >= 2,
+                                "S292 " + fixture + " hard enough (>=2/3 seeds)",
+                                "hardSeeds=" + hardSeeds + "/3");
+                    }
+                } finally {
+                    Solver.setCurveForTest(false);
+                    Limits.forcePotionsForTest(null);
+                    Limits.clearOverridesForTest();
+                    try { World.forceRestore(); } catch (Throwable t) { }
+                }
+            }
+        });
+
+        /*
+         * S293 (Task H): F4 variant matrix, 3 seeds x V0-V5 at an 80k-node cap, curves on.
+         * Record only: every variant's final score / steps / bestAt / nodes against V0, and the
+         * 100->64k per-tier curve. No "must be better" assertion.
+         */
+        Probe.core("S293 F4 matrix: 3 seeds x V0-V5 at an 80k-node cap",
+                new Runnable(){
+            @Override
+            public void run() {
+                String[] variants = {"V0", "V1", "V2", "V3", "V4", "V5"};
+                int[] vIndex = {0, 1, 2, 3, 4, 5};
+                long[] seeds = {9401L, 9402L, 9403L};
+                try {
+                    for (int s = 0; s < seeds.length; s++) {
+                        World root = buildHardFixture("F4", seeds[s]);
+                        String[] base = null;
+                        int baseScore = 0;
+                        for (int v = 0; v < variants.length; v++) {
+                            Solver.setCurveForTest(true);
+                            String[] cell;
+                            try {
+                                cell = matrixCellCapped("S293", "F4", variants[v], seeds[s], root,
+                                        vIndex[v], base == null ? null : base[1], 80000, 240000L);
+                            } finally {
+                                Solver.setCurveForTest(false);
+                            }
+                            if (v == 0) {
+                                base = cell;
+                                baseScore = Integer.parseInt(cell[5]);
+                            }
+                            int nodes = Integer.parseInt(cell[4]);
+                            int score = Integer.parseInt(cell[5]);
+                            int[] cs = curveStats(cell[6]);
+                            Probe.check("ok".equals(cell[0]),
+                                    "S293 seed=" + seeds[s] + " " + variants[v] + " produced a row",
+                                    "status=" + cell[0]);
+                            Probe.check(nodes <= 80000,
+                                    "S293 seed=" + seeds[s] + " " + variants[v] + " nodes within cap",
+                                    "nodes=" + nodes);
+                            Probe.check(cs[0] == 1 && cs[1] <= score,
+                                    "S293 seed=" + seeds[s] + " " + variants[v] + " curve monotonic",
+                                    "mono=" + cs[0] + " last=" + cs[1] + " score=" + score);
+                            Log.info("  S293 cmp fixture=F4 seed=" + seeds[s] + " " + variants[v]
+                                    + " score=" + score + " steps=" + cell[8]
+                                    + " bestAt=" + cell[2] + " nodes=" + nodes
+                                    + " proven=" + cell[7]
+                                    + " vsV0score=" + (v == 0 ? 0 : score - baseScore)
+                                    + " curve=" + cell[6]);
+                        }
+                    }
+                } finally {
+                    Solver.setCurveForTest(false);
+                    Limits.clearOverridesForTest();
+                    try { World.forceRestore(); } catch (Throwable t) { }
+                }
+            }
+        });
+
+        /*
+         * S294 (Task H): F5 variant matrix (same shape as S293) plus a report-only keyExtras
+         * comparison on F5 V0. No algorithm/default change; numbers are for the main brain.
+         */
+        Probe.core("S294 F5 matrix + keyExtras report: 3 seeds x V0-V5 at an 80k-node cap",
+                new Runnable(){
+            @Override
+            public void run() {
+                String[] variants = {"V0", "V1", "V2", "V3", "V4", "V5"};
+                int[] vIndex = {0, 1, 2, 3, 4, 5};
+                long[] seeds = {9501L, 9502L, 9503L};
+                try {
+                    Limits.forcePotionsForTest(Boolean.TRUE);
+                    for (int s = 0; s < seeds.length; s++) {
+                        World root = buildHardFixture("F5", seeds[s]);
+                        String[] base = null;
+                        int baseScore = 0;
+                        for (int v = 0; v < variants.length; v++) {
+                            Solver.setCurveForTest(true);
+                            String[] cell;
+                            try {
+                                cell = matrixCellCapped("S294", "F5", variants[v], seeds[s], root,
+                                        vIndex[v], base == null ? null : base[1], 80000, 240000L);
+                            } finally {
+                                Solver.setCurveForTest(false);
+                            }
+                            if (v == 0) {
+                                base = cell;
+                                baseScore = Integer.parseInt(cell[5]);
+                            }
+                            int nodes = Integer.parseInt(cell[4]);
+                            int score = Integer.parseInt(cell[5]);
+                            int[] cs = curveStats(cell[6]);
+                            Probe.check("ok".equals(cell[0]),
+                                    "S294 seed=" + seeds[s] + " " + variants[v] + " produced a row",
+                                    "status=" + cell[0]);
+                            Probe.check(nodes <= 80000,
+                                    "S294 seed=" + seeds[s] + " " + variants[v] + " nodes within cap",
+                                    "nodes=" + nodes);
+                            Probe.check(cs[0] == 1 && cs[1] <= score,
+                                    "S294 seed=" + seeds[s] + " " + variants[v] + " curve monotonic",
+                                    "mono=" + cs[0] + " last=" + cs[1] + " score=" + score);
+                            Log.info("  S294 cmp fixture=F5 seed=" + seeds[s] + " " + variants[v]
+                                    + " score=" + score + " steps=" + cell[8]
+                                    + " bestAt=" + cell[2] + " nodes=" + nodes
+                                    + " proven=" + cell[7]
+                                    + " vsV0score=" + (v == 0 ? 0 : score - baseScore)
+                                    + " curve=" + cell[6]);
+                        }
+                    }
+                    // ---- §4.1 keyExtras on F5 V0, report-only (no must-be-better assertion) ----
+                    long[] keySeeds = {9501L, 9502L};
+                    for (int s = 0; s < keySeeds.length; s++) {
+                        World root = buildHardFixture("F5", keySeeds[s]);
+                        for (int e = 0; e < 2; e++) {
+                            boolean extras = e == 1;
+                            Limits.overrideForTest("search.keyExtras", extras ? "on" : "off");
+                            Digest.setKeyExtras(Limits.keyExtras());
+                            Solver.Result r = searchCapped(root, 80000, 240000L);
+                            int score = Solver.lastBestScoreForTest();
+                            int nodes = r == null ? -1 : r.nodes;
+                            int steps = r == null || r.plan == null ? 0 : r.plan.size();
+                            int trans = Solver.lastTranspositions();
+                            Log.info("  S294 keyextras seed=" + keySeeds[s] + " extras=" + extras
+                                    + " score=" + score + " nodes=" + nodes
+                                    + " steps=" + steps + " transpositions=" + trans);
+                            Limits.overrideForTest("search.keyExtras", null);
+                            Digest.setKeyExtras(false);
+                        }
+                    }
+                } finally {
+                    Limits.overrideForTest("search.keyExtras", null);
+                    Digest.setKeyExtras(false);
+                    Solver.setCurveForTest(false);
+                    Limits.forcePotionsForTest(null);
+                    Limits.clearOverridesForTest();
                     try { World.forceRestore(); } catch (Throwable t) { }
                 }
             }
