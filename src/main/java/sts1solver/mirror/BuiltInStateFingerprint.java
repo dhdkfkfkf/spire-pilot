@@ -49,9 +49,39 @@ final class BuiltInStateFingerprint {
                             powers.value, unknown);
                 }
             }
+            tag = appendMirroredStatics(writer, tag, unknown);
         } catch (Throwable t) {
             unknown.add("built-in-state-capture-failed:" + t.getClass().getName());
         }
+    }
+
+    /**
+     * Capture the shallow values of the same static roots that World mirrors. This reuses the
+     * authoritative Statics table (including generated game scalars and discovered mod scalars)
+     * instead of maintaining a second list of global combat fields.
+     *
+     * <p>This is deliberately shallow: nested object graphs, maps, arrays and external mod services
+     * are not proven complete. The caller therefore keeps the resulting key inexact.
+     */
+    private static int appendMirroredStatics(CanonicalStateWriter writer, int tag,
+                                             List<String> unknown) {
+        Statics.Spec[] specs = Statics.specs();
+        for (Statics.Spec spec : specs) {
+            if (spec.kind == Statics.Kind.PREF) {
+                // Save-file overlays are deliberately isolated by World but are not combat state.
+                continue;
+            }
+            String label = "static." + spec.owner.getName() + "#" + spec.name;
+            final Object value;
+            try {
+                value = spec.field.get(null);
+            } catch (Throwable t) {
+                unknown.add("static-root-unreadable:" + label + ":" + t.getClass().getName());
+                continue;
+            }
+            tag = appendValue(writer, tag, label, value, unknown);
+        }
+        return tag;
     }
 
     private static int appendValue(CanonicalStateWriter writer, int tag, String label,
@@ -60,12 +90,21 @@ final class BuiltInStateFingerprint {
             writer.putString(tag++, label + "=null");
             return tag;
         }
+        if (isScalar(value.getClass())) {
+            writer.putString(tag++, label + "=" + scalar(value));
+            return tag;
+        }
         if (value instanceof Iterable<?>) {
             int index = 0;
             for (Object item : (Iterable<?>) value) {
                 tag = appendObject(writer, tag, label + "[" + index++ + "]", item, unknown);
             }
             writer.putString(tag++, label + ".size=" + index);
+            return tag;
+        }
+        if (value instanceof java.util.Map<?, ?> || value.getClass().isArray()) {
+            writer.putString(tag++, label + ".type=" + value.getClass().getName());
+            unknown.add("static-or-named-container-not-enumerated:" + label);
             return tag;
         }
         ReadResult groupResult = readNamed(value, "group");
