@@ -1669,6 +1669,29 @@ public final class Solver {
         return Solver.profile.nodes;
     }
 
+    /**
+     * F-task test hook: a snapshot of the EXISTING B176 counters from the last search. This does
+     * not count anything new -- it copies the very fields the position-keys log already prints, so
+     * the search-efficiency matrix gate can read them without parsing log text.
+     */
+    private static int b176Unsettled;
+    private static int b176MergedByPhase;
+    private static int b176Skipped;
+    private static int b176Dominated;
+    private static int b176RevisitedBetter;
+    private static int b176BestScore;
+
+    public static String lastB176ForTest() {
+        return "unsettled=" + b176Unsettled + " mergedByPhase=" + b176MergedByPhase
+                + " skipped=" + b176Skipped + " dominated=" + b176Dominated
+                + " revisitedBetter=" + b176RevisitedBetter;
+    }
+
+    /** F-task: the best-line score of the last search, for the matrix's bestScore column. */
+    public static int lastBestScoreForTest() {
+        return b176BestScore;
+    }
+
     /*
      * WARNING - Removed try catching itself - possible behaviour change.
      */
@@ -2562,9 +2585,31 @@ public final class Solver {
     /** B176: how many "kept raw" reasons were printed in this process (bounded, log only). */
     private static int settleReasonLogged;
 
+    /**
+     * F-task test hook: when true, the RNG stream position (13 counters, {@link
+     * sts1solver.mirror.RngStamp#of()}) is folded into the search equality key, so two boards that
+     * look identical but sit at different random positions are no longer merged. False by default:
+     * production behaviour and the saved line are byte-for-byte unchanged (gate S284).
+     */
+    private static boolean rngKeyForTest;
+
+    /** Test hook: enable/disable RNG-in-position-key for the next searches. Default off. */
+    public static void setRngKeyForTest(boolean value) {
+        rngKeyForTest = value;
+    }
+
+    /** Test hook: read the RNG-in-key switch (false unless a matrix variant turned it on). */
+    public static boolean rngKeyForTest() {
+        return rngKeyForTest;
+    }
+
     static String positionKey(String digest, boolean settled) {
         if (digest == null) {
             return "";
+        }
+        if (rngKeyForTest) {
+            String rng = sts1solver.mirror.RngStamp.of();
+            return settled ? Digest.stable(digest + "|rng=" + rng) : digest + "|rng=" + rng;
         }
         return settled ? Digest.stable(digest) : digest;
     }
@@ -5833,6 +5878,13 @@ public final class Solver {
             Log.info("position keys (B176): nodes=" + this.nodes + " unsettled=" + this.unsettledNodes
                     + " mergedByPhase=" + this.mergedByPhase + " skipped=" + this.skipped
                     + " dominated=" + this.dominated + " revisitedBetter=" + this.revisitedBetter);
+            // F-task: snapshot the same counters for the matrix gate (no new counting).
+            Solver.b176Unsettled = this.unsettledNodes;
+            Solver.b176MergedByPhase = this.mergedByPhase;
+            Solver.b176Skipped = this.skipped;
+            Solver.b176Dominated = this.dominated;
+            Solver.b176RevisitedBetter = this.revisitedBetter;
+            Solver.b176BestScore = this.best == null ? Integer.MIN_VALUE : this.best.score;
             profile.skipped = this.skipped;
             profile.transpositions = this.transpositions;
             // B184: the sliced path never printed the split, so the one place a player actually

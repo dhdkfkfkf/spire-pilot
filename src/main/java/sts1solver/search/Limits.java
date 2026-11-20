@@ -67,6 +67,31 @@ public final class Limits {
     private static long cachedAt;
     private static java.util.Map<String, String> cached;
 
+    /**
+     * F-task test-only overrides. Empty by default, so production reads settings.txt untouched.
+     * The matrix probe sets entries here to flip search switches for one measurement, then clears
+     * them. Never written by game code; no default value is changed.
+     */
+    private static final java.util.Map<String, String> testOverrides =
+            new java.util.HashMap<String, String>();
+
+    /** Test hook: force one settings key for the next reads, or remove it with a null value. */
+    public static synchronized void overrideForTest(String key, String value) {
+        if (key == null) {
+            return;
+        }
+        if (value == null) {
+            testOverrides.remove(key);
+        } else {
+            testOverrides.put(key, value);
+        }
+    }
+
+    /** Test hook: drop all forced settings keys (restore settings.txt-driven behaviour). */
+    public static synchronized void clearOverridesForTest() {
+        testOverrides.clear();
+    }
+
     private Limits() {
     }
 
@@ -490,6 +515,12 @@ public final class Limits {
 
     /** One value out of settings.txt (same file and format every other knob uses). */
     private static String read(String key, String fallback) {
+        // F-task: a test override wins before settings.txt. Empty map by default = no change.
+        synchronized (Limits.class) {
+            if (testOverrides.containsKey(key)) {
+                return testOverrides.get(key);
+            }
+        }
         try {
             java.util.Map<String, String> map = load();
             String v = map.get(key);
