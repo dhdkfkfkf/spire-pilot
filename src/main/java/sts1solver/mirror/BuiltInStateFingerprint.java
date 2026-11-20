@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.IdentityHashMap;
 
 /**
  * Deterministic, conservative inventory of built-in combat actors and mirrored static roots.
@@ -20,18 +21,19 @@ final class BuiltInStateFingerprint {
 
     static void append(CanonicalStateWriter writer, int firstTag, List<String> unknown) {
         int tag = firstTag;
+        TraversalContext context = new TraversalContext();
         try {
             Object player = sts1solver.reflect.Reflect.get(
                     sts1solver.reflect.Reflect.find(
                             com.megacrit.cardcrawl.dungeons.AbstractDungeon.class, "player"), null);
-            tag = appendObject(writer, tag, "player", player, unknown);
+            tag = appendObject(writer, tag, "player", player, unknown, context, 0);
             if (player != null) {
                 String[] members = {"relics", "potions", "orbs", "powers",
                         "hand", "drawPile", "discardPile", "exhaustPile"};
                 for (String member : members) {
                     ReadResult result = readNamed(player, member);
                     recordReadFailure("player." + member, result, unknown);
-                    tag = appendValue(writer, tag, "player." + member, result.value, unknown);
+                    tag = appendValue(writer, tag, "player." + member, result.value, unknown, context, 0);
                 }
             }
 
@@ -39,17 +41,17 @@ final class BuiltInStateFingerprint {
             ReadResult monstersResult = readNamed(group, "monsters");
             recordReadFailure("monsters", monstersResult, unknown);
             Object monsters = monstersResult.value;
-            tag = appendValue(writer, tag, "monsters", monsters, unknown);
+            tag = appendValue(writer, tag, "monsters", monsters, unknown, context, 0);
             if (monsters instanceof Iterable<?>) {
                 int index = 0;
                 for (Object monster : (Iterable<?>) monsters) {
                     ReadResult powers = readNamed(monster, "powers");
                     recordReadFailure("monster[" + index + "].powers", powers, unknown);
                     tag = appendValue(writer, tag, "monster[" + index++ + "].powers",
-                            powers.value, unknown);
+                            powers.value, unknown, context, 0);
                 }
             }
-            tag = appendMirroredStatics(writer, tag, unknown);
+            tag = appendMirroredStatics(writer, tag, unknown, context);
         } catch (Throwable t) {
             unknown.add("built-in-state-capture-failed:" + t.getClass().getName());
         }
@@ -64,7 +66,7 @@ final class BuiltInStateFingerprint {
      * are not proven complete. The caller therefore keeps the resulting key inexact.
      */
     private static int appendMirroredStatics(CanonicalStateWriter writer, int tag,
-                                             List<String> unknown) {
+                                             List<String> unknown, TraversalContext context) {
         Statics.Spec[] specs = Statics.specs().clone();
         // Dynamic mod registrations can arrive in different orders; canonical output must not
         // depend on registration order or on the mutable backing array owned by Statics.
@@ -87,13 +89,26 @@ final class BuiltInStateFingerprint {
                 unknown.add("static-root-unreadable:" + label + ":" + t.getClass().getName());
                 continue;
             }
-            tag = appendValue(writer, tag, label, value, unknown);
+            tag = appendValue(writer, tag, label, value, unknown, context, 0);
         }
         return tag;
     }
 
+    private static final int MAX_DEPTH = 8;
+    private static final int MAX_NODES = 4096;
+    private static final int MAX_FIELDS_PER_OBJECT = 256;
+    private static final int MAX_ORDERED_ITEMS = 1024;
+
+    /** Shared across all roots so aliases and cycles have one deterministic identity space. */
+    private static final class TraversalContext {
+        final IdentityHashMap<Object, Integer> identities = new IdentityHashMap<Object, Integer>();
+        int nextIdentity = 1;
+        int visitedNodes;
+    }
+
     private static int appendValue(CanonicalStateWriter writer, int tag, String label,
-                                   Object value, List<String> unknown) {
+                                   Object value, List<String> unknown,
+                                   TraversalContext context, int depth) {
         if (value == null) {
             writer.putString(tag++, label + "=null");
             return tag;
@@ -102,22 +117,40 @@ final class BuiltInStateFingerprint {
             writer.putString(tag++, label + "=" + scalar(value));
             return tag;
         }
+        if (depth > MAX_DEPTH) {
+            writer.putString(tag++, label + ".truncated=depth-limit");
+            unknown.add("object-graph-depth-limit:" + label);
+            return tag;
+        }
         if (value instanceof java.util.Set<?>) {
-            // Set iteration order is not a canonical ordering contract. Do not hash an arbitrary
-            // iteration sequence as if it were stable across JVMs or runs.
             writer.putString(tag++, label + ".set="
                     + value.getClass().getName() + ":" + ((java.util.Set<?>) value).size());
             unknown.add("unordered-set-not-canonicalized:" + label);
             return tag;
         }
+        if (value instanceof java.util.Map<?, ?>) {
+            writer.putString(tag++, label + ".map=" + value.getClass().getName()
+                    + ":" + ((java.util.Map<?, ?>) value).size());
+            unknown.add("map-not-canonicalized:" + label);
+            return tag;
+        }
         if (value instanceof java.util.List<?> || value instanceof java.util.Deque<?>
                 || value instanceof java.util.Queue<?>) {
+            if (!beginObject(writer, tag, label, value, context, unknown)) {
+                return tag + 1;
+            }
+            tag++;
             int index = 0;
             for (Object item : (Iterable<?>) value) {
-                // These collection contracts preserve semantic iteration order.
-                tag = appendValue(writer, tag, label + "[" + index++ + "]", item, unknown);
+                if (index >= MAX_ORDERED_ITEMS) {
+                    writer.putString(tag++, label + ".truncated=item-limit");
+                    unknown.add("ordered-collection-item-limit:" + label);
+                    break;
+                }
+                tag = appendValue(writer, tag, label + "[" + index++ + "]", item,
+                        unknown, context, depth + 1);
             }
-            writer.putString(tag++, label + ".size=" + index);
+            writer.putString(tag++, label + ".size=" + ((java.util.Collection<?>) value).size());
             return tag;
         }
         if (value instanceof Iterable<?>) {
@@ -126,17 +159,22 @@ final class BuiltInStateFingerprint {
             return tag;
         }
         if (value.getClass().isArray()) {
+            if (!beginObject(writer, tag, label, value, context, unknown)) {
+                return tag + 1;
+            }
+            tag++;
             int length = java.lang.reflect.Array.getLength(value);
-            for (int index = 0; index < length; index++) {
+            int limit = Math.min(length, MAX_ORDERED_ITEMS);
+            for (int index = 0; index < limit; index++) {
                 Object item = java.lang.reflect.Array.get(value, index);
-                tag = appendValue(writer, tag, label + "[" + index + "]", item, unknown);
+                tag = appendValue(writer, tag, label + "[" + index + "]", item,
+                        unknown, context, depth + 1);
+            }
+            if (length > limit) {
+                writer.putString(tag++, label + ".truncated=item-limit");
+                unknown.add("array-item-limit:" + label);
             }
             writer.putString(tag++, label + ".array-size=" + length);
-            return tag;
-        }
-        if (value instanceof java.util.Map<?, ?>) {
-            writer.putString(tag++, label + ".type=" + value.getClass().getName());
-            unknown.add("map-not-canonicalized:" + label);
             return tag;
         }
         ReadResult groupResult = readNamed(value, "group");
@@ -145,25 +183,58 @@ final class BuiltInStateFingerprint {
         }
         Object group = groupResult.value;
         if (group instanceof Iterable<?>) {
-            return appendValue(writer, tag, label, group, unknown);
+            if (!beginObject(writer, tag, label, value, context, unknown)) {
+                return tag + 1;
+            }
+            tag++;
+            return appendValue(writer, tag, label + ".group", group, unknown,
+                    context, depth + 1);
         }
-        return appendObject(writer, tag, label, value, unknown);
+        return appendObject(writer, tag, label, value, unknown, context, depth);
+    }
+
+    private static boolean beginObject(CanonicalStateWriter writer, int tag, String label,
+                                       Object value, TraversalContext context,
+                                       List<String> unknown) {
+        Integer prior = context.identities.get(value);
+        if (prior != null) {
+            writer.putString(tag, label + ".ref=" + prior);
+            return false;
+        }
+        if (context.visitedNodes >= MAX_NODES) {
+            writer.putString(tag, label + ".truncated=node-limit");
+            unknown.add("object-graph-node-limit:" + label);
+            return false;
+        }
+        int identity = context.nextIdentity++;
+        context.identities.put(value, Integer.valueOf(identity));
+        context.visitedNodes++;
+        writer.putString(tag, label + ".identity=" + identity);
+        return true;
     }
 
     private static int appendObject(CanonicalStateWriter writer, int tag, String label,
-                                    Object value, List<String> unknown) {
+                                    Object value, List<String> unknown,
+                                    TraversalContext context, int depth) {
         if (value == null) {
             writer.putString(tag++, label + "=null");
             return tag;
         }
+        if (depth > MAX_DEPTH) {
+            writer.putString(tag++, label + ".truncated=depth-limit");
+            unknown.add("object-graph-depth-limit:" + label);
+            return tag;
+        }
+        if (!beginObject(writer, tag, label, value, context, unknown)) {
+            return tag + 1;
+        }
+        tag++;
         writer.putString(tag++, label + ".class=" + value.getClass().getName());
         List<Field> fields = new ArrayList<Field>();
         for (Class<?> type = value.getClass(); type != null && type != Object.class;
              type = type.getSuperclass()) {
             for (Field field : type.getDeclaredFields()) {
                 int modifiers = field.getModifiers();
-                // transient is not a semantic guarantee: game and mod code may use transient
-                // instance fields as combat bookkeeping, so only static/synthetic fields are skipped.
                 if (Modifier.isStatic(modifiers) || field.isSynthetic()) {
                     continue;
                 }
@@ -176,7 +247,9 @@ final class BuiltInStateFingerprint {
                 return c != 0 ? c : a.getName().compareTo(b.getName());
             }
         });
-        for (Field field : fields) {
+        int fieldLimit = Math.min(fields.size(), MAX_FIELDS_PER_OBJECT);
+        for (int i = 0; i < fieldLimit; i++) {
+            Field field = fields.get(i);
             String fieldLabel = label + "." + field.getDeclaringClass().getName()
                     + "#" + field.getName();
             try {
@@ -187,16 +260,16 @@ final class BuiltInStateFingerprint {
                 if (isScalar(field.getType()) || (v != null && isScalar(v.getClass()))) {
                     writer.putString(tag++, fieldLabel + "=" + scalar(v));
                 } else {
-                    // Record enough shape to distinguish null from a present nested object, but
-                    // never imply that its mutable contents were captured.
-                    writer.putString(tag++, fieldLabel + ".nested="
-                            + (v == null ? "null" : v.getClass().getName()));
-                    unknown.add("nested-field-not-recursively-captured:" + fieldLabel);
+                    tag = appendValue(writer, tag, fieldLabel, v, unknown, context, depth + 1);
                 }
             } catch (Throwable t) {
                 unknown.add("field-unreadable:" + field.getDeclaringClass().getName()
                         + "#" + field.getName() + ":" + t.getClass().getName());
             }
+        }
+        if (fields.size() > fieldLimit) {
+            writer.putString(tag++, label + ".truncated=field-limit");
+            unknown.add("object-field-limit:" + label);
         }
         return tag;
     }
@@ -266,7 +339,7 @@ final class BuiltInStateFingerprint {
         if (value instanceof Enum<?>) {
             return ((Enum<?>) value).getDeclaringClass().getName() + ":" + ((Enum<?>) value).name();
         }
-        return String.valueOf(value);
+        return value.getClass().getName() + ":" + String.valueOf(value);
     }
 
 }
