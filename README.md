@@ -124,6 +124,7 @@ draws a fixed banner, which separates "the panel cannot draw" from "there is no 
 
 | 版本 | 主题 |
 |---|---|
+| 1.6.10 | 动作列表没读全时停下重算，不再按残缺选项继续 |
 | 1.6.9 | 计收益时能打死小偷就真的打死；小偷与「抢劫的」同场也先解决 |
 | 1.6.8 | 兼容开关拆成「战斗事件 / 战斗之外」两组；Config 面板重做；修徽章过大 |
 | 1.6.7 | Mods→Spire Pilot→Config 新增「兼容实验模式」；默认模式与以前一致 |
