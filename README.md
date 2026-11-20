@@ -8,14 +8,28 @@ It **mirrors the real combat engine into an isolated copy**, lets the **game's o
 power and relic code run on that copy**, and searches the **states that really came out** of it. The
 search result is a line, and executing a line is audited against the states the search predicted.
 
+That "do not model the game" rule is the whole design. There is no card table, no damage formula and
+no per-monster script here: every candidate state is produced by the engine itself, on a world this
+mod cloned and installed into the engine's static slots. If the engine can play a card, the search can
+play it — including cards from other mods it has never seen.
+
+What this repository adds on top of the base is mostly **evidence**: every claim about behaviour is
+backed by a gate that runs inside the real game, and every search experiment — including the ones
+that failed — is archived with its fixtures, seeds, budgets and measured numbers in
+[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md). The 1.7.0 release ships an eleven-gate research line
+(S283–S293) whose honest result is *no default change*: the obvious switches are not free wins even
+when measured to convergence, and saying so is part of the work.
+
 > **Upstream.** This repository is a derivative of
 > [STS1 Engine Solver](https://github.com/zck070718/sts1-engine-solver) by 闪珖灵感菇 (MIT). It starts from
 > that project's 1.0.3 and continues as its own line of releases: `0.1.0` through `1.0.0` are this
 > repository's own work on top of that base, and every change is listed under this repository's own
 > version numbers in [CHANGELOG.md](CHANGELOG.md). The panel layout, the sandbox mirror and the search
 > pipeline come from the base; the texture guard, the turn horizon that only the clock may narrow, the
-> time-budget tiers, the turn-level ranking and the panel rework are this repository's changes. Full
-> attribution and license texts: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+> time-budget tiers, the turn-level ranking, the panel rework, the search-state audit and the whole 1.7
+> experiment line are this repository's changes. The exact boundary — inherited vs. added — is written
+> down in [docs/CREDITS.md](docs/CREDITS.md); full attribution and license texts are in
+> [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 The architecture follows the reference project [CombatSolver (STS2)](https://github.com/Torch1230/CombatSolver):
 capture a root state, simulate in the background without touching the live fight, print the route,
@@ -39,6 +53,28 @@ relics and RNG in a hand-written model. It worked, and then bled:
 
 Every one of those is a *transcription* bug. The fix chosen here is to stop transcribing: copy the
 objects and call the real methods.
+
+## 1.7: what was measured, and what was rejected
+
+The 1.7.0 goal was "find the same best line with fewer nodes". Nine measurement rounds later the
+result is *no default change* — and that is a finding, not an omission. Representative numbers
+(all reproducible with the gates named in the table; full archive in
+[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)):
+
+| Question | What the gates showed |
+| --- | --- |
+| Does folding RNG counters into the search key save nodes? | Merges move ≤1%, the best line never changes (V1) |
+| Does dominance pruning / turnPlanOff help? | Point-identical to the baseline, every threshold, every seed (V2/V3) |
+| Is a 20k-node budget already optimal? | No — F2/9301 gains +5,997 at node 72,343 of an 80k run |
+| Do targetFocus/diversity switches help? | Real but **bidirectional** on the hard fixture: +2,002 … −10,000 on the same board |
+| Is the zero-cost stop free? | No — it fires at 5–21 nodes and costs ~12,000 score on a Feed board |
+| Are potions and relic counters part of the key? | No — replacing a potion or changing Nunchaku's counter left the digest byte-identical |
+
+Two of those gaps were real correctness losses, so 1.7.0 ships them as **opt-in switches that leave
+every default untouched**: `search.provenStop=off` (run the budget instead of stopping on a
+zero-cost win) and `search.keyExtras=on` (fold potion slots, relic counters and orb evoke/passive
+into the key). The default arms reproduce the previous build byte-for-byte; that equivalence is
+itself gated (S290/S291).
 
 ## Compatibility
 
@@ -124,6 +160,7 @@ draws a fixed banner, which separates "the panel cannot draw" from "there is no 
 
 | 版本 | 主题 |
 |---|---|
+| 1.7.0 | 搜索实验线全量并入：两枚默认不变开关 + 实验档案；默认行为与 1.6.10 相同 |
 | 1.6.10 | 动作列表没读全时停下重算，不再按残缺选项继续 |
 | 1.6.9 | 计收益时能打死小偷就真的打死；小偷与「抢劫的」同场也先解决 |
 | 1.6.8 | 兼容开关拆成「战斗事件 / 战斗之外」两组；Config 面板重做；修徽章过大 |
@@ -193,6 +230,11 @@ Last full run: **54 checks, 0 failures**. Highlights:
 | Sandbox actions leave the live fight untouched | digest equal, 3 actions executed |
 | Static leak check around a sandbox session | **457 inventory fields, 0 changed**, restore exact |
 | Gameplay path (F8/F9/F10 logic) on a real fight | solved, executed, **won at 74/80**, 0 drift |
+
+How a gate is run, what counts as evidence and what is explicitly *not* covered:
+[docs/VALIDATION.md](docs/VALIDATION.md). The next experiment (1.8, node budget and beam retention
+on the hard fixture) is designed, with its acceptance rules, in
+[docs/ROADMAP-1.8.md](docs/ROADMAP-1.8.md).
 
 ## Content coverage (measured, not claimed)
 
