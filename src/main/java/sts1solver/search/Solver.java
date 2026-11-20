@@ -298,7 +298,12 @@ public final class Solver {
             installed = true;
             int hp0 = Solver.hp();
             int gold0 = Solver.playerGold();
-            List<Action> actions = Legal.actions();
+            ActionGenerationResult generated = Legal.actionsResult();
+            if (!generated.complete()) {
+                Log.warn("rollout skipped: incomplete legal action set; " + generated.failure);
+                return Integer.MIN_VALUE;
+            }
+            List<Action> actions = generated.actions;
             Action greedy = Solver.greedyRolloutAction(actions);
             if (greedy != null) {
                 Legal.apply(greedy);
@@ -3422,7 +3427,15 @@ public final class Solver {
                 TurnPlan.classify(waiting);
                 return waiting;
             }
-            List<Action> list = Legal.actions();
+            ActionGenerationResult generated = Legal.actionsResult();
+            if (!generated.complete()) {
+                String reason = generated.failure.isEmpty()
+                        ? "unknown action-generation failure" : generated.failure;
+                Log.warn("search stopped: incomplete legal action set; " + reason);
+                throw new IllegalStateException("Incomplete legal action set: " + reason,
+                        generated.cause);
+            }
+            List<Action> list = generated.actions;
             // 1.0.5 (B6): opt-in. Signatures are read while the sandbox is installed, so they are
             // consistent with the very list the actions were built from.
             List<Action> out = Solver.canonicalCandidates(list,
@@ -4522,6 +4535,8 @@ public final class Solver {
         private int nodeIndex;
         private int actionIndex;
         private List<Action> currentActs;
+        /** Diagnostic for a candidate scan that failed before producing a complete action set. */
+        private String actionGenerationFailure = "";
         private int layer;
         private int nodes;
         private int expansions;
@@ -4819,6 +4834,11 @@ public final class Solver {
 
         public String reason() {
             return this.reason;
+        }
+
+        /** Detailed cause when search stopped because legal-action enumeration was incomplete. */
+        public String actionGenerationFailure() {
+            return this.actionGenerationFailure;
         }
 
         public int bestActions() {
@@ -5307,7 +5327,19 @@ public final class Solver {
                 }
                 this.seenBest.put(seenKey, Integer.valueOf(node.score));
                 long candStart = System.nanoTime();
-                this.currentActs = Solver.candidates(node.world);
+                try {
+                    this.currentActs = Solver.candidates(node.world);
+                } catch (IllegalStateException failure) {
+                    // A partial legal-action list is not a valid search frontier. Stop this session
+                    // explicitly instead of treating the node as terminal or crashing the game loop.
+                    this.actionGenerationFailure = failure.getMessage() == null
+                            ? "incomplete legal action enumeration" : failure.getMessage();
+                    this.reason = "incomplete-actions";
+                    Log.warn("search aborted: " + this.actionGenerationFailure);
+                    node.world = null;
+                    this.done = true;
+                    return;
+                }
                 long candUs = (System.nanoTime() - candStart) / 1000L;
                 if (candUs >= Solver.SLOW_STEP_US) {
                     // B170: enumerating actions can open screens and replay choices; that work is
