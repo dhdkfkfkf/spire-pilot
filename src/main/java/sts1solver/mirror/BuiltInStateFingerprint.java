@@ -132,8 +132,9 @@ final class BuiltInStateFingerprint {
              type = type.getSuperclass()) {
             for (Field field : type.getDeclaredFields()) {
                 int modifiers = field.getModifiers();
-                if (Modifier.isStatic(modifiers) || Modifier.isTransient(modifiers)
-                        || field.isSynthetic() || !isScalar(field.getType())) {
+                // transient is not a semantic guarantee: game and mod code may use transient
+                // instance fields as combat bookkeeping, so only static/synthetic fields are skipped.
+                if (Modifier.isStatic(modifiers) || field.isSynthetic()) {
                     continue;
                 }
                 fields.add(field);
@@ -146,16 +147,25 @@ final class BuiltInStateFingerprint {
             }
         });
         for (Field field : fields) {
+            String fieldLabel = label + "." + field.getDeclaringClass().getName()
+                    + "#" + field.getName();
             try {
                 if (!field.isAccessible()) {
                     field.setAccessible(true);
                 }
                 Object v = field.get(value);
-                writer.putString(tag++, label + "." + field.getDeclaringClass().getName()
-                        + "#" + field.getName() + "=" + scalar(v));
+                if (isScalar(field.getType()) || (v != null && isScalar(v.getClass()))) {
+                    writer.putString(tag++, fieldLabel + "=" + scalar(v));
+                } else {
+                    // Record enough shape to distinguish null from a present nested object, but
+                    // never imply that its mutable contents were captured.
+                    writer.putString(tag++, fieldLabel + ".nested="
+                            + (v == null ? "null" : v.getClass().getName()));
+                    unknown.add("nested-field-not-recursively-captured:" + fieldLabel);
+                }
             } catch (Throwable t) {
                 unknown.add("field-unreadable:" + field.getDeclaringClass().getName()
-                        + "#" + field.getName());
+                        + "#" + field.getName() + ":" + t.getClass().getName());
             }
         }
         return tag;
