@@ -109,8 +109,8 @@ public final class CanonicalStateWriter {
     }
 
     private void field(int tag, int type, byte[] value) {
-        if (tag < 0 || tag < lastTag) {
-            throw new IllegalArgumentException("Canonical field tags must be non-negative and ordered: " + tag);
+        if (tag < 0 || tag <= lastTag) {
+            throw new IllegalArgumentException("Canonical field tags must be strictly increasing and non-negative: " + tag);
         }
         lastTag = tag;
         try {
