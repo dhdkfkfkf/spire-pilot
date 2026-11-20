@@ -394,7 +394,7 @@ public final class Solver {
                 int ra = refined.get(a).intValue();
                 int rb = refined.get(b).intValue();
                 if (ra != rb) {
-                    return rb - ra;
+                    return Solver.compareRollout(ra, rb);
                 }
                 if (a.rank != b.rank) {
                     return b.rank - a.rank;
@@ -408,6 +408,28 @@ public final class Solver {
         for (int i = 0; i < k; ++i) {
             nodes.set(i, head.get(i));
         }
+    }
+
+    /**
+     * Rollout ordering, descending. A failed rollout is Integer.MIN_VALUE and must sort last; the
+     * old `rb - ra` form overflows for exactly that value (MIN_VALUE - 5 is negative), so a failed
+     * node could be ranked ahead of a real one. Measurement branch 2026-11-20 (S288).
+     */
+    static int compareRollout(int a, int b) {
+        if (a == b) {
+            return 0;
+        }
+        if (a == Integer.MIN_VALUE) {
+            return 1;
+        }
+        if (b == Integer.MIN_VALUE) {
+            return -1;
+        }
+        return b > a ? 1 : -1;
+    }
+
+    public static int compareRolloutForTest(int a, int b) {
+        return compareRollout(a, b);
     }
 
     /**
@@ -1902,7 +1924,7 @@ public final class Solver {
                                 if (bestWinLayer < 0) {
                                     bestWinLayer = n5 + 1;
                                 }
-                                if (n20 == 0 && n21 == 0) {
+                                if (provenStopForTest && n20 == 0 && n21 == 0) {
                                     provenOptimal = true;
                                 }
                                 // A finished battle has no children: never put a win back into the frontier.
@@ -2125,7 +2147,7 @@ public final class Solver {
                     if (bestWinLayer < 0) {
                         bestWinLayer = entry.layer;
                     }
-                    if (combinedHp == 0 && sub.provenOptimal) {
+                    if (combinedHp == 0 && sub.provenOptimal && provenStopForTest) {
                         provenOptimal = true;
                         break;
                     }
@@ -2640,6 +2662,17 @@ public final class Solver {
     /** Test hook: enable/disable RNG-in-position-key for the next searches. Default off. */
     public static void setRngKeyForTest(boolean value) {
         rngKeyForTest = value;
+    }
+
+    /**
+     * S289 test hook: when false, a zero-HP-loss zero-potion win no longer sets "proven optimal",
+     * so the search keeps exploring. Default true = production. Used only to measure what the stop
+     * costs; never set by the panel.
+     */
+    private static boolean provenStopForTest = true;
+
+    public static void setProvenStopForTest(boolean value) {
+        provenStopForTest = value;
     }
 
     /** Test hook: read the RNG-in-key switch (false unless a matrix variant turned it on). */
@@ -5588,7 +5621,7 @@ public final class Solver {
                     if (this.bestWinLayer < 0) {
                         this.bestWinLayer = this.layer + 1;
                     }
-                    if (n == 0 && n2 == 0) {
+                    if (provenStopForTest && n == 0 && n2 == 0) {
                         this.provenOptimal = true;
                     }
                 }

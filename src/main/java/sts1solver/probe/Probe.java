@@ -169,6 +169,16 @@ public final class Probe {
                 curve};
     }
 
+    /** S289: one plain capped search, no variant switches, result returned as-is. */
+    private static Solver.Result searchCapped(World root, int capNodes, long deadlineMs) {
+        Solver.Session session = new Solver.Session(root, 24, 96, Long.MAX_VALUE / 8L, capNodes, 0);
+        long deadline = System.currentTimeMillis() + deadlineMs;
+        while (!session.finished() && System.currentTimeMillis() < deadline) {
+            session.advance(50L);
+        }
+        return session.result();
+    }
+
     public static void autoTest() {
         Log.setRunId(String.valueOf(System.currentTimeMillis()));
         // B112: remember the player's own run saves, so anything the suite writes on exit can be
@@ -3778,6 +3788,208 @@ public final class Probe {
                     Solver.setCurveForTest(false);
                     Solver.setRngKeyForTest(false);
                     Limits.clearOverridesForTest();
+                    try { World.forceRestore(); } catch (Throwable t) { }
+                }
+            }
+        });
+
+        /*
+         * S287 (2026-11-20, F-task round 5): measurement only. The search key is
+         * Digest.stable(...); this gate asks whether that key can tell apart two boards whose
+         * *decision-relevant* inventory differs. It changes nothing in production.
+         *
+         * Why it matters: using a potion costs the potion, and a relic counter (Nunchaku: one
+         * energy every 10 attacks) changes what the next turns can do. If the key ignores them,
+         * two branches that reached the same board with different inventories become one node and
+         * the one still holding the potion / the counter can be discarded for good.
+         */
+        Probe.core("S287 key gaps: potions and relic counters are invisible to the search key",
+                new Runnable(){
+            @Override
+            public void run() {
+                World a = null;
+                World b = null;
+                try {
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9301L;
+                    spec.maxHealth = 80;
+                    spec.deck = new String[]{"Strike_R", "Strike_R", "Strike_R", "Strike_R",
+                            "Strike_R", "Defend_R", "Defend_R", "Defend_R", "Defend_R", "Bash"};
+                    spec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+                    World root = World.captureLive();
+
+                    a = root.fork();
+                    a.install();
+                    String plainA = Digest.stable(Digest.ofCurrent());
+                    a.player().potions.set(0, PotionHelper.getPotion("Fire Potion"));
+                    String withPotion = Digest.stable(Digest.ofCurrent());
+                    String potionId = a.player().potions.get(0).ID;
+                    a.uninstall();
+                    a = null;
+
+                    b = root.fork();
+                    b.install();
+                    String plainB = Digest.stable(Digest.ofCurrent());
+                    String blankId = b.player().potions.get(0).ID;
+                    b.uninstall();
+                    b = null;
+
+                    Probe.check(plainA.equals(plainB),
+                            "S287 two clones of the same board digest the same", "");
+                    Probe.check(!"Fire Potion".equals(blankId) && potionId != null
+                                    && potionId.contains("Fire"),
+                            "S287 the potion really was replaced in one clone only",
+                            potionId + " vs " + blankId);
+                    Probe.check(withPotion.equals(plainB),
+                            "S287 CONFIRMED: a full potion slot does not change the key",
+                            "both " + plainB.length() + " chars");
+
+                    a = root.fork();
+                    a.install();
+                    com.megacrit.cardcrawl.relics.Nunchaku nunchaku =
+                            new com.megacrit.cardcrawl.relics.Nunchaku();
+                    nunchaku.counter = 0;
+                    a.player().relics.add(nunchaku);
+                    String relic0 = Digest.stable(Digest.ofCurrent());
+                    nunchaku.counter = 7;
+                    String relic7 = Digest.stable(Digest.ofCurrent());
+                    a.uninstall();
+                    a = null;
+
+                    Probe.check(relic0.equals(relic7),
+                            "S287 CONFIRMED: a relic counter does not change the key either",
+                            "counter 0 vs 7, both " + relic0.length() + " chars");
+                } catch (Throwable t) {
+                    Probe.check(false, "S287 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { if (a != null) a.uninstall(); } catch (Throwable t) { }
+                    try { if (b != null) b.uninstall(); } catch (Throwable t) { }
+                    try { World.forceRestore(); } catch (Throwable t) { }
+                }
+            }
+        });
+
+        /*
+         * S288 (2026-11-20, F-task round 5): the rollout re-rank compared raw refinements with
+         * `rb - ra`, which overflows when one side is the failure sentinel Integer.MIN_VALUE --
+         * MIN_VALUE - 5 is negative, so a failed rollout could be ranked ahead of a real one and
+         * take a beam slot. The fix is a comparator with an explicit last-place rule; this gate
+         * proves the ordering property directly, including through a real sort.
+         */
+        Probe.core("S288 a failed rollout ranks last (no comparator overflow)",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    int min = Integer.MIN_VALUE;
+                    Probe.check(Solver.compareRolloutForTest(-5, min) < 0,
+                            "S288 a normal score ranks above a failure", "");
+                    Probe.check(Solver.compareRolloutForTest(min, -5) > 0,
+                            "S288 a failure ranks below a normal score", "");
+                    Probe.check(Solver.compareRolloutForTest(min, min) == 0,
+                            "S288 two failures tie", "");
+                    Probe.check(Solver.compareRolloutForTest(min, min + 1) > 0
+                                    && Solver.compareRolloutForTest(min + 1, min) < 0,
+                            "S288 a failure also ranks below MIN+1", "");
+                    Probe.check(Solver.compareRolloutForTest(10, 5) < 0
+                                    && Solver.compareRolloutForTest(5, 10) > 0,
+                            "S288 higher rollout scores still come first", "");
+                    java.util.List<Integer> values = new java.util.ArrayList<Integer>(
+                            java.util.Arrays.asList(min, 3, min, 7, 5, min));
+                    java.util.Collections.sort(values, new java.util.Comparator<Integer>(){
+                        @Override
+                        public int compare(Integer x, Integer y) {
+                            return Solver.compareRolloutForTest(x.intValue(), y.intValue());
+                        }
+                    });
+                    StringBuilder order = new StringBuilder();
+                    for (int i = 0; i < values.size(); i++) {
+                        if (i > 0) {
+                            order.append(',');
+                        }
+                        order.append(values.get(i).intValue() == min ? "MIN" : values.get(i));
+                    }
+                    Probe.check(values.get(0).intValue() == 7
+                                    && values.get(1).intValue() == 5
+                                    && values.get(2).intValue() == 3
+                                    && values.get(3).intValue() == min
+                                    && values.get(4).intValue() == min
+                                    && values.get(5).intValue() == min,
+                            "S288 sorting keeps 7,5,3 first and every failure last",
+                            order.toString());
+                } catch (Throwable t) {
+                    Probe.check(false, "S288 ran without throwing", String.valueOf(t));
+                }
+            }
+        });
+
+        /*
+         * S289 (2026-11-20, F-task round 5): measurement only. The zero-cost stop (B120) treats
+         * "won, lost 0 HP, drank no potion" as final, but the score of a win also carries loot,
+         * post-fight heal and growth (Feed's +max HP). This gate runs the SAME board twice, once
+         * with the stop and once with it disabled through a test hook, and reports whether the
+         * stop costs score on a Feed fixture.
+         */
+        Probe.core("S289 zero-cost stop vs growth: the same Feed fight with the stop on and off",
+                new Runnable(){
+            @Override
+            public void run() {
+                String[] deck = {"Strike_R", "Strike_R", "Strike_R", "Strike_R", "Feed",
+                        "Defend_R", "Defend_R", "Defend_R"};
+                String[] monsters = {"com.megacrit.cardcrawl.monsters.exordium.LouseNormal"};
+                long[] seeds = {9301L, 9302L, 9303L};
+                try {
+                    for (int s = 0; s < seeds.length; s++) {
+                        Synthetic.Spec spec = new Synthetic.Spec();
+                        spec.seed = seeds[s];
+                        spec.maxHealth = 80;
+                        spec.deck = deck;
+                        spec.monsters = monsters;
+                        Synthetic.build(spec, new Synthetic.SyntheticStep());
+                        Driver.drain(4000, 800L);
+                        World root = World.captureLive();
+
+                        Solver.setProvenStopForTest(true);
+                        Solver.Result on = searchCapped(root, 30000, 120000L);
+                        int onScore = Solver.lastBestScoreForTest();
+                        Solver.setProvenStopForTest(false);
+                        Solver.Result off = searchCapped(root, 30000, 120000L);
+                        int offScore = Solver.lastBestScoreForTest();
+                        Solver.setProvenStopForTest(true);
+                        try { World.forceRestore(); } catch (Throwable t) { }
+
+                        String onPlan = on == null || on.plan == null
+                                ? "-" : matrixPlanDigest(on.plan);
+                        String offPlan = off == null || off.plan == null
+                                ? "-" : matrixPlanDigest(off.plan);
+                        Log.info("  S289 seed=" + seeds[s]
+                                + "|stopOn: win=" + (on != null && on.win)
+                                + " proven=" + (on != null && on.provenOptimal)
+                                + " nodes=" + (on == null ? -1 : on.nodes)
+                                + " score=" + onScore
+                                + " plan=" + (onPlan.isEmpty() || "-".equals(onPlan) ? "-"
+                                        : Integer.toHexString(onPlan.hashCode()) + "/" + onPlan.length())
+                                + "|stopOff: win=" + (off != null && off.win)
+                                + " nodes=" + (off == null ? -1 : off.nodes)
+                                + " score=" + offScore
+                                + " plan=" + (offPlan.isEmpty() || "-".equals(offPlan) ? "-"
+                                        : Integer.toHexString(offPlan.hashCode()) + "/" + offPlan.length())
+                                + "|samePlan=" + String.valueOf(onPlan.equals(offPlan)));
+
+                        Probe.check(on != null && off != null && onPlan.length() > 0
+                                        && offPlan.length() > 0,
+                                "S289 seed=" + seeds[s] + " both runs produced a line", "");
+                        Probe.check(offScore >= onScore,
+                                "S289 seed=" + seeds[s] + " the extra exploration never scores lower",
+                                onScore + " -> " + offScore);
+                    }
+                } catch (Throwable t) {
+                    Probe.check(false, "S289 ran without throwing", String.valueOf(t));
+                } finally {
+                    Solver.setProvenStopForTest(true);
                     try { World.forceRestore(); } catch (Throwable t) { }
                 }
             }
