@@ -72,6 +72,8 @@ public final class SearchStateKey {
         }
         SearchStateKey that = (SearchStateKey) other;
         return schemaVersion == that.schemaVersion
+                && exact == that.exact
+                && unknownReasons.equals(that.unknownReasons)
                 && Arrays.equals(canonicalBytes, that.canonicalBytes);
     }
 
