@@ -83,8 +83,7 @@ final class BuiltInStateFingerprint {
             for (Field field : type.getDeclaredFields()) {
                 int modifiers = field.getModifiers();
                 if (Modifier.isStatic(modifiers) || Modifier.isTransient(modifiers)
-                        || field.isSynthetic() || !isScalar(field.getType())
-                        || isPresentationField(field.getName())) {
+                        || field.isSynthetic() || !isScalar(field.getType())) {
                     continue;
                 }
                 fields.add(field);
@@ -154,14 +153,4 @@ final class BuiltInStateFingerprint {
         return String.valueOf(value);
     }
 
-    private static boolean isPresentationField(String name) {
-        String n = name.toLowerCase(java.util.Locale.ROOT);
-        return n.equals("current_x") || n.equals("current_y") || n.equals("target_x")
-                || n.equals("target_y") || n.contains("color") || n.contains("scale")
-                || n.contains("angle") || n.contains("timer") || n.contains("alpha")
-                || n.contains("transparen") || n.contains("glow") || n.contains("hover")
-                || n.contains("texture") || n.contains("image") || n.contains("sound")
-                || n.contains("font") || n.contains("hitbox") || n.contains("render")
-                || n.contains("animation") || n.contains("effect");
-    }
 }
