@@ -123,15 +123,60 @@ final class BuiltInStateFingerprint {
             return tag;
         }
         if (value instanceof java.util.Set<?>) {
-            writer.putString(tag++, label + ".set="
-                    + value.getClass().getName() + ":" + ((java.util.Set<?>) value).size());
-            unknown.add("unordered-set-not-canonicalized:" + label);
+            java.util.Set<?> set = (java.util.Set<?>) value;
+            List<String> members = new ArrayList<String>();
+            for (Object item : set) {
+                if (item == null || !isScalar(item.getClass())) {
+                    writer.putString(tag++, label + ".set="
+                            + value.getClass().getName() + ":" + set.size());
+                    unknown.add("unordered-set-has-non-scalar-member:" + label);
+                    return tag;
+                }
+                members.add(scalar(item));
+            }
+            Collections.sort(members);
+            if (!beginObject(writer, tag, label, value, context, unknown)) {
+                return tag + 1;
+            }
+            tag++;
+            writer.putString(tag++, label + ".set-class=" + value.getClass().getName());
+            for (int i = 0; i < members.size(); i++) {
+                writer.putString(tag++, label + ".set-member[" + i + "]=" + members.get(i));
+            }
+            writer.putString(tag++, label + ".set-size=" + members.size());
             return tag;
         }
         if (value instanceof java.util.Map<?, ?>) {
-            writer.putString(tag++, label + ".map=" + value.getClass().getName()
-                    + ":" + ((java.util.Map<?, ?>) value).size());
-            unknown.add("map-not-canonicalized:" + label);
+            java.util.Map<?, ?> map = (java.util.Map<?, ?>) value;
+            List<String[]> entries = new ArrayList<String[]>();
+            for (java.util.Map.Entry<?, ?> entry : map.entrySet()) {
+                Object key = entry.getKey();
+                Object item = entry.getValue();
+                if (key == null || item == null || !isScalar(key.getClass())
+                        || !isScalar(item.getClass())) {
+                    writer.putString(tag++, label + ".map="
+                            + value.getClass().getName() + ":" + map.size());
+                    unknown.add("map-has-non-scalar-key-or-value:" + label);
+                    return tag;
+                }
+                entries.add(new String[] {scalar(key), scalar(item)});
+            }
+            Collections.sort(entries, new Comparator<String[]>() {
+                public int compare(String[] a, String[] b) {
+                    int c = a[0].compareTo(b[0]);
+                    return c != 0 ? c : a[1].compareTo(b[1]);
+                }
+            });
+            if (!beginObject(writer, tag, label, value, context, unknown)) {
+                return tag + 1;
+            }
+            tag++;
+            writer.putString(tag++, label + ".map-class=" + value.getClass().getName());
+            for (int i = 0; i < entries.size(); i++) {
+                writer.putString(tag++, label + ".map-entry[" + i + "].key=" + entries.get(i)[0]);
+                writer.putString(tag++, label + ".map-entry[" + i + "].value=" + entries.get(i)[1]);
+            }
+            writer.putString(tag++, label + ".map-size=" + entries.size());
             return tag;
         }
         if (value instanceof java.util.List<?> || value instanceof java.util.Deque<?>
