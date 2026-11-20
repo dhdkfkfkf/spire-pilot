@@ -149,11 +149,12 @@ final class BuiltInStateFingerprint {
 
     private static boolean isPresentationField(String name) {
         String n = name.toLowerCase(java.util.Locale.ROOT);
-        return n.contains("x") || n.contains("y") || n.contains("color")
-                || n.contains("scale") || n.contains("angle") || n.contains("timer")
-                || n.contains("alpha") || n.contains("transparen") || n.contains("glow")
-                || n.contains("hover") || n.contains("texture") || n.contains("image")
-                || n.contains("sound") || n.contains("font") || n.contains("hitbox")
-                || n.contains("render") || n.contains("animation") || n.contains("effect");
+        return n.equals("current_x") || n.equals("current_y") || n.equals("target_x")
+                || n.equals("target_y") || n.contains("color") || n.contains("scale")
+                || n.contains("angle") || n.contains("timer") || n.contains("alpha")
+                || n.contains("transparen") || n.contains("glow") || n.contains("hover")
+                || n.contains("texture") || n.contains("image") || n.contains("sound")
+                || n.contains("font") || n.contains("hitbox") || n.contains("render")
+                || n.contains("animation") || n.contains("effect");
     }
 }
