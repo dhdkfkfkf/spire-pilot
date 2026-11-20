@@ -1,5 +1,7 @@
 package sts1solver.search;
 
+import sts1solver.mirror.SearchStateKey;
+
 /**
  * Evidence recorded for one simulated edge. Missing or inexact keys weaken the evidence; they do
  * not silently become a verified transition.
