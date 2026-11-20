@@ -200,7 +200,7 @@ public final class Probe {
     }
 
     /*
-     * Task H helpers: hard synthetic fixtures and curve readers shared by S292/S293/S294.
+     * Task H helpers: hard synthetic fixtures and curve readers shared by S292/S293.
      * Fixture shapes are fixed here and never tuned per seed: if a gate fails it is reported
      * honestly, not repaired by changing the board.
      */
@@ -4362,18 +4362,17 @@ public final class Probe {
         });
 
         /*
-         * S292 (2026-11-20, Task H+I+J): hardness gate. F4 and F7 must each be hard enough to be
-         * worth a variant matrix. F5 (flee control) and F6 (known 1/3, too easy) only log and are
-         * never asserted: a fleeing Looter ends the fight early, and Fire Potion + Feed made F6
-         * shorter/easier (main-brain run 17:41-17:44). Per hard fixture, >=2 of 3 seeds must
-         * simultaneously show:
+         * S292 (2026-11-20, Task K): hardness gate. Only F4 is still asserted hard (it backs S293).
+         * F5/F6/F7 only log and are never asserted: the potion-matrix line was retired after the
+         * main-brain run 17:41-18:00 measured them too easy (F5 0/3 flee, F6 1/3, F7 0/3).
+         * For the asserted fixture, >=2 of 3 seeds must simultaneously show:
          *   (1) best found after 8000 nodes (bestAt > 8000);
          *   (2) score at the 8000-node threshold is below the final score (still improving);
          *   (3) V4 (targetFocus off) or V5 (diversity off) changes the final score or step count
          *       versus V0 on that same seed.
          * If a hard fixture is not hard enough, report the count honestly; never re-tune it.
          */
-        Probe.core("S292 hard fixtures: F4/F7 hard; F5 flee + F6 easy controls logged only",
+        Probe.core("S292 hardness: F4 asserted; F5/F6/F7 retired controls logged only",
                 new Runnable(){
             @Override
             public void run() {
@@ -4442,18 +4441,23 @@ public final class Probe {
                                     "mono=" + cs[0] + " last=" + cs[1] + " final=" + finalScore);
                         }
                         Log.info("  S292 fixture=" + fixture + " hardSeeds=" + hardSeeds + "/3");
-                        if ("F5".equals(fixture) || "F6".equals(fixture)) {
-                            // F5 flee control (Looter ends early -> expected 0/3) and F6 known-easy
-                            // (main-brain 1/3: Fire Potion + Feed shorten the fight) are logged only;
-                            // DO NOT assert hardness on either.
-                            Log.info("  S292 fixture=" + fixture
-                                    + ("F5".equals(fixture)
-                                        ? " flee-control (expected 0/3), no hardness assert"
-                                        : " known-easy control (main-brain 1/3), no hardness assert"));
-                        } else {
+                        if ("F4".equals(fixture)) {
+                            // F4 is the only fixture still used as a hardness matrix (S293).
                             Probe.check(hardSeeds >= 2,
                                     "S292 " + fixture + " hard enough (>=2/3 seeds)",
                                     "hardSeeds=" + hardSeeds + "/3");
+                        } else {
+                            // Task K: the potion-matrix line is retired (all three measured too
+                            // easy / not hard by the main brain 17:41-18:00). Log-only, no assert:
+                            //   F5 = 0/3  Looter flees the fight early (1.3k-4.4k nodes).
+                            //   F6 = 1/3  Fire Potion + Feed shorten the fight (5.8k-13.7k nodes).
+                            //   F7 = 0/3  single GremlinNob ends early (5.7k-12.4k nodes).
+                            String reason = "F5".equals(fixture)
+                                    ? "flee-control, measured 0/3 (Looter flees 1.3k-4.4k nodes)"
+                                    : ("F6".equals(fixture)
+                                        ? "known-easy control, measured 1/3 (Fire Potion + Feed)"
+                                        : "known-easy control, measured 0/3 (single GremlinNob)");
+                            Log.info("  S292 fixture=" + fixture + " " + reason + ", no hardness assert");
                         }
                     }
                 } finally {
@@ -4517,87 +4521,6 @@ public final class Probe {
                     }
                 } finally {
                     Solver.setCurveForTest(false);
-                    Limits.clearOverridesForTest();
-                    try { World.forceRestore(); } catch (Throwable t) { }
-                }
-            }
-        });
-
-        /*
-         * S294 (Task J): F7 variant matrix (same shape as S293) plus a report-only keyExtras
-         * comparison on F7 V0. No algorithm/default change; numbers are for the main brain.
-         */
-        Probe.core("S294 F7 matrix + keyExtras report: 3 seeds x V0-V5 at an 80k-node cap",
-                new Runnable(){
-            @Override
-            public void run() {
-                String[] variants = {"V0", "V1", "V2", "V3", "V4", "V5"};
-                int[] vIndex = {0, 1, 2, 3, 4, 5};
-                long[] seeds = {9701L, 9702L, 9703L};
-                try {
-                    Limits.forcePotionsForTest(Boolean.TRUE);
-                    for (int s = 0; s < seeds.length; s++) {
-                        World root = buildHardFixture("F7", seeds[s]);
-                        String[] base = null;
-                        int baseScore = 0;
-                        for (int v = 0; v < variants.length; v++) {
-                            Solver.setCurveForTest(true);
-                            String[] cell;
-                            try {
-                                cell = matrixCellCapped("S294", "F7", variants[v], seeds[s], root,
-                                        vIndex[v], base == null ? null : base[1], 80000, 240000L);
-                            } finally {
-                                Solver.setCurveForTest(false);
-                            }
-                            if (v == 0) {
-                                base = cell;
-                                baseScore = Integer.parseInt(cell[5]);
-                            }
-                            int nodes = Integer.parseInt(cell[4]);
-                            int score = Integer.parseInt(cell[5]);
-                            int[] cs = curveStats(cell[6]);
-                            Probe.check("ok".equals(cell[0]),
-                                    "S294 seed=" + seeds[s] + " " + variants[v] + " produced a row",
-                                    "status=" + cell[0]);
-                            Probe.check(nodes <= 80000,
-                                    "S294 seed=" + seeds[s] + " " + variants[v] + " nodes within cap",
-                                    "nodes=" + nodes);
-                            Probe.check(cs[0] == 1 && cs[1] <= score,
-                                    "S294 seed=" + seeds[s] + " " + variants[v] + " curve monotonic",
-                                    "mono=" + cs[0] + " last=" + cs[1] + " score=" + score);
-                            Log.info("  S294 cmp fixture=F7 seed=" + seeds[s] + " " + variants[v]
-                                    + " score=" + score + " steps=" + cell[8]
-                                    + " bestAt=" + cell[2] + " nodes=" + nodes
-                                    + " proven=" + cell[7]
-                                    + " vsV0score=" + (v == 0 ? 0 : score - baseScore)
-                                    + " curve=" + cell[6]);
-                        }
-                    }
-                    // ---- §4.1 keyExtras on F7 V0, report-only (no must-be-better assertion) ----
-                    long[] keySeeds = {9701L, 9702L};
-                    for (int s = 0; s < keySeeds.length; s++) {
-                        World root = buildHardFixture("F7", keySeeds[s]);
-                        for (int e = 0; e < 2; e++) {
-                            boolean extras = e == 1;
-                            Limits.overrideForTest("search.keyExtras", extras ? "on" : "off");
-                            Digest.setKeyExtras(Limits.keyExtras());
-                            Solver.Result r = searchCapped(root, 80000, 240000L);
-                            int score = Solver.lastBestScoreForTest();
-                            int nodes = r == null ? -1 : r.nodes;
-                            int steps = r == null || r.plan == null ? 0 : r.plan.size();
-                            int trans = Solver.lastTranspositions();
-                            Log.info("  S294 keyextras seed=" + keySeeds[s] + " extras=" + extras
-                                    + " score=" + score + " nodes=" + nodes
-                                    + " steps=" + steps + " transpositions=" + trans);
-                            Limits.overrideForTest("search.keyExtras", null);
-                            Digest.setKeyExtras(false);
-                        }
-                    }
-                } finally {
-                    Limits.overrideForTest("search.keyExtras", null);
-                    Digest.setKeyExtras(false);
-                    Solver.setCurveForTest(false);
-                    Limits.forcePotionsForTest(null);
                     Limits.clearOverridesForTest();
                     try { World.forceRestore(); } catch (Throwable t) { }
                 }
