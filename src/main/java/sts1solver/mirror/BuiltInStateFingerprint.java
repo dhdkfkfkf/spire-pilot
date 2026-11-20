@@ -65,7 +65,15 @@ final class BuiltInStateFingerprint {
      */
     private static int appendMirroredStatics(CanonicalStateWriter writer, int tag,
                                              List<String> unknown) {
-        Statics.Spec[] specs = Statics.specs();
+        Statics.Spec[] specs = Statics.specs().clone();
+        // Dynamic mod registrations can arrive in different orders; canonical output must not
+        // depend on registration order or on the mutable backing array owned by Statics.
+        java.util.Arrays.sort(specs, new Comparator<Statics.Spec>() {
+            public int compare(Statics.Spec a, Statics.Spec b) {
+                int c = a.owner.getName().compareTo(b.owner.getName());
+                return c != 0 ? c : a.name.compareTo(b.name);
+            }
+        });
         for (Statics.Spec spec : specs) {
             if (spec.kind == Statics.Kind.PREF) {
                 // Save-file overlays are deliberately isolated by World but are not combat state.
@@ -94,19 +102,35 @@ final class BuiltInStateFingerprint {
             writer.putString(tag++, label + "=" + scalar(value));
             return tag;
         }
+        if (value instanceof java.util.Set<?>) {
+            // Set iteration order is not a canonical ordering contract. Do not hash an arbitrary
+            // iteration sequence as if it were stable across JVMs or runs.
+            writer.putString(tag++, label + ".set="
+                    + value.getClass().getName() + ":" + ((java.util.Set<?>) value).size());
+            unknown.add("unordered-set-not-canonicalized:" + label);
+            return tag;
+        }
         if (value instanceof Iterable<?>) {
             int index = 0;
             for (Object item : (Iterable<?>) value) {
-                // Elements may themselves be scalars or nested containers (for example a mod-owned
-                // list of UUIDs). Route through appendValue so their actual values are encoded.
+                // Lists/deques preserve semantic order. Elements may be scalar or nested objects.
                 tag = appendValue(writer, tag, label + "[" + index++ + "]", item, unknown);
             }
             writer.putString(tag++, label + ".size=" + index);
             return tag;
         }
-        if (value instanceof java.util.Map<?, ?> || value.getClass().isArray()) {
+        if (value.getClass().isArray()) {
+            int length = java.lang.reflect.Array.getLength(value);
+            for (int index = 0; index < length; index++) {
+                Object item = java.lang.reflect.Array.get(value, index);
+                tag = appendValue(writer, tag, label + "[" + index + "]", item, unknown);
+            }
+            writer.putString(tag++, label + ".array-size=" + length);
+            return tag;
+        }
+        if (value instanceof java.util.Map<?, ?>) {
             writer.putString(tag++, label + ".type=" + value.getClass().getName());
-            unknown.add("static-or-named-container-not-enumerated:" + label);
+            unknown.add("map-not-canonicalized:" + label);
             return tag;
         }
         ReadResult groupResult = readNamed(value, "group");
