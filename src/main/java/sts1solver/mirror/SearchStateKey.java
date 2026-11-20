@@ -49,7 +49,8 @@ public final class SearchStateKey {
         byte[] hash = sha256(hashInput.toByteArray());
         this.hashHi = readLong(hash, 0);
         this.hashLo = readLong(hash, 8);
-        this.hashCode = 31 * (31 * schemaVersion + Arrays.hashCode(this.canonicalBytes))\n                + (exact ? 1 : 0) + this.unknownReasons.hashCode();
+        this.hashCode = 31 * (31 * schemaVersion + Arrays.hashCode(this.canonicalBytes))
+                + (exact ? 1 : 0) + this.unknownReasons.hashCode();
     }
 
     /** Full canonical payload, defensively copied. */
