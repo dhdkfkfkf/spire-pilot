@@ -45,7 +45,9 @@ public final class SearchStateSnapshot {
 
         List<String> unknown = new ArrayList<String>();
         unknown.add("legacy-digest-is-not-a-complete-behavior-state-snapshot");
+        unknown.add("object-valued-fields-and-nested-mod-state-are-not-fully-traversed");
         unknown.add("mod-owned-mutable-state-is-not-fully-enumerated");
+        BuiltInStateFingerprint.append(writer, 2, unknown);
         if (rawDigest != null && rawDigest.indexOf("unreadable:") >= 0) {
             unknown.add("legacy-digest-reported-unreadable-state");
         }
