@@ -368,7 +368,10 @@ final class BuiltInStateFingerprint {
 
     private static boolean isScalar(Class<?> type) {
         return type.isPrimitive() || type == String.class || type == Boolean.class
-                || Number.class.isAssignableFrom(type) || type.isEnum();
+                || type == Character.class || type == Byte.class || type == Short.class
+                || type == Integer.class || type == Long.class || type == Float.class
+                || type == Double.class || type == java.math.BigInteger.class
+                || type == java.math.BigDecimal.class || type.isEnum();
     }
 
     private static String scalar(Object value) {
