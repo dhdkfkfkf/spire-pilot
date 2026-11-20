@@ -110,13 +110,19 @@ final class BuiltInStateFingerprint {
             unknown.add("unordered-set-not-canonicalized:" + label);
             return tag;
         }
-        if (value instanceof Iterable<?>) {
+        if (value instanceof java.util.List<?> || value instanceof java.util.Deque<?>
+                || value instanceof java.util.Queue<?>) {
             int index = 0;
             for (Object item : (Iterable<?>) value) {
-                // Lists/deques preserve semantic order. Elements may be scalar or nested objects.
+                // These collection contracts preserve semantic iteration order.
                 tag = appendValue(writer, tag, label + "[" + index++ + "]", item, unknown);
             }
             writer.putString(tag++, label + ".size=" + index);
+            return tag;
+        }
+        if (value instanceof Iterable<?>) {
+            writer.putString(tag++, label + ".iterable=" + value.getClass().getName());
+            unknown.add("iterable-order-not-guaranteed:" + label);
             return tag;
         }
         if (value.getClass().isArray()) {
