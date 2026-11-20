@@ -23,18 +23,30 @@ import java.util.Set;
  */
 public final class Legal {
 
+    /** S277: lets the gate exercise the incomplete path without a corrupted engine state. */
+    static boolean failNextScanForTest;
+
     private Legal() {
     }
 
     public static List<Action> actions() {
+        return actionsResult().actions;
+    }
+
+    /** Enumerates candidates without hiding a partially failed scan. */
+    public static ActionGenerationResult actionsResult() {
         List<Action> out = new ArrayList<Action>();
         try {
+            if (failNextScanForTest) {
+                failNextScanForTest = false;
+                throw new IllegalStateException("S277 injected enumeration failure");
+            }
             // B125 (m03996 #2): a decided fight has no decisions. The game itself skips the turn
             // increment in that state (getNextAction: turnHasEnded && areMonstersBasicallyDead),
             // so an end turn there is a no-op that still LOOKS like a branch; the search used to
             // chain those and the panel showed several end turns inside one turn row.
             if (Driver.combatOver()) {
-                return out;
+                return ActionGenerationResult.complete(out);
             }
             List<AbstractMonster> alive = Driver.aliveMonsters();
             List<AbstractCard> hand = AbstractDungeon.player.hand.group;
@@ -125,9 +137,11 @@ public final class Legal {
             }
             out.add(Action.endTurn());
         } catch (Throwable t) {
-            // An unreadable decision point yields no candidates; the caller treats that as terminal.
+            return ActionGenerationResult.incomplete(out,
+                    "Legal action enumeration failed: " + t.getClass().getName()
+                            + (t.getMessage() == null ? "" : ": " + t.getMessage()), t);
         }
-        return out;
+        return ActionGenerationResult.complete(out);
     }
 
     /**

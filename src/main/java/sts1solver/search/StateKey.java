@@ -3,24 +3,24 @@ package sts1solver.search;
 /**
  * A 128-bit fingerprint of a visited position key.
  *
- * <p>The search keys its visited set and its per-layer merge table on the canonical position key,
- * which is a long descriptive string. Using the string itself meant every lookup compared hundreds
- * of characters and every entry kept a second reference to it. Two independent 64-bit FNV-1a passes
- * (different seeds and step offsets, both finished with a splitmix64 avalanche) give a 128-bit key:
- * the chance of two DIFFERENT boards colliding within one search is about 2^-128 per pair, which is
- * far below the chance of a hardware fault, so the visited set keeps its exact meaning.
+ * <p>The search keys its visited set and per-layer merge table on a descriptive canonical position
+ * string. Two independent 64-bit FNV-1a passes, finished with a splitmix64 avalanche, provide a
+ * 128-bit hash for fast bucket selection.
  *
- * <p>The string is still kept on the node itself -- logs and the deferred-line diagnostics print it,
- * and the "was this key canonicalised" comparisons stay string based.
+ * <p>The hash is NOT treated as identity: equality also compares the complete canonical string, so
+ * even a deliberate or accidental 128-bit collision cannot merge two different position keys. The
+ * string is retained by reference (it is immutable and already lives on the node), not copied.
  */
 public final class StateKey {
 
     public final long hi;
     public final long lo;
+    private final String canonicalKey;
 
-    private StateKey(long hi, long lo) {
+    private StateKey(long hi, long lo, String canonicalKey) {
         this.hi = hi;
         this.lo = lo;
+        this.canonicalKey = canonicalKey;
     }
 
     public static StateKey of(String key) {
@@ -36,7 +36,7 @@ public final class StateKey {
         }
         long hi = mix64(h1 + h2);
         long lo = mix64(h2 ^ (h1 << 1) ^ 0x2545f4914f6cdd1dL);
-        return new StateKey(hi, lo);
+        return new StateKey(hi, lo, key);
     }
 
     /** splitmix64 finalizer: every input bit affects every output bit. */
@@ -55,7 +55,9 @@ public final class StateKey {
             return false;
         }
         StateKey other = (StateKey) o;
-        return hi == other.hi && lo == other.lo;
+        return hi == other.hi && lo == other.lo
+                && (canonicalKey == null ? other.canonicalKey == null
+                        : canonicalKey.equals(other.canonicalKey));
     }
 
     @Override

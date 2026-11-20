@@ -3339,6 +3339,104 @@ public final class Probe {
             }
         });
 
+        Probe.core("S277 a failed legal-action scan stops the search instead of expanding a partial list",
+                new Runnable(){
+            @Override
+            public void run() {
+                Synthetic.Spec spec = new Synthetic.Spec();
+                spec.seed = 9271L;
+                spec.maxHealth = 80;
+                spec.deck = new String[]{"Strike_R", "Strike_R", "Defend_R", "Defend_R", "Defend_R"};
+                spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                Synthetic.build(spec, new Synthetic.SyntheticStep());
+                try {
+                    java.lang.reflect.Field seam = sts1solver.search.Legal.class
+                            .getDeclaredField("failNextScanForTest");
+                    seam.setAccessible(true);
+                    // Baseline: a normal fight enumerates completely and both entry points agree.
+                    sts1solver.search.ActionGenerationResult base =
+                            sts1solver.search.Legal.actionsResult();
+                    java.util.List<sts1solver.search.Action> viaActions =
+                            sts1solver.search.Legal.actions();
+                    Probe.check(base.complete(), "baseline enumeration is complete", "");
+                    Probe.check(viaActions.size() == base.actions.size() && viaActions.size() > 0,
+                            "actions() and actionsResult().actions agree on candidate count",
+                            "actions=" + viaActions.size() + " result=" + base.actions.size());
+                    // Inject: arm the seam, hit the real catch, assert the incomplete contract.
+                    seam.setBoolean(null, true);
+                    sts1solver.search.ActionGenerationResult failed =
+                            sts1solver.search.Legal.actionsResult();
+                    Probe.check(!failed.complete(), "the injected scan reports incomplete", "");
+                    Probe.check(failed.failure.startsWith("Legal action enumeration failed:")
+                                    && failed.failure.contains("IllegalStateException")
+                                    && failed.failure.contains("S277"),
+                            "failure names the enum failure, the exception type and the seam",
+                            failed.failure);
+                    // One-shot: the next scan is complete again without touching the seam.
+                    sts1solver.search.ActionGenerationResult after =
+                            sts1solver.search.Legal.actionsResult();
+                    Probe.check(after.complete() && !after.actions.isEmpty(),
+                            "the seam fires once; the next scan has candidates again",
+                            "count=" + after.actions.size());
+                    // Search side: candidates() must refuse an incomplete set, not expand it.
+                    World.forceRestore();
+                    World world = World.captureLive();
+                    seam.setBoolean(null, true);
+                    java.lang.reflect.Method candidates = sts1solver.search.Solver.class
+                            .getDeclaredMethod("candidates", World.class);
+                    candidates.setAccessible(true);
+                    try {
+                        candidates.invoke(null, world);
+                        Probe.check(false, "candidates refuses an incomplete action set",
+                                "no exception was thrown");
+                    } catch (java.lang.reflect.InvocationTargetException ite) {
+                        Throwable cause = ite.getCause();
+                        Probe.check(cause instanceof IllegalStateException
+                                        && cause.getMessage() != null
+                                        && cause.getMessage().startsWith("Incomplete legal action set:"),
+                                "candidates throws Incomplete legal action set",
+                                cause == null ? "null" : cause.getMessage());
+                    }
+                    Probe.check(!seam.getBoolean(null), "the seam is consumed by candidates", "");
+                } catch (Throwable t) {
+                    Probe.check(false, "S277 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { World.forceRestore(); } catch (Throwable t) { }
+                    try { Driver.end(); } catch (Throwable t) { }
+                    Gameplay.clearPendingForTest();
+                    Gameplay.reset();
+                }
+            }
+        });
+
+        Probe.core("S278 StateKey equality requires the full canonical string, not just the hash",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    sts1solver.search.StateKey a = sts1solver.search.StateKey.of("same");
+                    sts1solver.search.StateKey b = sts1solver.search.StateKey.of("same");
+                    Probe.check(a.equals(b), "of(same) equals of(same)", "");
+                    Probe.check(a.hashCode() == b.hashCode(), "equal keys share a hashCode", "");
+                    Probe.check(!a.equals(sts1solver.search.StateKey.of("b")),
+                            "of(a) does not equal of(b)", "");
+                    // Same hash components, different canonical string: must still be unequal.
+                    java.lang.reflect.Constructor<sts1solver.search.StateKey> ctor =
+                            sts1solver.search.StateKey.class.getDeclaredConstructor(
+                                    long.class, long.class, String.class);
+                    ctor.setAccessible(true);
+                    sts1solver.search.StateKey x = ctor.newInstance(11L, 22L, "alpha");
+                    sts1solver.search.StateKey y = ctor.newInstance(11L, 22L, "beta");
+                    Probe.check(x.hi == y.hi && x.lo == y.lo,
+                            "the two keys share hi/lo (hash components)", "");
+                    Probe.check(!x.equals(y),
+                            "equal hi/lo with different canonical strings are NOT equal", "");
+                } catch (Throwable t) {
+                    Probe.check(false, "S278 ran without throwing", String.valueOf(t));
+                }
+            }
+        });
+
         Probe.core("S100 m16202-4: the panel shows card and potion NAMES, not engine ids",
                 new Runnable(){
             @Override
