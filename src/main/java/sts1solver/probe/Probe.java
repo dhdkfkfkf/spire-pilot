@@ -4123,7 +4123,8 @@ public final class Probe {
                         "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
                 long[] seeds = {9301L, 9302L, 9303L};
                 int[] expScore = {10013559, 10015001, 10001248};
-                int[] expNodes = {2400, 19199, 8848};
+                // S291 Part D: these three values are S285's bestAt (nodes-at-best), NOT total nodes.
+                int[] expBestAt = {2400, 19199, 8848};
                 World a = null;
                 World b = null;
                 try {
@@ -4218,13 +4219,15 @@ public final class Probe {
                         Digest.setKeyExtras(false);
                         String[] cell = matrixCellCapped("S291", "F2", "V0", seeds[s], f2root,
                                 0, null, 20000, 240000L);
+                        int bestAt = Integer.parseInt(cell[2]);
                         int nodes = Integer.parseInt(cell[4]);
                         int score = Integer.parseInt(cell[5]);
-                        Log.info("  S291 control seed=" + seeds[s] + " nodes=" + nodes
-                                + " score=" + score);
-                        Probe.check("ok".equals(cell[0]) && score == expScore[s] && nodes == expNodes[s],
+                        Log.info("  S291 control seed=" + seeds[s] + " bestAt=" + bestAt
+                                + " nodes=" + nodes + " score=" + score);
+                        Probe.check("ok".equals(cell[0]) && score == expScore[s]
+                                        && bestAt == expBestAt[s] && nodes <= 20000,
                                 "S291 seed=" + seeds[s] + " F2/V0 20k control unchanged",
-                                "nodes=" + nodes + " score=" + score);
+                                "bestAt=" + bestAt + " nodes=" + nodes + " score=" + score);
                         try { World.forceRestore(); } catch (Throwable t) { }
                     }
 
