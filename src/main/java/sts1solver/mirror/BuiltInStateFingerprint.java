@@ -37,6 +37,13 @@ final class BuiltInStateFingerprint {
             Object group = com.megacrit.cardcrawl.dungeons.AbstractDungeon.getMonsters();
             Object monsters = readNamed(group, "monsters");
             tag = appendValue(writer, tag, "monsters", monsters, unknown);
+            if (monsters instanceof Iterable<?>) {
+                int index = 0;
+                for (Object monster : (Iterable<?>) monsters) {
+                    tag = appendValue(writer, tag, "monster[" + index++ + "].powers",
+                            readNamed(monster, "powers"), unknown);
+                }
+            }
         } catch (Throwable t) {
             unknown.add("built-in-state-capture-failed:" + t.getClass().getName());
         }
