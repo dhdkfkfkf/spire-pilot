@@ -2726,6 +2726,66 @@ public final class Probe {
             }
         });
 
+        Probe.core("S304 1.7.3: a live copy that differs only in exhaust is still the planned card",
+                new Runnable(){
+            @Override
+            public void run() {
+                // 2026-11-21 (user, 魔力): 实机侧由能力/遗物把 exhaust 后设为 true，沙盒评分时还是
+                // false。print 严格比较会让手上两张同 id 卡都被判成「不是计划那张」，自动出牌停。
+                // 现在只有 exhaust 不同时仍认作计划选的那张；其他字段不同仍然拒绝。
+                Synthetic.Spec spec = new Synthetic.Spec();
+                spec.seed = 41L;
+                spec.maxHealth = 80;
+                spec.deck = new String[]{"Strike_R", "Strike_R", "Defend_R", "Defend_R", "Bash"};
+                spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                Synthetic.build(spec, new Synthetic.SyntheticStep());
+                Probe.rollIntents();
+                AbstractCard first = null;
+                AbstractCard second = null;
+                for (int i = 0; i < AbstractDungeon.player.hand.group.size(); ++i) {
+                    AbstractCard c = (AbstractCard) AbstractDungeon.player.hand.group.get(i);
+                    if (c != null && "Strike_R".equals(c.cardID)) {
+                        if (first == null) {
+                            first = c;
+                        } else if (second == null) {
+                            second = c;
+                        }
+                    }
+                }
+                Probe.check(first != null && second != null, "the fixture holds two Strikes", "");
+                if (first == null || second == null) {
+                    return;
+                }
+                String planned = sts1solver.mirror.CardPrint.of(first);
+                sts1solver.search.Action action = sts1solver.search.Action.card(
+                        0, -1, 1, "Strike_R", "Strike_R", "", "Strike_R", "plan-uuid-not-live")
+                        .withCardPrint(planned);
+                // Both live copies now carry the late exhaust flag, exactly like the 魔力 fight.
+                first.exhaust = true;
+                second.exhaust = true;
+                AbstractCard matched = Gameplay.liveCardFor(action);
+                Log.info("  S304 exhaust-only: matched=" + (matched != null)
+                        + " planned=" + planned + " live0=" + sts1solver.mirror.CardPrint.of(first));
+                Probe.check(matched != null,
+                        "a copy that differs only in exhaust still matches the plan",
+                        "planned=" + planned + " live=" + sts1solver.mirror.CardPrint.of(first));
+
+                // The leniency stops at exhaust: a different damage number must still refuse.
+                String plannedOther = sts1solver.mirror.CardPrint.of(first);
+                sts1solver.search.Action other = sts1solver.search.Action.card(
+                        0, -1, 1, "Strike_R", "Strike_R", "", "Strike_R", "plan-uuid-not-live")
+                        .withCardPrint(plannedOther);
+                first.baseDamage = 9;
+                second.baseDamage = 9;
+                AbstractCard refused = Gameplay.liveCardFor(other);
+                Log.info("  S304 other-field: matched=" + (refused != null)
+                        + " planned=" + plannedOther);
+                Probe.check(refused == null,
+                        "a different damage number still refuses instead of playing a neighbour", "");
+                Gameplay.reset();
+            }
+        });
+
         Probe.core("S265 m02372: 收起 and 隐藏 are buttons the size of the action row, and no scale readout",
                 new Runnable(){
             @Override

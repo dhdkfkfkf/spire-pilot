@@ -75,7 +75,13 @@ public final class CardPrint {
             "angle", "transparency", "Transparency", "glow", "Glow", "hover", "Hover", "draw",
             "Draw", "xml", "img", "Img", "portrait", "Portrait", "texture", "Texture", "font",
             "Font", "flash", "Flash", "effect", "Effect", "list", "List", "hitbox", "hb", "raw",
-            "render", "Render", "tip", "Tip", "shown", "Shown", "varData"};
+            "render", "Render", "tip", "Tip", "shown", "Shown", "varData",
+            // 1.7.3 (user, 魔力): previewIndex cycles the preview art on a timer and the *Text
+            // fields hold rendered description strings. Both are drawing state -- a sandbox copy
+            // and the live card never share the timer phase or the initialized text instance, so
+            // keeping them in the print made two owners of the same Mana look different and the
+            // autopilot refused to play one that was right there in hand.
+            "preview", "Preview", "Text", "text", "flavor", "Flavor"};
 
     private static final Map<Class<?>, Field[]> EXTRA =
             Collections.synchronizedMap(new WeakHashMap<Class<?>, Field[]>());

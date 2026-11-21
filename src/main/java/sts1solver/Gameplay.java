@@ -3818,6 +3818,14 @@ public final class Gameplay {
     }
 
     /**
+     * 1.7.3: a card print without the exhaust flag. Two copies of the same card that differ only
+     * here are the same play; the flag only changes where the card lands after it is played.
+     */
+    private static String withoutExhaust(String print) {
+        return print.replace("|exhaust=true", "").replace("|exhaust=false", "");
+    }
+
+    /**
      * uuid, else the STATE the plan recorded (B98), else the same card ID + upgrade flags, else the
      * recorded hand index.
      *
@@ -3846,6 +3854,24 @@ public final class Gameplay {
                         return c;
                     }
                 }
+                // 1.7.3 (user, 魔力): exhaust is decided on the LIVE card by powers/relics, and
+                // the sandbox copy the plan was scored on may not carry that late change (the
+                // 2026-11-21 log showed identical prints except exhaust=false vs true). It says
+                // where
+                // the card goes AFTER it is played, not which card this is, so a copy that differs
+                // only there is still the play the plan chose. Every other field must still match.
+                if (action.cardPrint != null && !action.cardPrint.isEmpty()) {
+                    for (int i = 0; i < hand.size(); ++i) {
+                        AbstractCard c = (AbstractCard)hand.get(i);
+                        if (c != null && withoutExhaust(action.cardPrint).equals(
+                                withoutExhaust(sts1solver.mirror.CardPrint.of(c)))) {
+                            Log.info("execute: matched " + action.cardName
+                                    + " ignoring exhaust (plan=" + action.cardPrint
+                                    + " live=" + sts1solver.mirror.CardPrint.of(c) + ")");
+                            return c;
+                        }
+                    }
+                }
                 int copies = 0;
                 for (int i = 0; i < hand.size(); ++i) {
                     AbstractCard c = (AbstractCard)hand.get(i);
@@ -3856,9 +3882,19 @@ public final class Gameplay {
                 if (copies > 1) {
                     // Several copies of that id, none with the planned state: whatever we picked here
                     // would be a different play than the one the plan scored (B98).
+                    // 1.7.3: print the live copies too -- the next mismatch report should show both
+                    // sides of the comparison instead of only the planned print.
+                    StringBuilder livePrints = new StringBuilder();
+                    for (int i = 0; i < hand.size(); ++i) {
+                        AbstractCard h = (AbstractCard)hand.get(i);
+                        if (h != null && action.cardId != null && action.cardId.equals(h.cardID)) {
+                            livePrints.append(" [").append(sts1solver.mirror.CardPrint.of(h)).append(']');
+                        }
+                    }
                     Log.warn("execute: " + copies + " copies of " + action.cardId
                             + " in hand and none carries the planned state (" + action.cardPrint
-                            + "); refusing instead of playing a neighbour");
+                            + "); live=" + livePrints
+                            + "; refusing instead of playing a neighbour");
                     return null;
                 }
             }
