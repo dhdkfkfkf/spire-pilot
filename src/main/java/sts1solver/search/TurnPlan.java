@@ -49,6 +49,12 @@ public final class TurnPlan {
     /** Attack damage the living monsters are aiming at the player this turn. */
     static volatile int lastIncoming;
 
+    /** 1.7.2: how many annotate() calls fell back to the engine's order (see skippedForTest). */
+    static volatile int skipped;
+
+    /** 1.7.2: how many non-empty candidate lists reached annotate() (guards a vacuous gate). */
+    static volatile int annotateCalls;
+
     private static volatile String notice;
 
     private TurnPlan() {
@@ -68,6 +74,25 @@ public final class TurnPlan {
         lastMustDefend = false;
         lastReachableDamage = 0;
         lastIncoming = 0;
+        skipped = 0;
+        annotateCalls = 0;
+    }
+
+    /**
+     * 1.7.2 test hook: how many times {@link #annotate(List)} gave up on a search. It used to be
+     * every search (the in-place sort threw on the generator's unmodifiable view); a gate reads
+     * this so the ordering cannot go silently dead again.
+     */
+    public static int skippedForTest() {
+        return skipped;
+    }
+
+    /**
+     * 1.7.2 test hook: how many candidate lists actually reached the ordering. A gate that only
+     * asserts "no skip" would pass on a search that never annotates at all.
+     */
+    public static int annotateCallsForTest() {
+        return annotateCalls;
     }
 
     /**
@@ -79,6 +104,7 @@ public final class TurnPlan {
         if (acts == null || acts.isEmpty()) {
             return;
         }
+        annotateCalls++;
         try {
             classify(acts);
             if (Limits.turnPlan()) {
@@ -86,6 +112,7 @@ public final class TurnPlan {
             }
         } catch (Throwable t) {
             // An unreadable hand must not cost a decision: keep the engine's own order.
+            skipped++;
             Log.warnEvery("turn-plan", 30000L, "turn plan skipped: " + t);
         }
     }

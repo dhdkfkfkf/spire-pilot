@@ -2663,6 +2663,45 @@ public final class Probe {
             }
         });
 
+        Probe.core("S302 1.7.2: the turn plan re-orders the branches instead of giving up",
+                new Runnable(){
+            @Override
+            public void run() {
+                // 1.6.10 起 search.turnPlan 声称「只重排不删分支」，但候选表是 ActionGenerationResult
+                // 的 unmodifiableList，canonicalCandidates/TargetFocus 在没有合并时把它原样返回，
+                // 于是 order() 里那句 Collections.sort 每次都抛 UnsupportedOperationException、被
+                // catch(Throwable) 吞掉 → 排序从上线起就是死的，只在日志里留一行 WARN。
+                // 这条门禁盯的是「真的排过」而不是「没报错」：annotateCalls 必须 >0，skipped 必须 0。
+                Synthetic.Spec spec = new Synthetic.Spec();
+                spec.seed = 17L;
+                spec.maxHealth = 80;
+                spec.deck = new String[]{"Strike_R", "Strike_R", "Defend_R", "Defend_R", "Bash"};
+                spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                Synthetic.build(spec, new Synthetic.SyntheticStep());
+                Probe.rollIntents();
+                PlanCache.clear();
+                sts1solver.search.TurnPlan.reset();
+                Gameplay.reset();
+                try { AbstractDungeon.actionManager.update(); } catch (Throwable ignored) {}
+                Gameplay.tick();
+                Gameplay.solveLive();
+                int calls = sts1solver.search.TurnPlan.annotateCallsForTest();
+                int skipped = sts1solver.search.TurnPlan.skippedForTest();
+                boolean plan = Gameplay.hasPlan();
+                Log.info("  S302 turn plan: calls=" + calls + " skipped=" + skipped
+                        + " plan=" + plan);
+                Probe.check(calls > 0,
+                        "a search really hands its candidates to the turn plan",
+                        "calls=" + calls);
+                Probe.check(skipped == 0,
+                        "the turn plan orders them instead of falling back silently",
+                        "calls=" + calls + " skipped=" + skipped);
+                Probe.check(plan, "and the search still lands a line", "plan=" + plan);
+                sts1solver.search.TurnPlan.reset();
+                Gameplay.reset();
+            }
+        });
+
         Probe.core("S265 m02372: 收起 and 隐藏 are buttons the size of the action row, and no scale readout",
                 new Runnable(){
             @Override
@@ -3865,8 +3904,11 @@ public final class Probe {
                 int[] caps = {20000, 40000, 80000};
                 // The 20k control must reproduce round-2 S283 exactly; a drift here would make
                 // the 40k/80k columns incomparable.
+                // 1.7.2: seed 9303's best node is 8847, not 8848 -- S283 ran while search.turnPlan
+                // was silently dead (Solver passed the generator's unmodifiable view into the
+                // in-place sort), so the best node sat one expansion later. Scores are unchanged.
                 int[] expectedScore = {10013559, 10015001, 10001248};
-                int[] expectedBestAt = {2400, 19199, 8848};
+                int[] expectedBestAt = {2400, 19199, 8847};
                 try {
                     for (int s = 0; s < seeds.length; s++) {
                         Synthetic.Spec spec = new Synthetic.Spec();
@@ -4226,7 +4268,11 @@ public final class Probe {
                 String[] monsters = {"com.megacrit.cardcrawl.monsters.exordium.LouseNormal"};
                 long[] seeds = {9301L, 9302L, 9303L};
                 int[] expOnScore = {10023597, 10023038, 10023277};
-                int[] expOnNodes = {14, 5, 21};
+                // 1.7.2: 9303 is 20 nodes, not the 21 S289 recorded. S289 ran while search.turnPlan
+                // was silently dead (the in-place sort threw on the generator's unmodifiable view),
+                // so the first branch it expanded was the engine's order; with the order really
+                // applied the same search stops one node earlier. Score and proven are unchanged.
+                int[] expOnNodes = {14, 5, 20};
                 int[] expOffScore = {10035593, 10035032, 10035271};
                 int[] expOffNodes = {30000, 30000, 26409};
                 int[] expOffSteps = {7, 8, 9};
@@ -4306,7 +4352,9 @@ public final class Probe {
                 long[] seeds = {9301L, 9302L, 9303L};
                 int[] expScore = {10013559, 10015001, 10001248};
                 // S291 Part D: these three values are S285's bestAt (nodes-at-best), NOT total nodes.
-                int[] expBestAt = {2400, 19199, 8848};
+                // 1.7.2: 9303 is 8847, one node earlier than S285 recorded -- S285 ran while
+                // search.turnPlan was silently dead, so the best node sat one expansion later.
+                int[] expBestAt = {2400, 19199, 8847};
                 World a = null;
                 World b = null;
                 try {

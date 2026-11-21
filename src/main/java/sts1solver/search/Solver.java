@@ -3568,6 +3568,12 @@ public final class Solver {
             // that can change the turn, before anything forks them.
             out = TargetFocus.apply(out);
             // 1.0.6 (C1): this turn's bound only re-orders; the branch set is unchanged.
+            // 1.7.2: the generator hands out an unmodifiable view and both steps above return it
+            // untouched when they merge nothing, so the in-place sort in TurnPlan.order() used to
+            // throw and the whole ordering was silently skipped. Give it a list it can sort.
+            if (Limits.turnPlan() && !(out instanceof java.util.ArrayList)) {
+                out = new java.util.ArrayList<Action>(out);
+            }
             TurnPlan.annotate(out);
             String planNotice = TurnPlan.takeNotice();
             if (planNotice != null) {
