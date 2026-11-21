@@ -1250,9 +1250,21 @@ public final class Probe {
                 Synthetic.build(spec, new Synthetic.SyntheticStep());
                 PlanCache.clear();
                 Gameplay.reset();
+                // 1.7.2: since 1.6.3 an unsettled board queues the solve instead of starting it
+                // inline. Pump real frames so startQueuedSolve() consumes the queue, then drive
+                // the sliced search -- the same shape as the successful second call below.
                 Gameplay.startQuickSolve();
                 long deadline = System.currentTimeMillis() + 60000L;
-                while (!Gameplay.advanceQuickForTest(5L) && System.currentTimeMillis() < deadline) {
+                int slicesFirst = 0;
+                while (!Gameplay.hasPlan() && System.currentTimeMillis() < deadline) {
+                    try { AbstractDungeon.actionManager.update(); } catch (Throwable ignored) {}
+                    Gameplay.tick();
+                    ++slicesFirst;
+                    if (Gameplay.currentPlan() != null) {
+                        while (!Gameplay.advanceQuickForTest(5L) && System.currentTimeMillis() < deadline) {
+                            ++slicesFirst;
+                        }
+                    }
                 }
                 Solver.Result first = Gameplay.currentPlan();
                 int before = first == null || first.plan.isEmpty() ? -1 : first.plan.get(0).turn;
@@ -1893,6 +1905,13 @@ public final class Probe {
                 long started = System.currentTimeMillis();
                 Gameplay.toggleAutopilot();
                 long waited = System.currentTimeMillis() - started;
+                // 1.7.2: waited above still measures only the non-blocking button press. The
+                // solve it queued needs real frames before its status is observable.
+                long pumpDeadline = System.currentTimeMillis() + 60000L;
+                while (!Gameplay.quickSearching() && System.currentTimeMillis() < pumpDeadline) {
+                    try { AbstractDungeon.actionManager.update(); } catch (Throwable ignored) {}
+                    Gameplay.tick();
+                }
                 boolean searching = Gameplay.quickSearching();
                 boolean armed = Gameplay.autoplayArmed();
                 Log.info("  S93 arm: waited=" + waited + "ms searching=" + searching + " armed=" + armed
@@ -2293,6 +2312,13 @@ public final class Probe {
                 // Half (a): a search is in flight with the autoplay arming on it.
                 Gameplay.setAutoModeForTest(Gameplay.MODE_FULL);
                 Gameplay.toggleAutopilot();
+                // 1.7.2: pump real frames so the queued solve starts (quickSearching() true)
+                // before its status is sampled. Stop the moment it starts so armed stays set.
+                long pumpDeadlineA = System.currentTimeMillis() + 60000L;
+                while (!Gameplay.quickSearching() && System.currentTimeMillis() < pumpDeadlineA) {
+                    try { AbstractDungeon.actionManager.update(); } catch (Throwable ignored) {}
+                    Gameplay.tick();
+                }
                 boolean searching = Gameplay.quickSearching();
                 boolean armedBefore = Gameplay.autoplayArmed();
                 Gameplay.cycleAutoMode();
@@ -2549,6 +2575,13 @@ public final class Probe {
                 // hit -- otherwise "yielded" would pass without ever testing the yield.
                 Gameplay.autopilotOnForTest();
                 Gameplay.startQuickSolve();
+                // 1.7.2: pump real frames so the queued solve starts -- the scheduler-yield
+                // assertion below is only meaningful while a search actually owns the statics.
+                long pumpDeadlineS = System.currentTimeMillis() + 60000L;
+                while (!Gameplay.quickSearching() && System.currentTimeMillis() < pumpDeadlineS) {
+                    try { AbstractDungeon.actionManager.update(); } catch (Throwable ignored) {}
+                    Gameplay.tick();
+                }
                 boolean searching = Gameplay.quickSearching();
                 Gameplay.prefetchDuringPaceForTest();
                 boolean yielded = !sts1solver.search.Prefetch.busy()
