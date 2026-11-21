@@ -1145,9 +1145,21 @@ public final class Probe {
                 spec.deck = new String[]{"Strike_R", "Strike_R", "Strike_R", "Defend_R", "Defend_R"};
                 spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
                 Synthetic.build(spec, new Synthetic.SyntheticStep());
+                // 1.7.2: same fixture shape as S74/S93 -- live play rolls the move on the first
+                // frame, and a fresh fixture's first tick is a world switch. Roll the intent and
+                // burn that frame before asking for the sliced search, otherwise the solve is only
+                // queued and the panel keeps saying "waiting for the monster's intent".
+                Probe.rollIntents();
                 PlanCache.clear();
                 Gameplay.reset();
+                try { AbstractDungeon.actionManager.update(); } catch (Throwable ignored) {}
+                Gameplay.tick();
                 Gameplay.startQuickSolve();
+                long f8Started = System.currentTimeMillis() + 5000L;
+                while (!Gameplay.quickSearching() && System.currentTimeMillis() < f8Started) {
+                    try { AbstractDungeon.actionManager.update(); } catch (Throwable ignored) {}
+                    Gameplay.tick();
+                }
                 Probe.check(Gameplay.quickSearching(), "F8 starts a sliced search instead of blocking", "");
                 String progress = String.join(" | ", Gameplay.lines());
                 Log.info("  S62 progress: " + progress);
@@ -1317,11 +1329,23 @@ public final class Probe {
                 first.deck = new String[]{"Strike_R", "Strike_R", "Strike_R", "Defend_R", "Defend_R"};
                 first.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
                 Synthetic.build(first, new Synthetic.SyntheticStep());
+                // 1.7.2: same fixture shape as S74/S93 -- roll the intent and burn the world-switch
+                // frame, or the solve stays queued and this gate reads an empty strip.
+                Probe.rollIntents();
                 PlanCache.clear();
                 Gameplay.reset();
+                try { AbstractDungeon.actionManager.update(); } catch (Throwable ignored) {}
+                Gameplay.tick();
                 Gameplay.startQuickSolve();
                 long deadline = System.currentTimeMillis() + 60000L;
-                while (!Gameplay.advanceQuickForTest(10L) && System.currentTimeMillis() < deadline) {
+                while (!Gameplay.hasPlan() && System.currentTimeMillis() < deadline) {
+                    try { AbstractDungeon.actionManager.update(); } catch (Throwable ignored) {}
+                    Gameplay.tick();
+                    if (Gameplay.currentPlan() != null) {
+                        while (!Gameplay.advanceQuickForTest(10L)
+                                && System.currentTimeMillis() < deadline) {
+                        }
+                    }
                 }
                 // The strip is built inside Gameplay.lines(), which the panel calls every frame; a
                 // headless gate has no next frame, so run the same step once before reading route().
