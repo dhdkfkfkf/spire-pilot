@@ -17,3 +17,14 @@
 - 编译失败只摘 `ERROR`/`error:`/`BUILD FAILURE` 行和首个堆栈，不要回贴整段 maven 输出。
 - 搜索源码优先 `src\main\java` 范围，别把 `research\`、`evidence\`、`build\` 一起递归。
 - 需要跨 54 个 `.log` 比对时先用 `grep` 工具的文件清单/条数确认目标文件，再逐文件取结论。
+
+## 发布 / 创意工坊上传约定
+
+- **`changeNote` 只写当前版本的改动，不追加历史条目。** 玩家更新说明里只需要看到「这一版改了什么」，
+  旧版本内容留在 CHANGELOG 与工坊描述正文里。
+- **`config.json` 的 `description` 上限是 8000 字节（UTF-8），不是字符数。** 上传前必须按字节校验；
+  1.7.2 第一次上传就是因 8,455 字节返回 `SteamResult=InvalidParam`。
+- `description-bbcode.txt` 必须与 `config.json` 的 `description` 逐字节一致；描述保持纯 BBCode，
+  不混 emoji。
+- 上传包在 `dist\workshop-ws\`，真人双击 `upload.cmd`；上传前确认游戏与 ModTheSpire 已关闭、
+  Steam 已登录。
