@@ -1899,18 +1899,32 @@ public final class Probe {
                 spec.deck = new String[]{"Strike_R", "Strike_R", "Defend_R", "Defend_R", "Bash"};
                 spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
                 Synthetic.build(spec, new Synthetic.SyntheticStep());
+                // 1.7.2: live play rolls the move on the first frame of the turn; a fixture left on
+                // the DEBUG placeholder queues every solve for INTENT_WAIT_MAX_MS first.
+                Probe.rollIntents();
                 PlanCache.clear();
                 Gameplay.setBudgetCapForTest(1500L);
                 Gameplay.reset();
+                // 1.7.2: the fresh fixture is a new player/node, so the very first tick sees a world
+                // switch and clears whatever was armed (detectWorldSwitch). Live play never notices:
+                // frames run between "combat starts" and the player pressing the button. Burn that
+                // frame here, while nothing is armed, so the press below is what the queue holds.
+                try { AbstractDungeon.actionManager.update(); } catch (Throwable ignored) {}
+                Gameplay.tick();
                 long started = System.currentTimeMillis();
                 Gameplay.toggleAutopilot();
                 long waited = System.currentTimeMillis() - started;
                 // 1.7.2: waited above still measures only the non-blocking button press. The
                 // solve it queued needs real frames before its status is observable.
                 long pumpDeadline = System.currentTimeMillis() + 60000L;
+                boolean pumpLogged = false;
                 while (!Gameplay.quickSearching() && System.currentTimeMillis() < pumpDeadline) {
                     try { AbstractDungeon.actionManager.update(); } catch (Throwable ignored) {}
                     Gameplay.tick();
+                    if (!pumpLogged && System.currentTimeMillis() > started + 3000L) {
+                        pumpLogged = true;
+                        Probe.logPumpState("S93");
+                    }
                 }
                 boolean searching = Gameplay.quickSearching();
                 boolean armed = Gameplay.autoplayArmed();
@@ -2192,6 +2206,10 @@ public final class Probe {
                 spec.deck = new String[]{"Strike_R", "Strike_R", "Defend_R", "Defend_R", "Bash"};
                 spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
                 Synthetic.build(spec, new Synthetic.SyntheticStep());
+                // 1.7.2: live play rolls the monster's move on the first frame of the turn. Without
+                // it the 全自动 re-solve is QUEUED instead of starting, the arming is dropped one
+                // call later, and the mode stops -- a fixture shape the live game never has.
+                Probe.rollIntents();
                 PlanCache.clear();
                 Gameplay.reset();
                 Gameplay.solveLive();
@@ -2210,6 +2228,26 @@ public final class Probe {
                 Gameplay.setAutoModeForTest(Gameplay.MODE_FULL);
                 Gameplay.autopilotOnForTest();
                 Gameplay.tick();
+                // 1.7.2: a re-solve started while the monster intents are still unrolled is QUEUED
+                // ("solve queued (怪物意图还没确定)"), and the very next thing this path does is stop
+                // the autopilot for "board not settled" -- so one tick only asks for the search and
+                // going=false. Pump real frames until the queued solve is in flight (the same shape
+                // as S74's second call); bounded, so a board that never settles fails the gate
+                // instead of hanging it.
+                long pumpDeadline = System.currentTimeMillis() + 60000L;
+                long pumpFrom = System.currentTimeMillis();
+                boolean pumpLogged = false;
+                // Stop as soon as the request is visibly satisfied: the search is running, or it
+                // already landed a line (the cache makes that instant), or the arming survived.
+                while (!Gameplay.quickSearching() && !Gameplay.hasPlan() && !Gameplay.autoplayArmed()
+                        && System.currentTimeMillis() < pumpDeadline) {
+                    try { AbstractDungeon.actionManager.update(); } catch (Throwable ignored) {}
+                    Gameplay.tick();
+                    if (!pumpLogged && System.currentTimeMillis() > pumpFrom + 3000L) {
+                        pumpLogged = true;
+                        Probe.logPumpState("S258 full");
+                    }
+                }
                 boolean fullGoes = Gameplay.autopilot() || Gameplay.quickSearching()
                         || Gameplay.autoplayArmed();
                 int replans = Gameplay.autoReplansForTest();
@@ -2306,6 +2344,11 @@ public final class Probe {
                 Synthetic.build(spec, new Synthetic.SyntheticStep());
                 PlanCache.clear();
                 Gameplay.reset();
+                // 1.7.2: same shape as S93/S258 -- roll the move, then burn the fixture's own
+                // world-switch frame while nothing is armed.
+                Probe.rollIntents();
+                try { AbstractDungeon.actionManager.update(); } catch (Throwable ignored) {}
+                Gameplay.tick();
                 long capBefore = Gameplay.budgetCapForTest();
                 Gameplay.setBudgetCapForTest(1500L);
 
@@ -2538,12 +2581,20 @@ public final class Probe {
                 spec.deck = new String[]{"Strike_R", "Strike_R", "Defend_R", "Defend_R", "Bash"};
                 spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
                 Synthetic.build(spec, new Synthetic.SyntheticStep());
+                // 1.7.2: same as S258 -- a live monster has rolled its move, so the solve this gate
+                // asks for starts at once instead of sitting in the queue.
+                Probe.rollIntents();
                 PlanCache.clear();
                 sts1solver.search.Prefetch.resetForTest();
                 Gameplay.reset();
                 Gameplay.solveLive();
                 Solver.Result line = Gameplay.currentPlan();
                 boolean haveLine = line != null && line.plan != null && !line.plan.isEmpty();
+                // 1.7.2: the fixture's own world switch is still pending here; leave it for the tick
+                // that follows (it clears the plan, not the line captured above) so it cannot land in
+                // the pump below and wipe the arming the gate is about to set.
+                try { AbstractDungeon.actionManager.update(); } catch (Throwable ignored) {}
+                Gameplay.tick();
 
                 // A tail of one step: the only shape the scheduler is allowed to start on.
                 Gameplay.installPlanForTest(line, haveLine ? line.plan.size() - 1 : 0);
@@ -2578,9 +2629,15 @@ public final class Probe {
                 // 1.7.2: pump real frames so the queued solve starts -- the scheduler-yield
                 // assertion below is only meaningful while a search actually owns the statics.
                 long pumpDeadlineS = System.currentTimeMillis() + 60000L;
+                long pumpFromS = System.currentTimeMillis();
+                boolean pumpLoggedS = false;
                 while (!Gameplay.quickSearching() && System.currentTimeMillis() < pumpDeadlineS) {
                     try { AbstractDungeon.actionManager.update(); } catch (Throwable ignored) {}
                     Gameplay.tick();
+                    if (!pumpLoggedS && System.currentTimeMillis() > pumpFromS + 3000L) {
+                        pumpLoggedS = true;
+                        Probe.logPumpState("S264");
+                    }
                 }
                 boolean searching = Gameplay.quickSearching();
                 Gameplay.prefetchDuringPaceForTest();
@@ -21705,6 +21762,68 @@ private static void s78Write(File file, String text, long modified) {
             ++failed;
         }
         Log.check(bl, string, string2);
+    }
+
+    /**
+     * 1.7.2: roll the fixture monsters' moves, the way the live game does on the first frame of a
+     * turn. A Synthetic fixture leaves every monster on the placeholder intent, and
+     * {@code Gameplay.intentsUnrolled()} then queues each solve for up to INTENT_WAIT_MAX_MS -- a
+     * shape live play never has. Gates that measure "the solve started at once" roll first.
+     */
+    private static void rollIntents() {
+        try {
+            com.megacrit.cardcrawl.rooms.AbstractRoom room = AbstractDungeon.getCurrRoom();
+            if (room == null || room.monsters == null || room.monsters.monsters == null) {
+                return;
+            }
+            for (int i = 0; i < room.monsters.monsters.size(); ++i) {
+                com.megacrit.cardcrawl.monsters.AbstractMonster monster =
+                        (com.megacrit.cardcrawl.monsters.AbstractMonster) room.monsters.monsters.get(i);
+                if (monster == null || monster.isDead || monster.isDying) {
+                    continue;
+                }
+                if (monster.intent == null
+                        || monster.intent == com.megacrit.cardcrawl.monsters.AbstractMonster.Intent.DEBUG) {
+                    monster.rollMove();
+                    monster.createIntent();
+                }
+            }
+        }
+        catch (Throwable t) {
+            Log.warn("gate: could not roll the fixture intents: " + t);
+        }
+    }
+
+    /**
+     * 1.7.2 diagnostic: why a queued solve still has not started. Only the gates that pump frames
+     * call this -- it prints once per pump, after three seconds, and never changes any state.
+     */
+    private static void logPumpState(String tag) {
+        Object room = AbstractDungeon.getCurrRoom();
+        String phase = "-";
+        if (room != null) {
+            try {
+                phase = String.valueOf(((com.megacrit.cardcrawl.rooms.AbstractRoom) room).phase);
+            } catch (Throwable ignored) {
+                phase = room.getClass().getSimpleName();
+            }
+        }
+        com.megacrit.cardcrawl.actions.GameActionManager am = AbstractDungeon.actionManager;
+        Log.info("  " + tag + " pump: queued=" + Gameplay.solveQueuedForTest()
+                + " settled=" + Gameplay.engineSettledForTest()
+                + " combat=" + Gameplay.inCombatForTest()
+                + " screenUp=" + AbstractDungeon.isScreenUp
+                + " phase=" + phase
+                + " actions=" + (am == null ? -1 : am.actions.size())
+                + " cardQueue=" + (am == null ? -1 : am.cardQueue.size())
+                + " monsterQueue=" + (am == null ? -1 : am.monsterQueue.size())
+                + " usingCard=" + (am != null && am.usingCard)
+                + " turnEnded=" + (am != null && am.turnHasEnded)
+                + " cur=" + (am == null || am.currentAction == null ? "-"
+                        : am.currentAction.getClass().getSimpleName())
+                + " awaiting=" + Driver.isAwaitingSelection()
+                + " deep=" + Gameplay.deepSearching()
+                + " stop=" + Gameplay.stopNoteForTest());
     }
 
     private static boolean hasRow(java.util.List<String> rows, String start) {
