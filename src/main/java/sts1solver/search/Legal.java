@@ -6,6 +6,8 @@ import com.megacrit.cardcrawl.monsters.AbstractMonster;
 import com.megacrit.cardcrawl.potions.AbstractPotion;
 import com.megacrit.cardcrawl.potions.PotionSlot;
 import sts1solver.drive.Driver;
+import sts1solver.mirror.FgoNoble;
+import sts1solver.mirror.FernWand;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -134,6 +136,12 @@ public final class Legal {
                 } else {
                     out.add(Action.potion(s, -1, label + "::", p.ID));
                 }
+            }
+            if (FgoNoble.canRelease()) {
+                out.add(Action.noble(FgoNoble.label()));
+            }
+            if (FernWand.canUse()) {
+                out.add(Action.wand(FernWand.label()));
             }
             out.add(Action.endTurn());
         } catch (Throwable t) {
@@ -360,6 +368,20 @@ public final class Legal {
         if (a.isEndTurn()) {
             return Driver.endTurn();
         }
+        if (a.isNoble()) {
+            if (!FgoNoble.release()) {
+                throw new ReplayException("the line cannot be replayed: " + describe(a)
+                        + " -- fgo noble is no longer available");
+            }
+            return Driver.drain();
+        }
+        if (a.isWand()) {
+            if (!FernWand.use()) {
+                throw new ReplayException("the line cannot be replayed: " + describe(a)
+                        + " -- the fern wand is no longer usable");
+            }
+            return Driver.drain();
+        }
         if (a.isCard()) {
             AbstractCard card = handCard(a);
             AbstractMonster target = null;
@@ -499,6 +521,9 @@ public final class Legal {
         // while the real step was 结束回合.
         if (a.isEndTurn()) {
             return "结束回合";
+        }
+        if (a.isNoble() || a.isWand()) {
+            return a.label;
         }
         if (a.cardName != null && !a.cardName.isEmpty()) {
             return a.cardName + (a.cardId == null || a.cardId.isEmpty() ? "" : " [" + a.cardId + "]");

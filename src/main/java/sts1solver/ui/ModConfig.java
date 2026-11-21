@@ -12,6 +12,7 @@ import com.megacrit.cardcrawl.core.Settings;
 import com.megacrit.cardcrawl.helpers.FontHelper;
 import sts1solver.mirror.CompatMode;
 import sts1solver.mirror.HookQuiet;
+import sts1solver.mirror.ScreenAssist;
 import sts1solver.util.Log;
 
 /**
@@ -22,12 +23,18 @@ import sts1solver.util.Log;
  * pre-1.6.7 behaviour (sandbox hooks run, so mod hook effects are part of the plan); a switch
  * isolates that group inside a sandbox window so a buggy listener there cannot freeze the game.
  * The copy says which group freezes usually come from, because the known hang is a combat event.
+ *
+ * <p>B200 adds a third section: an off-plan picker that autopilot would otherwise stop on is
+ * answered from a short search rooted at that screen. It defaults ON (user 2026-11-21). The real
+ * cost is one automated, irreversible pick that may be worse than the player's own, so the copy
+ * names that cost instead of only the wait.
  */
 public final class ModConfig {
 
     private static ModPanel panel;
     private static ModLabeledToggleButton combatToggle;
     private static ModLabeledToggleButton otherToggle;
+    private static ModLabeledToggleButton screenToggle;
 
     private ModConfig() {
     }
@@ -81,12 +88,32 @@ public final class ModConfig {
             label(p, "第二个管战斗外的通知：mod 在那儿弹界面、放声音或发奖励。", x, 380f,
                     FontHelper.charDescFont, Settings.GOLD_COLOR);
 
+            label(p, "计划外的选牌界面（自动战斗）", x, 344f,
+                    FontHelper.charDescFont, Settings.GOLD_COLOR);
+            ModLabeledToggleButton screen = toggle(p,
+                    "遇到计划外选牌：现场求解后接着自动（默认开）",
+                    x, 300f, ScreenAssist.enabled(),
+                    new java.util.function.Consumer<basemod.ModToggleButton>() {
+                        @Override
+                        public void accept(basemod.ModToggleButton button) {
+                            ScreenAssist.write(button.enabled);
+                        }
+                    });
+            label(p, "开启：计划外弹出选牌时，现场算一下并替你选，不打断你。", x, 262f,
+                    FontHelper.charDescFont, Settings.CREAM_COLOR);
+            label(p, "代价：最多多等 3 秒；这一选是临时算的，可能不如你手选，选了不能反悔。", x, 234f,
+                    FontHelper.charDescFont, Settings.CREAM_COLOR);
+            label(p, "算不出来或屏幕已经变了，仍会停下让你选；关闭则一律停下等你。", x, 206f,
+                    FontHelper.charDescFont, Settings.CREAM_COLOR);
+
             BaseMod.registerModBadge(badge(), "Spire Pilot", "dhdkfkfkf",
                     "战斗求解器：计算每回合的出牌路线，可自动执行。", p);
             panel = p;
             combatToggle = combat;
             otherToggle = other;
-            Log.info("config: panel registered; " + CompatMode.label());
+            screenToggle = screen;
+            Log.info("config: panel registered; " + CompatMode.label()
+                    + " | screen assist: " + ScreenAssist.label());
         } catch (Throwable t) {
             Log.warn("config: cannot register the settings panel: " + t);
         }
@@ -105,6 +132,11 @@ public final class ModConfig {
     /** Gate seam: the non-combat switch reflects the stored setting at startup. */
     public static ModLabeledToggleButton otherToggle() {
         return otherToggle;
+    }
+
+    /** Gate seam: the off-plan screen switch reflects the stored setting at startup. */
+    public static ModLabeledToggleButton screenToggle() {
+        return screenToggle;
     }
 
     private static ModLabeledToggleButton toggle(ModPanel p, String text, float x, float y,

@@ -24,7 +24,7 @@ public final class Action {
     public final String cardName;
     /** Target monster name, or "" when the action has no target. */
     public final String targetName;
-    /** "card", "potion", "end", or "sel" (an answer to a selection screen, B162). */
+    /** "card", "potion", "end", "sel" (a picker answer), "noble" or "wand" (mod UI effects). */
     public final String kind;
     /** Cards chosen to answer a card-select screen (comma separated ids), or "". */
     public final String choice;
@@ -428,8 +428,35 @@ public final class Action {
         return new Action(-1, -1, 0, -1, "结束回合", "", "", "end");
     }
 
+    /**
+     * A mod UI activation that is not a card play, a potion or a picker answer.
+     *
+     * <p>The first user is FGO's 宝具解放 button: standing in front of a full gauge, the player can
+     * click it, which queues the mod's own action and opens a standard GRID. The action is planned
+     * like any other decision, but its legality and effect live in the mod bridge, not here.
+     */
+    public static Action noble(String label) {
+        return new Action(-1, -1, 0, -1, label, "宝具解放", "", "noble");
+    }
+
+    /**
+     * The Fern wand's panel activation: a mod UI effect that is neither a card play nor a potion.
+     * The legality and the effect live in {@link sts1solver.mirror.FernWand}; this only names it.
+     */
+    public static Action wand(String label) {
+        return new Action(-1, -1, 0, -1, label, "法杖造牌", "", "wand");
+    }
+
     public boolean isPotion() {
         return potionSlot >= 0;
+    }
+
+    public boolean isNoble() {
+        return "noble".equals(kind);
+    }
+
+    public boolean isWand() {
+        return "wand".equals(kind);
     }
 
     /**

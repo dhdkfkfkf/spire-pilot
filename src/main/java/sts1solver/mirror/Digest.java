@@ -68,6 +68,17 @@ public final class Digest {
                 if (keyExtras) {
                     sb.append(" ep=").append(potionSlots(p.potions));
                 }
+                // FGO keeps its gauge in a mod static scalar, not on the player. Without it two
+                // positions that differ only in 宝具值 would share a transposition key.
+                int fgoNp = FgoNoble.gaugeForDigest();
+                if (fgoNp >= 0) {
+                    sb.append(" np=").append(fgoNp);
+                }
+                // The Fern wand's charge and rate are SpireFields on the player, not powers.
+                String fern = FernWand.digest();
+                if (!fern.isEmpty()) {
+                    sb.append(" fern=").append(fern);
+                }
                 sb.append(" H=").append(pile(p.hand));
                 sb.append(" D=").append(pile(p.drawPile));
                 sb.append(" X=").append(pile(p.discardPile));

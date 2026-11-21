@@ -4527,6 +4527,922 @@ public final class Probe {
             }
         });
 
+        // B200: screen-replan gates. ScreenAssist is default-on in the wild, so every sub-test
+        // pins it explicitly (TRUE or FALSE) -- nothing here relies on settings.txt.
+        Probe.core("S296 plan-off-screen: solve & adopt a selection step without touching the screen (B200)",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    Gameplay.reset();
+                    sts1solver.mirror.ScreenAssist.setForTest(Boolean.TRUE);
+                    Gameplay.setBudgetCapForTest(1500L);
+
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9296L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.deck = new String[]{"Strike_R", "Defend_R", "Bash"};
+                    spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    com.megacrit.cardcrawl.cards.CardGroup group =
+                            new com.megacrit.cardcrawl.cards.CardGroup(
+                                    com.megacrit.cardcrawl.cards.CardGroup.CardGroupType.UNSPECIFIED);
+                    group.addToBottom(com.megacrit.cardcrawl.helpers.CardLibrary.getCopy("Strike_R"));
+                    group.addToBottom(com.megacrit.cardcrawl.helpers.CardLibrary.getCopy("Strike_R"));
+                    AbstractDungeon.gridSelectScreen.open(group, 1, "S296", false, false, false, false);
+
+                    if (!Driver.isAwaitingSelection()
+                            || Driver.selectionKind() != Driver.SelectionKind.GRID) {
+                        Probe.check(false, "S296 a GRID was opened that the plan did not model",
+                                "kind=" + Driver.selectionKind() + " state=" + Driver.selectionState());
+                        return;
+                    }
+                    String namesBefore = Driver.namesOf(Driver.selectionCandidates());
+                    Gameplay.autopilotOnForTest();
+
+                    java.lang.reflect.Method replan = Gameplay.class
+                            .getDeclaredMethod("startScreenReplan", String.class);
+                    replan.setAccessible(true);
+                    boolean started = ((Boolean) replan.invoke(null, "gate S296")).booleanValue();
+                    Probe.check(started, "S296 startScreenReplan started a short search",
+                            "started=" + started + " state=" + Gameplay.planStateForTest());
+                    Probe.check(Gameplay.quickSearching(), "S296 a search is running",
+                            "quick=" + Gameplay.quickSearching()
+                                    + " state=" + Gameplay.planStateForTest());
+
+                    long deadline = System.currentTimeMillis() + 12000L;
+                    while (Gameplay.quickSearching() && System.currentTimeMillis() < deadline) {
+                        Gameplay.advanceQuickForTest(50L);
+                    }
+                    Probe.check(!Gameplay.quickSearching(), "S296 the search finished",
+                            "quick=" + Gameplay.quickSearching()
+                                    + " state=" + Gameplay.planStateForTest());
+
+                    Solver.Result plan = Gameplay.currentPlan();
+                    boolean planOk = plan != null && plan.plan != null && !plan.plan.isEmpty()
+                            && plan.plan.get(0).action != null;
+                    Probe.check(planOk, "S296 a plan was adopted",
+                            "plan=" + (plan == null ? "null" : plan.planText())
+                                    + " state=" + Gameplay.planStateForTest());
+                    if (planOk) {
+                        Action first = plan.plan.get(0).action;
+                        Probe.check(first.isSelection(), "S296 the first step is a selection",
+                                "action=" + first.label + " choice=" + first.choice);
+                        Probe.check(first.choice != null && !first.choice.isEmpty(),
+                                "S296 the selection step carries a non-empty choice",
+                                "choice=" + first.choice + " action=" + first.label);
+                    }
+                    Probe.check(Driver.selectionKind() == Driver.SelectionKind.GRID
+                                    && Driver.isAwaitingSelection(),
+                            "S296 the screen is still open after the search",
+                            "kind=" + Driver.selectionKind() + " state=" + Driver.selectionState());
+                    Probe.check(Driver.selectionCandidates().size() == 2,
+                            "S296 the candidate count is unchanged",
+                            "candidates=" + Driver.namesOf(Driver.selectionCandidates()));
+                    Probe.check(namesBefore.equals(Driver.namesOf(Driver.selectionCandidates())),
+                            "S296 the candidate names are unchanged",
+                            "before=" + namesBefore
+                                    + " after=" + Driver.namesOf(Driver.selectionCandidates()));
+                } catch (Throwable t) {
+                    Probe.check(false, "S296 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                    sts1solver.mirror.ScreenAssist.setForTest(null);
+                    sts1solver.mirror.RolloutChoices.setForTest(null);
+                    Gameplay.setBudgetCapForTest(0L);
+                }
+            }
+        });
+
+        Probe.core("S297 screen-assist off + P1 same-frame guard (B200)", new Runnable(){
+            @Override
+            public void run() {
+                // A -- ScreenAssist pinned off must make startScreenReplan decline.
+                try {
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9297L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.deck = new String[]{"Strike_R", "Defend_R", "Bash"};
+                    spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    com.megacrit.cardcrawl.cards.CardGroup group =
+                            new com.megacrit.cardcrawl.cards.CardGroup(
+                                    com.megacrit.cardcrawl.cards.CardGroup.CardGroupType.UNSPECIFIED);
+                    group.addToBottom(com.megacrit.cardcrawl.helpers.CardLibrary.getCopy("Strike_R"));
+                    group.addToBottom(com.megacrit.cardcrawl.helpers.CardLibrary.getCopy("Strike_R"));
+                    AbstractDungeon.gridSelectScreen.open(group, 1, "S297A", false, false, false, false);
+
+                    Gameplay.reset();
+                    sts1solver.mirror.ScreenAssist.setForTest(Boolean.FALSE);
+                    Gameplay.setBudgetCapForTest(1500L);
+
+                    Probe.check(Driver.selectionKind() == Driver.SelectionKind.GRID
+                                    && Driver.isAwaitingSelection(),
+                            "S297A a GRID was open before the switch-off",
+                            "kind=" + Driver.selectionKind() + " state=" + Driver.selectionState());
+
+                    java.lang.reflect.Method replan = Gameplay.class
+                            .getDeclaredMethod("startScreenReplan", String.class);
+                    replan.setAccessible(true);
+                    boolean started = ((Boolean) replan.invoke(null, "gate S297 off")).booleanValue();
+                    Probe.check(!started, "S297A startScreenReplan returned false with ScreenAssist off",
+                            "started=" + started + " state=" + Gameplay.planStateForTest());
+                    Probe.check(!Gameplay.quickSearching(), "S297A no search was started",
+                            "quick=" + Gameplay.quickSearching()
+                                    + " state=" + Gameplay.planStateForTest());
+                    Probe.check(Gameplay.currentPlan() == null, "S297A no plan was adopted",
+                            "plan=" + Gameplay.planStateForTest());
+                    Probe.check(Driver.selectionKind() == Driver.SelectionKind.GRID
+                                    && Driver.isAwaitingSelection(),
+                            "S297A the screen is still unanswered",
+                            "kind=" + Driver.selectionKind() + " state=" + Driver.selectionState());
+                } catch (Throwable t) {
+                    Probe.check(false, "S297A ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                    sts1solver.mirror.ScreenAssist.setForTest(null);
+                    sts1solver.mirror.RolloutChoices.setForTest(null);
+                    Gameplay.setBudgetCapForTest(0L);
+                }
+
+                // B -- P1: with a quick search already running, maybeAutopilot must not advance
+                // the installed plan on that same frame (the `if (quick != null) return;` guard).
+                try {
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9297L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.deck = new String[]{"Strike_R", "Defend_R", "Bash"};
+                    spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    Gameplay.reset();
+                    sts1solver.mirror.ScreenAssist.setForTest(Boolean.TRUE);
+                    Gameplay.setBudgetCapForTest(1500L);
+
+                    Action fake = Action.card(0, 0, 0, "", "", "", "");
+                    Solver.Result fakeResult = Solver.resultForTest(Arrays.asList(fake),
+                            new int[]{GameActionManager.turn},
+                            new int[]{AbstractDungeon.player.currentHealth});
+                    Gameplay.installPlanForTest(fakeResult, 0);
+
+                    com.megacrit.cardcrawl.cards.CardGroup group =
+                            new com.megacrit.cardcrawl.cards.CardGroup(
+                                    com.megacrit.cardcrawl.cards.CardGroup.CardGroupType.UNSPECIFIED);
+                    group.addToBottom(com.megacrit.cardcrawl.helpers.CardLibrary.getCopy("Strike_R"));
+                    group.addToBottom(com.megacrit.cardcrawl.helpers.CardLibrary.getCopy("Strike_R"));
+                    AbstractDungeon.gridSelectScreen.open(group, 1, "S297B", false, false, false, false);
+
+                    Probe.check(Driver.selectionKind() == Driver.SelectionKind.GRID,
+                            "S297B a GRID was opened while a plan was installed",
+                            "kind=" + Driver.selectionKind() + " state=" + Driver.selectionState());
+
+                    java.lang.reflect.Method replan = Gameplay.class
+                            .getDeclaredMethod("startScreenReplan", String.class);
+                    replan.setAccessible(true);
+                    boolean started = ((Boolean) replan.invoke(null, "gate S297 p1")).booleanValue();
+                    Probe.check(started && Gameplay.quickSearching(),
+                            "S297B a second search started on the already-open screen",
+                            "started=" + started + " quick=" + Gameplay.quickSearching());
+
+                    String before = Gameplay.planStateForTest();
+                    int handBefore = AbstractDungeon.player.hand.size();
+
+                    java.lang.reflect.Method maybe = Gameplay.class
+                            .getDeclaredMethod("maybeAutopilot", boolean.class);
+                    maybe.setAccessible(true);
+                    maybe.invoke(null, Boolean.TRUE);
+
+                    String after = Gameplay.planStateForTest();
+                    int handAfter = AbstractDungeon.player.hand.size();
+                    Probe.check(before.equals(after),
+                            "S297B maybeAutopilot did not touch the plan while a search runs",
+                            "before=" + before + " after=" + after);
+                    Probe.check(handBefore == handAfter,
+                            "S297B maybeAutopilot did not execute the first step",
+                            "handBefore=" + handBefore + " handAfter=" + handAfter);
+                    Probe.check(Driver.selectionKind() == Driver.SelectionKind.GRID
+                                    && Driver.isAwaitingSelection(),
+                            "S297B the screen remained open",
+                            "kind=" + Driver.selectionKind() + " state=" + Driver.selectionState());
+                } catch (Throwable t) {
+                    Probe.check(false, "S297B ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                    sts1solver.mirror.ScreenAssist.setForTest(null);
+                    sts1solver.mirror.RolloutChoices.setForTest(null);
+                    Gameplay.setBudgetCapForTest(0L);
+                }
+
+                // C -- smoke only: the rollout-choice + songzang mirror path must not throw.
+                // The mirrorChoices flag cannot be observed in the gate environment, so only
+                // "no throw" is asserted; stateForTest() is logged, NOT asserted.
+                try {
+                    sts1solver.mirror.RolloutChoices.setForTest(Boolean.TRUE);
+                    sts1solver.mirror.SongZangRenBridge.resetForTest();
+                    sts1solver.mirror.SongZangRenBridge.push();
+                    Probe.check(true, "S297C rollout choices + songzang push did not throw",
+                            "state=" + sts1solver.mirror.SongZangRenBridge.stateForTest());
+                } catch (Throwable t) {
+                    Probe.check(false, "S297C ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                    sts1solver.mirror.ScreenAssist.setForTest(null);
+                    sts1solver.mirror.RolloutChoices.setForTest(null);
+                    Gameplay.setBudgetCapForTest(0L);
+                }
+            }
+        });
+
+        Probe.core("S298 end-turn GRID is walkable by the screen search (B200)", new Runnable(){
+            @Override
+            public void run() {
+                // A -- live: a deterministic one-shot power opens a GRID during end-turn
+                // resolution; Driver.endTurn() must stop on it and it must be answerable.
+                try {
+                    Gameplay.reset();
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9298L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.deck = new String[]{"Strike_R", "Defend_R", "Bash"};
+                    spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    final boolean[] sent = {false};
+                    final boolean[] fired = {false};
+                    final com.megacrit.cardcrawl.cards.CardGroup group =
+                            new com.megacrit.cardcrawl.cards.CardGroup(
+                                    com.megacrit.cardcrawl.cards.CardGroup.CardGroupType.UNSPECIFIED);
+                    group.addToBottom(com.megacrit.cardcrawl.helpers.CardLibrary.getCopy("Strike_R"));
+                    group.addToBottom(com.megacrit.cardcrawl.helpers.CardLibrary.getCopy("Defend_R"));
+                    com.megacrit.cardcrawl.powers.AbstractPower gridPower =
+                            new com.megacrit.cardcrawl.powers.AbstractPower() {{
+                                this.owner = AbstractDungeon.player;
+                                this.ID = "sts1solver:S298Grid";
+                                this.name = "S298 grid";
+                                this.description = "opens a grid during end-turn";
+                                this.type = com.megacrit.cardcrawl.powers.AbstractPower.PowerType.BUFF;
+                                this.isTurnBased = false;
+                                this.img = null;
+                            }
+                        @Override
+                        public void atEndOfTurn(boolean isPlayer) {
+                            if (sent[0]) return;
+                            sent[0] = true;
+                            AbstractDungeon.player.damage(new DamageInfo(
+                                    AbstractDungeon.player, 1, DamageInfo.DamageType.NORMAL));
+                        }
+                        @Override
+                        public int onAttacked(DamageInfo info, int damageAmount) {
+                            if (!fired[0]) {
+                                fired[0] = true;
+                                AbstractDungeon.gridSelectScreen.open(group, 1, "S298", false, false, false, false);
+                            }
+                            return damageAmount;
+                        }
+                    };
+                    AbstractDungeon.player.addPower(gridPower);
+
+                    Driver.endTurn();
+
+                    Probe.check(Driver.selectionKind() == Driver.SelectionKind.GRID
+                                    && Driver.isAwaitingSelection(),
+                            "S298A end-turn resolution left a GRID open",
+                            "kind=" + Driver.selectionKind() + " state=" + Driver.selectionState());
+                    Probe.check(Driver.selectionCandidates().size() == 2,
+                            "S298A the GRID has two candidates",
+                            "candidates=" + Driver.namesOf(Driver.selectionCandidates()));
+                    List<List<AbstractCard>> options = Driver.selectionOptions(4);
+                    Probe.check(options != null && options.size() == 2,
+                            "S298A the GRID has two answerable options",
+                            "options=" + (options == null ? "null" : String.valueOf(options.size())));
+                    if (options != null && !options.isEmpty()) {
+                        boolean answered = Driver.resolveSelection(options.get(0));
+                        Driver.drain();
+                        Probe.check(answered, "S298A the GRID was answered",
+                                "answered=" + answered + " state=" + Driver.selectionState());
+                        Probe.check(Driver.selectionKind() == Driver.SelectionKind.NONE,
+                                "S298A the GRID closed after the answer",
+                                "kind=" + Driver.selectionKind() + " state=" + Driver.selectionState());
+                        Probe.check(!Driver.lastAnswerUnfinished(),
+                                "S298A the answer finished cleanly",
+                                "unfinished=" + Driver.lastAnswerUnfinished()
+                                        + " state=" + Driver.selectionState());
+                    }
+                } catch (Throwable t) {
+                    Probe.check(false, "S298A ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                    sts1solver.mirror.ScreenAssist.setForTest(null);
+                    sts1solver.mirror.RolloutChoices.setForTest(null);
+                    Gameplay.setBudgetCapForTest(0L);
+                }
+
+                // B -- sandbox: the same end-turn GRID must be visible to screenWalkForTest,
+                // reported as "screen 1: ..." with two comma-separated options.
+                try {
+                    Gameplay.reset();
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9298L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.deck = new String[]{"Strike_R", "Defend_R", "Bash"};
+                    spec.monsters = new String[]{"com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    final boolean[] sent = {false};
+                    final boolean[] fired = {false};
+                    final com.megacrit.cardcrawl.cards.CardGroup group =
+                            new com.megacrit.cardcrawl.cards.CardGroup(
+                                    com.megacrit.cardcrawl.cards.CardGroup.CardGroupType.UNSPECIFIED);
+                    group.addToBottom(com.megacrit.cardcrawl.helpers.CardLibrary.getCopy("Strike_R"));
+                    group.addToBottom(com.megacrit.cardcrawl.helpers.CardLibrary.getCopy("Defend_R"));
+                    com.megacrit.cardcrawl.powers.AbstractPower gridPower =
+                            new com.megacrit.cardcrawl.powers.AbstractPower() {{
+                                this.owner = AbstractDungeon.player;
+                                this.ID = "sts1solver:S298Grid";
+                                this.name = "S298 grid";
+                                this.description = "opens a grid during end-turn";
+                                this.type = com.megacrit.cardcrawl.powers.AbstractPower.PowerType.BUFF;
+                                this.isTurnBased = false;
+                                this.img = null;
+                            }
+                        @Override
+                        public void atEndOfTurn(boolean isPlayer) {
+                            if (sent[0]) return;
+                            sent[0] = true;
+                            AbstractDungeon.player.damage(new DamageInfo(
+                                    AbstractDungeon.player, 1, DamageInfo.DamageType.NORMAL));
+                        }
+                        @Override
+                        public int onAttacked(DamageInfo info, int damageAmount) {
+                            if (!fired[0]) {
+                                fired[0] = true;
+                                AbstractDungeon.gridSelectScreen.open(group, 1, "S298", false, false, false, false);
+                            }
+                            return damageAmount;
+                        }
+                    };
+                    AbstractDungeon.player.addPower(gridPower);
+
+                    List<String> walk = Solver.screenWalkForTest(
+                            World.captureLive(), Action.endTurn(), 8);
+                    Log.info("S298 screen walk: " + walk);
+
+                    boolean threw = false;
+                    for (String line : walk) {
+                        if (line != null && line.startsWith("walk threw:")) threw = true;
+                    }
+                    Probe.check(!threw, "S298B the screen walk did not throw", "walk=" + walk);
+
+                    String screenLine = null;
+                    for (String line : walk) {
+                        if (line != null && line.startsWith("screen 1:")) {
+                            screenLine = line;
+                            break;
+                        }
+                    }
+                    Probe.check(screenLine != null,
+                            "S298B the walk saw the end-turn GRID as screen 1",
+                            "walk=" + walk);
+                    if (screenLine != null) {
+                        Probe.check(screenLine.indexOf(',') >= 0,
+                                "S298B screen 1 offered two options",
+                                "screenLine=" + screenLine);
+                    }
+                } catch (Throwable t) {
+                    Probe.check(false, "S298B ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                    sts1solver.mirror.ScreenAssist.setForTest(null);
+                    sts1solver.mirror.RolloutChoices.setForTest(null);
+                    Gameplay.setBudgetCapForTest(0L);
+                }
+            }
+        });
+
+        Probe.core("S299 FGO real mod: mirrored gauge, noble in Legal, tiers, sandbox isolation",
+                new Runnable(){
+            @Override
+            public void run() {
+                Field gaugeField = null;
+                try {
+                    if (sts1solver.mirror.ModStatics.resolve("fatemaster.characters.master") == null) {
+                        Probe.check(true, "the FGO mod is not enabled on this install (skipped)",
+                                "run with -Mods 'the fgo master,stslib'");
+                        return;
+                    }
+                    Class<?> masterClass = Class.forName("fatemaster.characters.master");
+                    gaugeField = masterClass.getField("fgoNp");
+                    Object masterEnum = Class.forName("fatemaster.Enum.ThmodClassEnum")
+                            .getField("Master_CLASS").get(null);
+
+                    Gameplay.reset();
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9299L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.playerClass = "fatemaster.characters.master";
+                    spec.playerClassEnum =
+                            (com.megacrit.cardcrawl.characters.AbstractPlayer.PlayerClass) masterEnum;
+                    spec.deck = new String[]{"Strike_R", "Defend_R"};
+                    spec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    Probe.check(sts1solver.mirror.FgoNoble.available(),
+                            "S299A the real FGO master is the live player",
+                            "player=" + AbstractDungeon.player.getClass().getName());
+                    Probe.check(sts1solver.mirror.ModStatics.keys()
+                                    .contains("fatemaster.characters.master#fgoNp"),
+                            "S299B fgoNp is owned by the static mirror",
+                            "key=fatemaster.characters.master#fgoNp");
+
+                    gaugeField.setInt(null, 100);
+                    Probe.check(sts1solver.mirror.FgoNoble.gauge() == 100
+                                    && sts1solver.mirror.FgoNoble.canRelease(),
+                            "S299C the 100% gauge is releasable in combat",
+                            "gauge=" + sts1solver.mirror.FgoNoble.gauge());
+                    Probe.check("宝具解放（100%）".equals(sts1solver.mirror.FgoNoble.label()),
+                            "S299C the 100% tier is the plain label",
+                            "label=" + sts1solver.mirror.FgoNoble.label());
+                    boolean noble = false;
+                    List<Action> legal = Legal.actions();
+                    for (int i = 0; i < legal.size(); i++) {
+                        if (legal.get(i).isNoble()) {
+                            noble = true;
+                        }
+                    }
+                    Probe.check(noble, "S299C Legal offers the noble action",
+                            "actions=" + legal.size());
+
+                    gaugeField.setInt(null, 260);
+                    World w = World.captureLive();
+                    boolean installed = false;
+                    int handBefore = AbstractDungeon.player.hand.size();
+                    try {
+                        w.install();
+                        installed = true;
+                        Driver.begin();
+
+                        int[] tiers = new int[]{300, 200, 100};
+                        String[] want = new String[]{"true/2", "true/1", "false/1"};
+                        for (int i = 0; i < tiers.length; i++) {
+                            gaugeField.setInt(null, tiers[i]);
+                            int before = AbstractDungeon.actionManager.actions.size();
+                            boolean released = sts1solver.mirror.FgoNoble.release();
+                            String got = "nothing queued";
+                            if (AbstractDungeon.actionManager.actions.size() > before) {
+                                com.megacrit.cardcrawl.actions.AbstractGameAction last =
+                                        AbstractDungeon.actionManager.actions.get(
+                                                AbstractDungeon.actionManager.actions.size() - 1);
+                                if ("fatemaster.Action.NP.NoblePhantasmSelectAction"
+                                        .equals(last.getClass().getName())) {
+                                    Field up = last.getClass().getDeclaredField("upgraded");
+                                    up.setAccessible(true);
+                                    got = up.getBoolean(last) + "/" + last.amount;
+                                    AbstractDungeon.actionManager.actions.remove(last);
+                                } else {
+                                    got = last.getClass().getName();
+                                }
+                            }
+                            Probe.check(released && want[i].equals(got),
+                                    "S299D " + tiers[i] + "% queues upgraded/amount " + want[i],
+                                    "released=" + released + " queued=" + got);
+                        }
+
+                        gaugeField.setInt(null, 100);
+                        boolean released = sts1solver.mirror.FgoNoble.release();
+                        Probe.check(released, "S299E the 100% release queues its action",
+                                "gauge=" + sts1solver.mirror.FgoNoble.gauge());
+                        boolean up = Driver.pumpUntilSelection(32);
+                        Probe.check(up && Driver.selectionKind() == Driver.SelectionKind.GRID,
+                                "S299E the real action opens the noble GRID",
+                                "up=" + up + " kind=" + Driver.selectionKind()
+                                        + " state=" + Driver.selectionState());
+                        if (up && Driver.selectionKind() == Driver.SelectionKind.GRID) {
+                            List<AbstractCard> offers = Driver.selectionCandidates();
+                            Probe.check(offers.size() >= 3,
+                                    "S299E the grid offers the fixed nobles",
+                                    "offers=" + Driver.namesOf(offers));
+                            String pickId = offers.isEmpty() ? "" : offers.get(0).cardID;
+                            boolean answered = Driver.resolveSelectionByNames(pickId);
+                            Probe.check(answered, "S299E the grid answer is accepted",
+                                    Driver.lastSelectionFailure());
+                            Driver.drain(4000, 800L);
+                            int copies = 0;
+                            com.megacrit.cardcrawl.cards.CardGroup hand =
+                                    AbstractDungeon.player.hand;
+                            for (int i = 0; i < hand.size(); i++) {
+                                if (pickId.equals(hand.group.get(i).cardID)) {
+                                    ++copies;
+                                }
+                            }
+                            Probe.check(copies == 1,
+                                    "S299E the 100% release puts exactly one copy in hand",
+                                    "id=" + pickId + " copies=" + copies
+                                            + " hand=" + Driver.namesOf(hand.group));
+                        }
+
+                        com.megacrit.cardcrawl.relics.AbstractRelic bow =
+                                com.megacrit.cardcrawl.helpers.RelicLibrary.getRelic(
+                                        "fatemaster:BowInsignia");
+                        if (bow != null) {
+                            AbstractDungeon.player.relics.add(bow);
+                        }
+                        gaugeField.setInt(null, 100);
+                        int beforeBow = AbstractDungeon.actionManager.actions.size();
+                        boolean bowReleased = sts1solver.mirror.FgoNoble.release();
+                        String bowQueued = "nothing queued";
+                        if (AbstractDungeon.actionManager.actions.size() > beforeBow) {
+                            com.megacrit.cardcrawl.actions.AbstractGameAction last =
+                                    AbstractDungeon.actionManager.actions.get(
+                                            AbstractDungeon.actionManager.actions.size() - 1);
+                            bowQueued = last.getClass().getSimpleName() + "/" + last.amount;
+                            AbstractDungeon.actionManager.actions.remove(last);
+                        }
+                        Probe.check(bowReleased && "DrawCardAction/3".equals(bowQueued),
+                                "S299F BowInsignia turns the release into draw 3",
+                                "label=" + sts1solver.mirror.FgoNoble.label()
+                                        + " queued=" + bowQueued);
+                    } finally {
+                        try {
+                            if (installed) {
+                                w.uninstall();
+                            }
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                    Probe.check(gaugeField.getInt(null) == 260,
+                            "S299G the live gauge survives the sandbox release",
+                            "liveGauge=" + gaugeField.getInt(null));
+                    Probe.check(AbstractDungeon.player.hand.size() == handBefore,
+                            "S299G the live hand did not gain a sandbox noble",
+                            "before=" + handBefore + " after="
+                                    + AbstractDungeon.player.hand.size());
+                } catch (Throwable t) {
+                    Probe.check(false, "S299 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                    try {
+                        if (gaugeField != null) {
+                            gaugeField.setInt(null, 0);
+                        }
+                    } catch (Throwable ignored) {}
+                    sts1solver.mirror.ScreenAssist.setForTest(null);
+                    sts1solver.mirror.RolloutChoices.setForTest(null);
+                    Gameplay.setBudgetCapForTest(0L);
+                }
+            }
+        });
+
+        Probe.core("S300 送葬人 real counter opens the GRID; B200 adopts it; bridge matches the version",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    if (sts1solver.mirror.ModStatics.resolve(
+                            "songzangren.character.TheUndertaker") == null) {
+                        Probe.check(true, "送葬人 is not enabled on this install (skipped)",
+                                "run with -Mods 'songzangren,stslib'");
+                        return;
+                    }
+                    Object utEnum = Class.forName("songzangren.character.TheUndertaker$Enums")
+                            .getField("THE_UNDERTAKER").get(null);
+                    boolean hasSetter;
+                    try {
+                        Class<?> compat = Class.forName("songzangren.compat.SpirePilotCompat");
+                        try {
+                            compat.getMethod("setMirrorChoices", boolean.class);
+                        } catch (NoSuchMethodException primitiveMiss) {
+                            compat.getMethod("setMirrorChoices", Boolean.class);
+                        }
+                        hasSetter = true;
+                    } catch (Throwable absent) {
+                        hasSetter = false;
+                    }
+
+                    Gameplay.reset();
+                    sts1solver.mirror.ScreenAssist.setForTest(Boolean.TRUE);
+                    sts1solver.mirror.RolloutChoices.setForTest(Boolean.TRUE);
+                    Gameplay.setBudgetCapForTest(1500L);
+
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9300L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.playerClass = "songzangren.character.TheUndertaker";
+                    spec.playerClassEnum =
+                            (com.megacrit.cardcrawl.characters.AbstractPlayer.PlayerClass) utEnum;
+                    spec.deck = new String[]{"Strike_R", "Defend_R"};
+                    spec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    String counterId = (String) Class.forName(
+                            "songzangren.cards.uncommon.WangZheDeTiaoHe")
+                            .getField("ID").get(null);
+                    AbstractDungeon.player.hand.addToTop(
+                            com.megacrit.cardcrawl.helpers.CardLibrary.getCopy(counterId));
+                    AbstractDungeon.player.exhaustPile.addToTop(
+                            com.megacrit.cardcrawl.helpers.CardLibrary.getCopy("Strike_R"));
+
+                    boolean armed = ((Boolean) Class.forName("songzangren.patches.CounterManager")
+                            .getMethod("isArmed").invoke(null)).booleanValue();
+                    Probe.check(armed, "S300A the real mod reports the player armed",
+                            "player=" + AbstractDungeon.player.getClass().getName()
+                                    + " hand=" + Driver.namesOf(AbstractDungeon.player.hand.group));
+
+                    AbstractMonster attacker =
+                            AbstractDungeon.getCurrRoom().monsters.monsters.get(0);
+                    int hpBefore = AbstractDungeon.player.currentHealth;
+                    AbstractDungeon.player.damage(
+                            new DamageInfo(attacker, 3, DamageInfo.DamageType.NORMAL));
+                    Driver.drain(4000, 800L);
+
+                    boolean grid = Driver.isAwaitingSelection()
+                            && Driver.selectionKind() == Driver.SelectionKind.GRID;
+                    Probe.check(grid, "S300A the real counter trigger opened a GRID",
+                            "kind=" + Driver.selectionKind() + " state=" + Driver.selectionState()
+                                    + " queue=" + Driver.queueNames(6));
+                    if (!grid) {
+                        Probe.check(false, "S300B B200 adoption needs the real counter screen",
+                                "no GRID was opened");
+                        return;
+                    }
+                    String namesBefore = Driver.namesOf(Driver.selectionCandidates());
+                    Probe.check(!Driver.selectionCandidates().isEmpty(),
+                            "S300A the GRID offers the exhaust pile",
+                            "offers=" + namesBefore);
+                    Probe.check(AbstractDungeon.player.currentHealth == hpBefore,
+                            "S300A the hit is deferred while the choice is open",
+                            "hp=" + AbstractDungeon.player.currentHealth + " was=" + hpBefore);
+                    // Forward-compatible with the author's upcoming setter: armed exactly when the
+                    // installed mod exposes it, a no-op when it does not. A setter that throws shows
+                    // up here as setter=true, state=unset.
+                    sts1solver.mirror.SongZangRenBridge.resetForTest();
+                    sts1solver.mirror.SongZangRenBridge.push();
+                    String bridgeState = sts1solver.mirror.SongZangRenBridge.stateForTest();
+                    Probe.check(hasSetter == "on".equals(bridgeState),
+                            "S300C the bridge matches the installed mod (setter present → armed)",
+                            "setter=" + hasSetter + " state=" + bridgeState);
+
+                    Gameplay.autopilotOnForTest();
+                    java.lang.reflect.Method replan = Gameplay.class
+                            .getDeclaredMethod("startScreenReplan", String.class);
+                    replan.setAccessible(true);
+                    boolean started = ((Boolean) replan.invoke(null, "gate S300")).booleanValue();
+                    Probe.check(started, "S300B startScreenReplan accepted the real counter GRID",
+                            "started=" + started + " state=" + Gameplay.planStateForTest());
+                    long deadline = System.currentTimeMillis() + 12000L;
+                    while (Gameplay.quickSearching() && System.currentTimeMillis() < deadline) {
+                        Gameplay.advanceQuickForTest(50L);
+                    }
+                    Probe.check(!Gameplay.quickSearching(), "S300B the search finished",
+                            "quick=" + Gameplay.quickSearching()
+                                    + " state=" + Gameplay.planStateForTest());
+                    Solver.Result plan = Gameplay.currentPlan();
+                    boolean planOk = plan != null && plan.plan != null && !plan.plan.isEmpty()
+                            && plan.plan.get(0).action != null;
+                    Probe.check(planOk, "S300B a plan was adopted from the real counter GRID",
+                            "plan=" + (plan == null ? "null" : plan.planText())
+                                    + " state=" + Gameplay.planStateForTest());
+                    if (planOk) {
+                        Action first = plan.plan.get(0).action;
+                        Probe.check(first.isSelection(),
+                                "S300B the first step is the counter answer",
+                                "action=" + first.label + " choice=" + first.choice);
+                        Probe.check(first.choice != null && !first.choice.isEmpty(),
+                                "S300B the answer names an exhaust-pile card",
+                                "choice=" + first.choice);
+                    }
+                    Probe.check(Driver.selectionKind() == Driver.SelectionKind.GRID
+                                    && Driver.isAwaitingSelection(),
+                            "S300B the real screen is still open after the search",
+                            "kind=" + Driver.selectionKind() + " state=" + Driver.selectionState());
+                    Probe.check(namesBefore.equals(Driver.namesOf(Driver.selectionCandidates())),
+                            "S300B the offers did not change",
+                            "before=" + namesBefore + " after="
+                                    + Driver.namesOf(Driver.selectionCandidates()));
+                } catch (Throwable t) {
+                    Probe.check(false, "S300 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                    sts1solver.mirror.ScreenAssist.setForTest(null);
+                    sts1solver.mirror.RolloutChoices.setForTest(null);
+                    Gameplay.setBudgetCapForTest(0L);
+                }
+            }
+        });
+
+        Probe.core("S301 Fern real wand: panel state, Legal, sandbox spends only its own charge",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    if (sts1solver.mirror.ModStatics.resolve("FrierenMod.Characters.Fern") == null) {
+                        Probe.check(true, "FrierenMod is not enabled on this install (skipped)",
+                                "run with -Mods FrierenMod,stslib");
+                        return;
+                    }
+                    Object fernEnum = Class.forName("FrierenMod.enums.CharacterEnums")
+                            .getField("FERN").get(null);
+                    Probe.check(fernEnum != null, "S301 the Fern character enum is registered",
+                            "FRIEREN/FERN/STARK are set by the mod's initializer");
+                    if (fernEnum == null) {
+                        return;
+                    }
+                    String powerId = (String) Class.forName("FrierenMod.powers.ConcentrationPower")
+                            .getField("POWER_ID").get(null);
+                    String cardId = (String) Class.forName(
+                            "FrierenMod.cards.tempCards.SpecializedOffensiveMagic")
+                            .getField("ID").get(null);
+
+                    Gameplay.reset();
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9301L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.playerClass = "FrierenMod.Characters.Fern";
+                    spec.playerClassEnum =
+                            (com.megacrit.cardcrawl.characters.AbstractPlayer.PlayerClass) fernEnum;
+                    spec.deck = new String[]{"Strike_R", "Defend_R"};
+                    spec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    Probe.check(sts1solver.mirror.FernWand.available(),
+                            "S301A the real Fern player owns a wand panel",
+                            "player=" + AbstractDungeon.player.getClass().getName());
+                    Probe.check(sts1solver.mirror.FernWand.charge() == 1
+                                    && sts1solver.mirror.FernWand.damage() == 0
+                                    && sts1solver.mirror.FernWand.canUse(),
+                            "S301B with no 专注 the wand is still legal (the mod only needs charge)",
+                            "charge=" + sts1solver.mirror.FernWand.charge()
+                                    + " damage=" + sts1solver.mirror.FernWand.damage());
+                    boolean zeroOffered = false;
+                    List<Action> zeroLegal = Legal.actions();
+                    for (int i = 0; i < zeroLegal.size(); i++) {
+                        if (zeroLegal.get(i).isWand()) {
+                            zeroOffered = true;
+                        }
+                    }
+                    Probe.check(zeroOffered, "S301B Legal offers the 0-damage wand",
+                            "actions=" + zeroLegal.size());
+                    Class.forName("FrierenMod.ui.panels.FernPanel")
+                            .getMethod("setEnergy", int.class)
+                            .invoke(null, Integer.valueOf(0));
+                    Probe.check(!sts1solver.mirror.FernWand.canUse(),
+                            "S301B with no charge the wand is not legal",
+                            "charge=" + sts1solver.mirror.FernWand.charge()
+                                    + " damage=" + sts1solver.mirror.FernWand.damage());
+                    boolean noChargeOffered = false;
+                    List<Action> noChargeLegal = Legal.actions();
+                    for (int i = 0; i < noChargeLegal.size(); i++) {
+                        if (noChargeLegal.get(i).isWand()) {
+                            noChargeOffered = true;
+                        }
+                    }
+                    Probe.check(!noChargeOffered, "S301B Legal does not offer the wand at charge 0",
+                            "actions=" + noChargeLegal.size());
+
+                    AbstractDungeon.player.powers.add(
+                            (com.megacrit.cardcrawl.powers.AbstractPower) Class.forName(
+                                    "FrierenMod.powers.ConcentrationPower")
+                                    .getConstructor(int.class).newInstance(Integer.valueOf(3)));
+                    Class.forName("FrierenMod.ui.panels.FernPanel")
+                            .getMethod("setEnergy", int.class)
+                            .invoke(null, Integer.valueOf(2));
+
+                    Probe.check(sts1solver.mirror.FernWand.charge() == 2
+                                    && sts1solver.mirror.FernWand.rate() == 2
+                                    && sts1solver.mirror.FernWand.damage() == 6,
+                            "S301C the panel reads charge 2, rate 2, damage 6",
+                            "charge=" + sts1solver.mirror.FernWand.charge()
+                                    + " rate=" + sts1solver.mirror.FernWand.rate()
+                                    + " damage=" + sts1solver.mirror.FernWand.damage());
+                    Probe.check(sts1solver.mirror.FernWand.canUse(),
+                            "S301C the wand is legal with charge and 专注",
+                            "label=" + sts1solver.mirror.FernWand.label());
+                    boolean offered = false;
+                    List<Action> legal = Legal.actions();
+                    for (int i = 0; i < legal.size(); i++) {
+                        if (legal.get(i).isWand()) {
+                            offered = true;
+                        }
+                    }
+                    Probe.check(offered, "S301C Legal offers the wand as soon as charge and 专注 allow it",
+                            "actions=" + legal.size());
+                    Probe.check(sts1solver.mirror.Digest.ofCurrent().contains("fern=2/2/1"),
+                            "S301C the digest carries charge/rate/max",
+                            sts1solver.mirror.Digest.ofCurrent());
+
+                    World w = World.captureLive();
+                    boolean installed = false;
+                    int liveHand = AbstractDungeon.player.hand.size();
+                    try {
+                        w.install();
+                        installed = true;
+                        Driver.begin();
+                        Probe.check(sts1solver.mirror.FernWand.charge() == 2
+                                        && sts1solver.mirror.FernWand.damage() == 6,
+                                "S301D the sandbox has its own wand panel",
+                                "charge=" + sts1solver.mirror.FernWand.charge()
+                                        + " damage=" + sts1solver.mirror.FernWand.damage());
+                        boolean used = sts1solver.mirror.FernWand.use();
+                        Probe.check(used, "S301D the wand queues its action", "");
+                        Driver.drain(4000, 800L);
+
+                        int copies = 0;
+                        int base = -1;
+                        com.megacrit.cardcrawl.cards.CardGroup hand = AbstractDungeon.player.hand;
+                        for (int i = 0; i < hand.size(); i++) {
+                            AbstractCard c = hand.group.get(i);
+                            if (cardId.equals(c.cardID)) {
+                                ++copies;
+                                base = c.baseDamage;
+                            }
+                        }
+                        Probe.check(copies == 1 && base >= 6,
+                                "S301D one 特化普攻魔法 with the panel's damage lands in hand",
+                                "id=" + cardId + " copies=" + copies + " baseDamage=" + base);
+                        Probe.check(AbstractDungeon.player.getPower(powerId) == null,
+                                "S301D the sandbox spent its 专注",
+                                "power=" + powerId);
+                        Probe.check(sts1solver.mirror.FernWand.charge() == 1,
+                                "S301D the sandbox spent one charge",
+                                "charge=" + sts1solver.mirror.FernWand.charge());
+                    } finally {
+                        try {
+                            if (installed) {
+                                w.uninstall();
+                            }
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                    Probe.check(sts1solver.mirror.FernWand.charge() == 2,
+                            "S301E the live charge survives the sandbox use",
+                            "liveCharge=" + sts1solver.mirror.FernWand.charge());
+                    com.megacrit.cardcrawl.powers.AbstractPower livePower =
+                            AbstractDungeon.player.getPower(powerId);
+                    Probe.check(livePower != null && livePower.amount == 3,
+                            "S301E the live 专注 survives the sandbox use",
+                            "liveAmount=" + (livePower == null ? "gone" : livePower.amount));
+                    Probe.check(AbstractDungeon.player.hand.size() == liveHand,
+                            "S301E the live hand did not gain a sandbox card",
+                            "before=" + liveHand + " after="
+                                    + AbstractDungeon.player.hand.size());
+                } catch (Throwable t) {
+                    Probe.check(false, "S301 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                    sts1solver.mirror.ScreenAssist.setForTest(null);
+                    sts1solver.mirror.RolloutChoices.setForTest(null);
+                    Gameplay.setBudgetCapForTest(0L);
+                }
+            }
+        });
+
         Probe.core("S100 m16202-4: the panel shows card and potion NAMES, not engine ids",
                 new Runnable(){
             @Override

@@ -17,6 +17,8 @@ import java.util.List;
 import sts1solver.drive.Driver;
 import sts1solver.mirror.Cloner;
 import sts1solver.mirror.Digest;
+import sts1solver.mirror.FgoNoble;
+import sts1solver.mirror.FernWand;
 import sts1solver.mirror.RenderState;
 import sts1solver.mirror.VfxGuard;
 import sts1solver.mirror.World;
@@ -245,6 +247,16 @@ public final class Gameplay {
     private static boolean quickRestartRequested;
     private static boolean quickIsReplan;
     private static String quickReason;
+    // B200: a screen opened outside the planned line. The search starts from the open picker
+    // (Legal.selectionActions) with a short budget; the adopted line only continues when the very
+    // screen that was searched is still the one on screen. Failure falls back to the B158 stop.
+    private static boolean quickScreenReplan;
+    private static String quickScreenSig;
+    private static String quickScreenReason;
+    private static boolean screenReplanCancelled;
+    private static String screenReplanFailedSig;
+    private static final int SCREEN_REPLAN_MS = 3000;
+    private static final int SCREEN_REPLAN_MIN_MS = 1200;
     // 1.0.0 (user m01050): the turn promise of the running search, remembered per slice so the
     // finished plan can still say which "N-turn best line under this budget" it came from (the
     // sessions report 0 once they are torn down).
@@ -391,6 +403,7 @@ public final class Gameplay {
             status = "不在战斗里";
             return;
         }
+        sts1solver.mirror.SongZangRenBridge.push();
         World.forceRestore();
         Hud.markStep(-1, -1, false);
         sts1solver.mirror.InputMute.resetSkipLog();
@@ -522,6 +535,9 @@ public final class Gameplay {
         // B51: stopping the search also cancels "play it when it lands" -- the player asked for one
         // thing at a time. (A restart right after this re-arms it explicitly.)
         autoplayArmed = false;
+        if (quickScreenReplan) {
+            screenReplanCancelled = true;
+        }
         quick.requestStop();
         status = "计算中：正在收尾…";
     }
@@ -566,6 +582,12 @@ public final class Gameplay {
             autoplayArmed = armAutoplay;
             return;
         }
+        quickScreenReplan = false;
+        quickScreenSig = null;
+        quickScreenReason = null;
+        screenReplanCancelled = false;
+        screenReplanFailedSig = "";
+        sts1solver.mirror.SongZangRenBridge.push();
         history.clear();
         replans = 0;
         driftReplans = 0;
@@ -799,16 +821,55 @@ public final class Gameplay {
         tickQuick(QUICK_SLICE_MS);
     }
 
+    /**
+     * B200 audit P2-2: tickQuick's early exits used to drop the session object without clearing the
+     * screen-replan flags or stopping autopilot. A screen replan still falls back to the B158 stop,
+     * never a guess; a queued F8 restart is preserved.
+     */
+    private static void abortQuick(String why, Throwable error, boolean screenFallback) {
+        boolean wasScreenReplan = quickScreenReplan;
+        String sig = quickScreenSig;
+        boolean cancelled = screenReplanCancelled;
+        boolean restart = quickRestartRequested;
+        boolean armForRestart = autoplayArmed;
+        quick = null;
+        quickBefore = null;
+        quickRenderBefore = null;
+        quickSkelBefore = null;
+        quickStatics = null;
+        quickView = null;
+        quickCacheKey = null;
+        quickHorizonText = "";
+        quickRestartRequested = false;
+        quickIsReplan = false;
+        quickReason = null;
+        quickScreenReplan = false;
+        quickScreenSig = null;
+        quickScreenReason = null;
+        screenReplanCancelled = false;
+        Gameplay.clearPreview();
+        sts1solver.ui.FrameStats.finishSearch();
+        World.forceRestore();
+        if (error != null) {
+            Log.error("quick search failed", error);
+        }
+        if (screenFallback && wasScreenReplan) {
+            Gameplay.failScreenReplan(sig, cancelled ? "cancelled" : "search failed");
+        } else {
+            status = why;
+        }
+        if (restart && Gameplay.inFight()) {
+            startQuickSolve(armForRestart);
+        }
+    }
+
     private static void tickQuick(long sliceMs) {
         if (quick == null) {
             return;
         }
         long tickStart = System.nanoTime();
         if (!Gameplay.inFight()) {
-            World.forceRestore();
-            quick = null;
-            Gameplay.clearPreview();
-            status = "战斗已结束，计算取消";
+            Gameplay.abortQuick("战斗已结束，计算取消", null, false);
             return;
         }
         boolean done;
@@ -817,11 +878,7 @@ public final class Gameplay {
             done = quick.advance(sliceMs);
         }
         catch (Throwable t) {
-            World.forceRestore();
-            quick = null;
-            Gameplay.clearPreview();
-            status = "计算失败: " + t;
-            Log.error("quick search failed", t);
+            Gameplay.abortQuick("计算失败: " + t, t, true);
             return;
         }
         Gameplay.lastAdvanceUs = (System.nanoTime() - phaseStart) / 1000L;
@@ -1344,6 +1401,14 @@ public final class Gameplay {
         String skelBefore = quickSkelBefore;
         ViewState viewBefore = quickView;
         String key = quickCacheKey;
+        boolean wasScreenReplan = quickScreenReplan;
+        String screenSig = quickScreenSig;
+        String screenReason = quickScreenReason;
+        boolean screenCancelled = screenReplanCancelled;
+        quickScreenReplan = false;
+        quickScreenSig = null;
+        quickScreenReason = null;
+        screenReplanCancelled = false;
         lastHorizonText = quickHorizonText;
         quickHorizonText = "";
         quick = null;
@@ -1368,6 +1433,15 @@ public final class Gameplay {
                     + " (兼容实验模式; their effects are not in this plan)");
         }
         if (r == null) {
+            if (wasScreenReplan) {
+                boolean screenRestart = quickRestartRequested;
+                quickRestartRequested = false;
+                Gameplay.failScreenReplan(screenSig, screenCancelled ? "cancelled" : "no result");
+                if (screenRestart && Gameplay.inFight()) {
+                    startQuickSolve(armForRestart);
+                }
+                return;
+            }
             autoplayArmed = false;
             status = "计算没有结果";
             // B42: a press that arrived while this search wound down already asked for a new one.
@@ -1420,6 +1494,46 @@ public final class Gameplay {
         Cloner.EFFECT_CLONES.clear();
         if (!"clean".equals(vfxSweep)) {
             Log.warn("vfx guard after quick search: " + vfxSweep);
+        }
+        if (wasScreenReplan) {
+            // B200: the search was rooted at a picker the plan never opened. It is usable only as the
+            // answer to THAT screen; anything else is the old no-guess stop, with the screen untouched.
+            boolean screenRestart = quickRestartRequested;
+            quickRestartRequested = false;
+            if (screenRestart) {
+                // B42: F8 during a screen replan is still a request for a new solve; do not swallow it.
+                Gameplay.failScreenReplan(screenSig, "restart requested");
+                Gameplay.startQuickSolve(armForRestart);
+                return;
+            }
+            if (screenCancelled || !autopilot) {
+                Gameplay.failScreenReplan(screenSig, screenCancelled ? "cancelled" : "autopilot off");
+                return;
+            }
+            if (!Gameplay.screenReplanFits(r, screenSig)) {
+                Gameplay.failScreenReplan(screenSig, "the open screen no longer matches the answer");
+                return;
+            }
+            screenReplanFailedSig = "";
+            plan = r;
+            planBuiltAt = now();
+            step = 0;
+            stepTarget = -1;
+            pending = null;
+            Gameplay.clearPendingChoice();
+            drift = 0;
+            lastRisk = null;
+            lethalConfirmed = false;
+            autopilotFailures = 0;
+            Gameplay.resetAutoReplans();
+            nextActionAtMs = 0L;
+            Gameplay.syncMarkers();
+            status = "这一屏计划里没有答案：已现场求解并接着自动（"
+                    + sts1solver.search.PlanText.headline(r) + "）";
+            stopNote = "";
+            Log.info("screen replan: adopted " + r.summary() + " first=["
+                    + r.plan.get(0).action.label + "] reason=" + screenReason + " | sig=" + screenSig);
+            return;
         }
         boolean wasReplan = quickIsReplan;
         String replanReason = quickReason;
@@ -1856,6 +1970,11 @@ public final class Gameplay {
         if (!autopilot || pending != null) {
             return;
         }
+        // B200 audit P1: answerLatentSelection starts a screen replan and leaves autopilot on;
+        // this same tick must not execute the old plan while the search owns the statics.
+        if (quick != null) {
+            return;
+        }
         if (Gameplay.dropStalePlan()) {
             if (++staleReplans > 5) {
                 Gameplay.stopAutopilot("计划连续落在旧回合并被丢弃 5 次；请点「计算」重算");
@@ -1897,7 +2016,7 @@ public final class Gameplay {
         // Idle frames while the engine resolves an action are NOT failures. Counting them as such
         // stopped autopilot with "engine busy 31 times" and refreshed the panel every frame, which
         // is its own stutter.
-        if (!Gameplay.engineSettled()) {
+        if (!Gameplay.engineSettled() && !Gameplay.plannedAnswerForOpenScreen()) {
             return;
         }
         // P2-14: one beat per action. The frame loop only compares the clock -- it never sleeps --
@@ -2034,14 +2153,21 @@ public final class Gameplay {
             quickStatics = null;
             quickView = null;
             quickCacheKey = null;
-            quickHorizonText = "";
-            quickRestartRequested = false;
-            quickIsReplan = false;
-            quickReason = null;
             Gameplay.clearPreview();
             sts1solver.ui.FrameStats.finishSearch();
             World.forceRestore();
         }
+        // B200 audit P2-1: these also outlive a quick session that tickQuick dropped on an error
+        // exit, so they are cleared whether or not a session object is still present.
+        quickHorizonText = "";
+        quickRestartRequested = false;
+        quickIsReplan = false;
+        quickReason = null;
+        quickScreenReplan = false;
+        quickScreenSig = null;
+        quickScreenReason = null;
+        screenReplanCancelled = false;
+        screenReplanFailedSig = "";
         if (deep != null) {
             deep.requestStop();
             deep = null;
@@ -2823,6 +2949,12 @@ public final class Gameplay {
             Log.info("replan search skipped (" + reason + "): a search is already running");
             return false;
         }
+        quickScreenReplan = false;
+        quickScreenSig = null;
+        quickScreenReason = null;
+        screenReplanCancelled = false;
+        screenReplanFailedSig = "";
+        sts1solver.mirror.SongZangRenBridge.push();
         try {
             String digest = Digest.ofCurrent();
             RenderState.Snap render = RenderState.capture();
@@ -2853,6 +2985,146 @@ public final class Gameplay {
             quickReason = null;
             Log.warn("replan search failed: " + error);
             return false;
+        }
+    }
+
+    /**
+     * B200: a mod opened a picker outside the planned line. Search from that screen with a short
+     * budget, and let finishQuick adopt the line only if the same screen is still open with the same
+     * offers. Failure is the old B158 stop, never a guess.
+     */
+    static boolean startScreenReplan(String reason) {
+        if (deep != null || quick != null) {
+            return false;
+        }
+        if (!sts1solver.mirror.ScreenAssist.enabled()) {
+            return false;
+        }
+        if (!Gameplay.inRoomCombat() || Driver.combatOver()) {
+            return false;
+        }
+        Driver.SelectionKind kind = Driver.selectionKind();
+        if (kind == null || kind == Driver.SelectionKind.NONE || kind == Driver.SelectionKind.OTHER) {
+            return false;
+        }
+        if (Driver.isAwaitingCardChoice()) {
+            return false;
+        }
+        String sig = Gameplay.screenSignature();
+        if (sig.isEmpty() || sig.equals(screenReplanFailedSig)) {
+            return false;
+        }
+        try {
+            if (Driver.selectionCandidates().isEmpty()) {
+                return false;
+            }
+        } catch (Throwable t) {
+            return false;
+        }
+        try {
+            sts1solver.mirror.SongZangRenBridge.push();
+            RenderState.Snap render = RenderState.capture();
+            ViewState view = ViewState.capture();
+            World liveRoot = World.captureLive();
+            long full = Gameplay.quickBudget();
+            long budget = full <= 0L
+                    ? SCREEN_REPLAN_MS
+                    : Math.max(SCREEN_REPLAN_MIN_MS, Math.min(SCREEN_REPLAN_MS, full));
+            quickCacheKey = null;
+            // The digest does not carry screen state; the screen signature is the guard that matters.
+            quickBefore = null;
+            Gameplay.beginSearchAudit(render);
+            quickView = view;
+            quickStartedAt = now();
+            quickHookMutedBefore = sts1solver.mirror.HookQuiet.mutedCount();
+            quickScreenReplan = true;
+            quickScreenSig = sig;
+            quickScreenReason = reason;
+            screenReplanCancelled = false;
+            quickIsReplan = false;
+            quickReason = null;
+            quickHorizonText = "";
+            sts1solver.search.Solver.resetSlowSteps();
+            quick = new sts1solver.search.QuickSession(liveRoot, budget, false);
+            Gameplay.clearPreview();
+            Hud.markStep(-1, -1, false);
+            status = "这一屏计划里没有答案：正在现场求解（最多 " + (budget / 1000) + " 秒）…";
+            Log.info("screen replan: started kind=" + kind + " budget=" + budget + "ms reason="
+                    + reason + " | sig=" + sig);
+            return true;
+        } catch (Throwable error) {
+            World.forceRestore();
+            quick = null;
+            quickScreenReplan = false;
+            quickScreenSig = null;
+            quickScreenReason = null;
+            screenReplanCancelled = false;
+            Log.warn("screen replan: could not start: " + error);
+            return false;
+        }
+    }
+
+    /** B200: called only from the two no-plan screen branches; never from a normal solve. */
+    private static boolean tryScreenReplanForAutopilot(String reason) {
+        return autopilot && Gameplay.startScreenReplan(reason);
+    }
+
+    /**
+     * B200: the open screen, its offers and its turn must still be the ones the search saw. The
+     * adopted plan must start with the answer to that screen -- never a card play, never a guess.
+     */
+    private static boolean screenReplanFits(Solver.Result r, String sig) {
+        if (r == null || r.plan == null || r.plan.isEmpty()) {
+            return false;
+        }
+        Solver.Step first = r.plan.get(0);
+        if (first == null || first.action == null || !first.action.isSelection()) {
+            return false;
+        }
+        if (first.turn != GameActionManager.turn) {
+            return false;
+        }
+        String current = Gameplay.screenSignature();
+        if (current.isEmpty() || sig == null || !sig.equals(current)) {
+            return false;
+        }
+        return Gameplay.selectionAnswerFits(first.action);
+    }
+
+    private static void failScreenReplan(String sig, String why) {
+        if (sig != null && !sig.isEmpty()) {
+            screenReplanFailedSig = sig;
+        }
+        String message = "这一屏计划里没有答案（实机开了沙盒没算到的界面）；自动出牌已停下，请你选，选完点「自动」继续";
+        Log.warn("screen replan: not adopted (" + why + ") | sig=" + sig);
+        Gameplay.stopAutopilot(message);
+    }
+
+    /**
+     * B200: the current plan's next step is already the answer to the open screen. The latent-screen
+     * path must leave it to maybeAutopilot instead of starting a second search or stopping.
+     */
+    private static boolean plannedAnswerForOpenScreen() {
+        if (plan == null || plan.plan == null || step < 0 || step >= plan.plan.size()) {
+            return false;
+        }
+        Solver.Step next = plan.plan.get(step);
+        return next != null && next.action != null && next.action.isSelection()
+                && Driver.selectionKind() != Driver.SelectionKind.NONE
+                && Gameplay.selectionAnswerFits(next.action);
+    }
+
+    private static String screenSignature() {
+        try {
+            Driver.SelectionKind kind = Driver.selectionKind();
+            if (kind == null || kind == Driver.SelectionKind.NONE) {
+                return "";
+            }
+            return kind.name() + "|" + GameActionManager.turn + "|"
+                    + Driver.namesOf(Driver.selectionCandidates()) + "|"
+                    + Driver.uuidsOf(Driver.selectionCandidates());
+        } catch (Throwable t) {
+            return "";
         }
     }
 
@@ -2929,6 +3201,7 @@ public final class Gameplay {
             return;
         }
         try {
+            sts1solver.mirror.SongZangRenBridge.push();
             World liveRoot = World.captureLive();
             boolean bossRoom = AbstractDungeon.getCurrRoom() instanceof MonsterRoomBoss;
             int aliveMonsters = 0;
@@ -3397,6 +3670,29 @@ public final class Gameplay {
                 }
                 Log.info("step selection: answered " + Driver.selectionKind() + " with [" + action.choice + "]");
                 lastActionAtMs = now();
+                return true;
+            }
+            if (action.isNoble()) {
+                int gaugeBefore = FgoNoble.gauge();
+                if (!FgoNoble.release()) {
+                    Gameplay.fail("宝具值不足或当前不能解放宝具");
+                    return false;
+                }
+                lastActionAtMs = now();
+                Log.info("step noble: released " + action.label + " gauge=" + gaugeBefore
+                        + " -> " + FgoNoble.gauge());
+                return true;
+            }
+            if (action.isWand()) {
+                int chargeBefore = FernWand.charge();
+                int damage = FernWand.damage();
+                if (!FernWand.use()) {
+                    Gameplay.fail("法杖现在不能用（充能或战斗状态变了）");
+                    return false;
+                }
+                lastActionAtMs = now();
+                Log.info("step wand: " + action.label + " charge=" + chargeBefore
+                        + " -> " + FernWand.charge() + " damage=" + damage);
                 return true;
             }
             if (action.isEndTurn()) {
@@ -4012,12 +4308,22 @@ public final class Gameplay {
                     || Driver.selectionKind() == Driver.SelectionKind.REWARD;
             if (!open) {
                 latentLogged = "";
+                screenReplanFailedSig = "";
+                return;
+            }
+            // B200: a freshly adopted screen-replan line starts with the answer to this very screen.
+            // Leave it to maybeAutopilot; starting a second search here would replace it with another.
+            if (Gameplay.plannedAnswerForOpenScreen()) {
                 return;
             }
             String planned = pendingChoice == null ? "" : pendingChoice;
             // B190: an answer that picks nothing is still an answer; only "the plan answered no
             // screen here at all" is a difference to report.
             if (planned.isEmpty() && Gameplay.choiceScreenCount() == 0) {
+                if (Gameplay.tryScreenReplanForAutopilot("latent " + Driver.selectionKind())) {
+                    Log.info("screen replan: taking over a latent " + Driver.selectionKind() + " screen");
+                    return;
+                }
                 String sig = Driver.selectionKind() + "|" + Driver.namesOf(Driver.selectionCandidates());
                 if (!sig.equals(latentLogged)) {
                     latentLogged = sig;
@@ -4026,6 +4332,9 @@ public final class Gameplay {
                             + " autopilot=" + autopilot
                             + " | step=" + step + "/" + (plan == null || plan.plan == null ? 0 : plan.plan.size())
                             + " | last plays: " + sts1solver.mirror.PlayTrace.recent(8));
+                }
+                if (autopilot && Gameplay.inRoomCombat() && !Driver.combatOver()) {
+                    Gameplay.stopAutopilot("这一屏计划里没有答案（实机开了沙盒没算到的界面）；自动出牌已停下，请你选，选完点「自动」继续");
                 }
                 return;
             }
@@ -4216,6 +4525,10 @@ public final class Gameplay {
             // reward screen the plan has no answer for is a live/sandbox difference; answering it with
             // "the best card" invents a state the plan never assumed.
             if (pick.isEmpty()) {
+                if (Gameplay.tryScreenReplanForAutopilot("off-plan reward screen")) {
+                    Log.info("screen replan: taking over an off-plan reward screen");
+                    return;
+                }
                 String whyReward = "\u8fd9\u4e00\u5c4f\u5956\u52b1\u8ba1\u5212\u91cc\u6ca1\u6709\u7b54\u6848\uff1b\u81ea\u52a8\u51fa\u724c\u5df2\u505c\u4e0b\uff0c\u8bf7\u4f60\u9009\uff0c\u9009\u5b8c\u70b9\u300c\u81ea\u52a8\u300d\u7ee7\u7eed";
                 Log.warnEvery("reward-no-answer", 5000L, "card reward screen with no planned answer at step "
                         + (Gameplay.step + 1) + ": " + Driver.cardRewardSummary());
@@ -4249,6 +4562,10 @@ public final class Gameplay {
             // B190 (user m01149): unless the plan's answer for this screen is "pick nothing" -- that
             // is a real answer (plannedScreens() counts the screens, not the picked cards).
             if (planned.isEmpty() && plannedScreens() == 0) {
+                if (Gameplay.tryScreenReplanForAutopilot("off-plan " + Driver.selectionKind())) {
+                    Log.info("screen replan: taking over an off-plan " + Driver.selectionKind() + " screen");
+                    return;
+                }
                 String why = "\u8fd9\u4e00\u5c4f\u8ba1\u5212\u91cc\u6ca1\u6709\u7b54\u6848\uff08\u5b9e\u673a\u5f00\u4e86\u6c99\u76d2\u6ca1\u7b97\u5230\u7684\u754c\u9762\uff09\uff1b\u81ea\u52a8\u51fa\u724c\u5df2\u505c\u4e0b\uff0c\u8bf7\u4f60\u9009\uff0c\u9009\u5b8c\u70b9\u300c\u81ea\u52a8\u300d\u7ee7\u7eed";
                 Log.warnEvery("selection-no-answer", 5000L, "selection open with no planned answer at step "
                         + (Gameplay.step + 1) + "/" + (plan == null || plan.plan == null ? 0 : plan.plan.size())
