@@ -80,7 +80,72 @@ public final class World {
             }
         }
         Cloner.observe(cloner.objects());
+        // 1.7.4 diagnosis (FrierenMod 专注): the sandbox's player has been seen with an EMPTY
+        // powers list while the live fight had ManaAffinityPower / ConcentrationPower / ... on it,
+        // and every card after that is scored against a player without its powers. Print both sides
+        // of the capture so the next report says whether the clone lost the list or the search
+        // consumed it later.
+        try {
+            com.megacrit.cardcrawl.characters.AbstractPlayer livePlayer =
+                    com.megacrit.cardcrawl.dungeons.AbstractDungeon.player;
+            for (int i = 0; i < specs.length; i++) {
+                Statics.Spec s = specs[i];
+                if (s.field.getDeclaringClass() == com.megacrit.cardcrawl.dungeons.AbstractDungeon.class
+                        && "player".equals(s.field.getName())
+                        && w.cells[i] instanceof com.megacrit.cardcrawl.characters.AbstractPlayer) {
+                    com.megacrit.cardcrawl.characters.AbstractPlayer copy =
+                            (com.megacrit.cardcrawl.characters.AbstractPlayer) w.cells[i];
+                    sts1solver.util.Log.info("capture probe: live powers=["
+                            + powerIds(livePlayer == null ? null : livePlayer.powers)
+                            + "] clone powers=[" + powerIds(copy.powers)
+                            + "] live manaExh=" + manaExhaust(livePlayer)
+                            + " clone manaExh=" + manaExhaust(copy));
+                }
+            }
+        } catch (Throwable ignored) {
+            // diagnosis only
+        }
         return w;
+    }
+
+    /** 1.7.4 diagnosis: power IDs in list order, for the capture probe. */
+    private static String powerIds(java.util.List<?> powers) {
+        if (powers == null) {
+            return "null";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < powers.size(); ++i) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            Object p = powers.get(i);
+            sb.append(p instanceof com.megacrit.cardcrawl.powers.AbstractPower
+                    ? ((com.megacrit.cardcrawl.powers.AbstractPower) p).ID : String.valueOf(p));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 1.7.4 diagnosis: the exhaust flag of every FrierenMod Mana in the hand. The live one reads
+     * true (the HairAccessory relic then grants 专注 on exhaust) while the sandbox copy has read
+     * false, which is where the two boards part ways.
+     */
+    private static String manaExhaust(com.megacrit.cardcrawl.characters.AbstractPlayer p) {
+        if (p == null || p.hand == null || p.hand.group == null) {
+            return "n/a";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < p.hand.group.size(); ++i) {
+            com.megacrit.cardcrawl.cards.AbstractCard c =
+                    (com.megacrit.cardcrawl.cards.AbstractCard) p.hand.group.get(i);
+            if (c != null && "FrierenMod:Mana".equals(c.cardID)) {
+                if (sb.length() > 0) {
+                    sb.append(',');
+                }
+                sb.append(c.exhaust);
+            }
+        }
+        return sb.length() == 0 ? "none" : sb.toString();
     }
 
     /** Deep copy of this world, preserving identity across roots. The search's branch primitive. */

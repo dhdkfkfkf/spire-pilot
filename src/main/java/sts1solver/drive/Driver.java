@@ -896,6 +896,14 @@ public final class Driver {
             if (AbstractDungeon.player != null && AbstractDungeon.player.isEndingTurn) {
                 return "ending-turn";
             }
+            // 送葬人作者 2026-11-21: the mod's settle queue is not in the engine, so a board the
+            // engine calls finished can still have the author's effects to run. The digest carries
+            // the depth; settled() must wait for it too, or a position key is taken before the
+            // queue drains and two different boards read as one.
+            Boolean szPending = sts1solver.mirror.SongZangRenBridge.hasPendingWork();
+            if (szPending != null && szPending.booleanValue()) {
+                return "sz-pending";
+            }
             return "";
         }
         catch (Throwable throwable) {
@@ -1168,8 +1176,24 @@ public final class Driver {
         simDelta = smallDeltaForPlay(card) ? SELECTION_DELTA : FAST_DELTA;
         try {
             gam.addCardQueueItem(new CardQueueItem(card, target, energyOnUse));
+            // 1.7.4 diagnosis (FrierenMod Mana): the live fight's SynchroWithoutManaPower sets
+            // card.exhaust=false inside onPlayCard, but the sandbox copy ended up in the exhaust
+            // pile instead of the discard pile. Print both sides of this one card so the next
+            // report says whether the sandbox had the power, the SYNCHRO tag, or neither.
+            boolean probeMana = card.cardID != null && card.cardID.contains("Mana");
+            if (probeMana) {
+                Log.info("mana probe: before exh=" + card.exhaust + " tags=" + card.tags
+                        + " powers=[" + powerIds() + "]");
+            }
             // B102: a drained queue is the state; a queue that ran out of time is not.
             Drain raw = drain();
+            if (probeMana) {
+                Log.info("mana probe: after exh=" + card.exhaust + " tags=" + card.tags
+                        + " powers=[" + powerIds() + "] hand=" + pileHas(
+                                AbstractDungeon.player.hand, card)
+                        + " discard=" + pileHas(AbstractDungeon.player.discardPile, card)
+                        + " exhaust=" + pileHas(AbstractDungeon.player.exhaustPile, card));
+            }
             Drain drained = completeIfTruncated(raw);
             if (drained != null && !drained.settled && leftoverUsingCard(gam)) {
                 // The engine refused a play we thought legal: same corruption as above, one layer
@@ -1200,6 +1224,35 @@ public final class Driver {
             return drained;
         } finally {
             simDelta = savedDelta;
+        }
+    }
+
+    /** 1.7.4 diagnosis: the live player's power IDs, for the Mana probe line. */
+    private static String powerIds() {
+        try {
+            if (AbstractDungeon.player == null || AbstractDungeon.player.powers == null) {
+                return "";
+            }
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < AbstractDungeon.player.powers.size(); ++i) {
+                com.megacrit.cardcrawl.powers.AbstractPower p = AbstractDungeon.player.powers.get(i);
+                if (i > 0) {
+                    sb.append(',');
+                }
+                sb.append(p == null ? "?" : p.ID);
+            }
+            return sb.toString();
+        } catch (Throwable t) {
+            return "?";
+        }
+    }
+
+    /** 1.7.4 diagnosis: does the pile still hold this exact card object? */
+    private static boolean pileHas(com.megacrit.cardcrawl.cards.CardGroup group, AbstractCard card) {
+        try {
+            return group != null && group.contains(card);
+        } catch (Throwable t) {
+            return false;
         }
     }
 

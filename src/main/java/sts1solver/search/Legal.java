@@ -462,7 +462,8 @@ public final class Legal {
                         + " planned state [" + a.cardPrint + "]; hand holds " + printsOf(sameId));
             }
             throw new ReplayException("the line cannot be replayed: " + describe(a)
-                    + " (state " + a.cardPrint + ") is not in hand (hand=" + handNames(hand) + ")");
+                    + " (state " + a.cardPrint + ") is not in hand (hand=" + handNames(hand) + ")"
+                    + pileNames());
         }
         for (int i = 0; i < hand.size(); ++i) {
             AbstractCard c = hand.get(i);
@@ -487,7 +488,7 @@ public final class Legal {
                     + " (hand=" + handNames(hand) + ")");
         }
         throw new ReplayException("the line cannot be replayed: " + describe(a) + " is not in hand (hand="
-                + handNames(hand) + ")");
+                + handNames(hand) + ")" + pileNames());
     }
 
     /** B78: the card a step names, resolved by identity -- exposed so a gate can prove it. */
@@ -546,6 +547,40 @@ public final class Legal {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < hand.size(); ++i) {
             AbstractCard c = hand.get(i);
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(c == null ? "?" : c.name);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 1.7.4: the other piles, for a replay failure. "not in hand" alone cannot tell whether the
+     * card was already played (discard/exhaust) or never drawn (draw pile), and that is exactly
+     * the difference between a wrong plan and a replay that lost a mod's temp-card effect.
+     */
+    private static String pileNames() {
+        try {
+            com.megacrit.cardcrawl.characters.AbstractPlayer p =
+                    com.megacrit.cardcrawl.dungeons.AbstractDungeon.player;
+            if (p == null) {
+                return "";
+            }
+            return " draw=[" + groupNames(p.drawPile) + "] discard=[" + groupNames(p.discardPile)
+                    + "] exhaust=[" + groupNames(p.exhaustPile) + "]";
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    private static String groupNames(com.megacrit.cardcrawl.cards.CardGroup g) {
+        if (g == null || g.group == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < g.group.size(); ++i) {
+            AbstractCard c = g.group.get(i);
             if (i > 0) {
                 sb.append(", ");
             }

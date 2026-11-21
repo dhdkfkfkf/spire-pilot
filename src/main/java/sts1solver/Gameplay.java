@@ -7,6 +7,7 @@ import com.megacrit.cardcrawl.actions.GameActionManager;
 import com.megacrit.cardcrawl.cards.AbstractCard;
 import com.megacrit.cardcrawl.cards.CardQueueItem;
 import com.megacrit.cardcrawl.dungeons.AbstractDungeon;
+import com.megacrit.cardcrawl.characters.AbstractPlayer;
 import com.megacrit.cardcrawl.monsters.AbstractMonster;
 import com.megacrit.cardcrawl.potions.AbstractPotion;
 import com.megacrit.cardcrawl.rooms.AbstractRoom;
@@ -3608,6 +3609,17 @@ public final class Gameplay {
             int playerMaxHp = Gameplay.playerMaxHp();
             EndTurnDecision endTurnDecision = Gameplay.decideEndTurnRisk(lastRisk, playerMaxHp, !autopilot);
             Log.info("end-turn risk: " + lastRisk.describe() + " -> " + (Object)((Object)endTurnDecision));
+            // 1.7.4 (user 2026-11-21): the sandbox and the live fight can diverge (that report had
+            // digestMatch=false on 92 of 93 steps). When the plan's whole turn is "end turn" while
+            // the live hand does hold a playable card, following it means standing there taking the
+            // hit -- stop and ask for a re-solve instead.
+            if (lastRisk != null && lastRisk.ok && lastRisk.damage > 0
+                    && Gameplay.turnPlayedNothing(Gameplay.step)
+                    && Gameplay.playableHandCount() > 0) {
+                Gameplay.stopAutopilot("计划这一回合不出牌，但手上有可打出的牌（局面与计划不一致）；"
+                        + "已停下，点「计算」重算");
+                return false;
+            }
             if (endTurnDecision == EndTurnDecision.STOP) {
                 Gameplay.stopAutopilot(lastRisk.stopText());
                 return false;
@@ -3636,6 +3648,101 @@ public final class Gameplay {
         settleReportAt = 0L;
         status = "\u6267\u884c\u4e2d: " + step.action.label + "\uff08\u7b49\u6e38\u620f\u63a8\u8fdb\uff09";
         return true;
+    }
+
+    /**
+     * 1.7.4: true when the plan's whole current turn is "end turn" -- no card, potion, wand or
+     * noble step at all. A live hand that still holds a playable card then means the sandbox and
+     * the fight disagree; the caller stops instead of ending the turn into the hit.
+     */
+    private static boolean turnPlayedNothing(int at) {
+        if (plan == null || plan.plan == null || at < 0 || at >= plan.plan.size()) {
+            return false;
+        }
+        Solver.Step current = plan.plan.get(at);
+        if (current == null || current.action == null || !current.action.isEndTurn()) {
+            return false;
+        }
+        int turn = current.action.turnBefore;
+        if (turn < 0) {
+            return at == 0 || plan.plan.get(at - 1) == null || plan.plan.get(at - 1).action == null
+                    || plan.plan.get(at - 1).action.isEndTurn();
+        }
+        for (int i = at; i >= 0; --i) {
+            Solver.Step s = plan.plan.get(i);
+            if (s == null || s.action == null) {
+                continue;
+            }
+            if (s.action.turnBefore != turn) {
+                break;
+            }
+            if (!s.action.isEndTurn()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 1.7.4: how many cards in the live hand the game would accept right now. */
+    private static int playableHandCount() {
+        try {
+            AbstractPlayer p = AbstractDungeon.player;
+            if (p == null || p.hand == null || p.hand.group == null) {
+                return 0;
+            }
+            ArrayList monsters = AbstractDungeon.getMonsters() == null
+                    ? null : AbstractDungeon.getMonsters().monsters;
+            int count = 0;
+            for (int i = 0; i < p.hand.group.size(); ++i) {
+                AbstractCard c = (AbstractCard)p.hand.group.get(i);
+                if (c == null) {
+                    continue;
+                }
+                if (Driver.needsEnemyTarget(c)) {
+                    if (monsters == null) {
+                        continue;
+                    }
+                    for (int k = 0; k < monsters.size(); ++k) {
+                        Object m = monsters.get(k);
+                        if (m instanceof AbstractMonster && ((AbstractMonster)m).isDead) {
+                            continue;
+                        }
+                        if (Driver.playerCanUse(c, p, (AbstractMonster)m)) {
+                            ++count;
+                            break;
+                        }
+                    }
+                } else if (Driver.playerCanUse(c, p, null)) {
+                    ++count;
+                }
+            }
+            return count;
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    /** 1.7.4 diagnosis: the exhaust flag of every FrierenMod Mana in the live hand. */
+    private static String manaHandExhaust() {
+        try {
+            AbstractPlayer p = AbstractDungeon.player;
+            if (p == null || p.hand == null || p.hand.group == null) {
+                return "n/a";
+            }
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < p.hand.group.size(); ++i) {
+                AbstractCard c = (AbstractCard)p.hand.group.get(i);
+                if (c != null && "FrierenMod:Mana".equals(c.cardID)) {
+                    if (sb.length() > 0) {
+                        sb.append(',');
+                    }
+                    sb.append(c.exhaust);
+                }
+            }
+            return sb.length() == 0 ? "none" : sb.toString();
+        } catch (Throwable t) {
+            return "?";
+        }
     }
 
     private static boolean submit(Solver.Step step) {
@@ -3739,6 +3846,14 @@ public final class Gameplay {
                     return false;
                 }
                 card.energyOnUse = action.energyOnUse;
+                // 1.7.4 diagnosis: the LIVE side of the Mana question. The sandbox probe in
+                // Driver.play saw its own temp Mana born with exhaust=false, while the captured
+                // ones are true; whether the fight plays a true or a false one here says which
+                // side the plan and the fight disagree on.
+                if (card.cardID != null && card.cardID.contains("Mana")) {
+                    Log.info("live mana submit: exh=" + card.exhaust + " hand mana exh=["
+                            + manaHandExhaust() + "]");
+                }
                 AbstractDungeon.actionManager.addCardQueueItem(new CardQueueItem(card, target, action.energyOnUse));
                 lastActionAtMs = now();
                 return true;
@@ -4768,16 +4883,13 @@ public final class Gameplay {
         }
         Gameplay.syncMarkers();
         ++verified;
-        if (diverged) {
-            status = "第 " + (Gameplay.step + 1) + " 步和计划不一样（局面已偏离）；自动出牌已停下，计划保留";
-            ++Gameplay.step;
-            if (autopilot) {
-                Gameplay.stopAutopilot(status);
-            } else {
-            }
-            return;
-        }
-        status = "\u7b2c " + ++Gameplay.step + "/" + Gameplay.plan.plan.size() + " \u6b65\u5df2\u6821\u9a8c";
+        // B77 (user m21571): a board that came out slightly differently is NOT a reason to stop --
+        // noteDriftAndContinue above already printed both sides and said the plan keeps running. The
+        // old stop branch here contradicted that promise and stopped the autopilot on things like a
+        // temp card sitting in the discard pile rather than the exhaust pile (FrierenMod 魔力).
+        // A step that really needs a card the fight no longer has pauses by itself in fail().
+        status = "\u7b2c " + ++Gameplay.step + "/" + Gameplay.plan.plan.size() + " \u6b65\u5df2\u6821\u9a8c"
+                + (diverged ? "\uff08\u4e0e\u9884\u6d4b\u7565\u6709\u51fa\u5165\uff0c\u7ee7\u7eed\uff09" : "");
         if (Gameplay.step >= Gameplay.plan.plan.size()) {
             status = "\u8ba1\u5212\u6267\u884c\u5b8c\u6bd5\uff08" + (Gameplay.plan.win ? "\u80dc\u7ebf" : (Gameplay.plan.escaped ? "\u9003\u8dd1" : "\u672a\u80dc")) + "\uff09";
         }

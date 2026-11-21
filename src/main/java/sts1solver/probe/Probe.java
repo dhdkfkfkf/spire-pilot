@@ -12973,10 +12973,10 @@ Probe.core("S134 B84: a select screen opened by a power (Foresight scry) still g
                 }
             }
         });
-        // B157 (user m14819): "有不对的直接停下来". A step whose settled board differs from the one
-        // the plan recorded is not a note any more: the numbers after it are fiction, so the
-        // autopilot stops and the plan stays for the player to read. Nothing is recomputed.
-        Probe.core("S210 a step that comes out differently stops the autopilot (B157)", new Runnable(){
+        // B77 (user m21571) supersedes B157: "deploy the plan, and only pause when the card or the
+        // potion it names is not there". A board that settles differently is noted (S127) and the
+        // walk continues; the step that really needs a missing card pauses in fail().
+        Probe.core("S210 a step that comes out differently keeps the autopilot running (B77)", new Runnable(){
             @Override
             public void run() {
                 try {
@@ -12999,10 +12999,13 @@ Probe.core("S134 B84: a select screen opened by a power (Foresight scry) still g
                     int live = GameActionManager.turn;
                     java.util.List<Action> acts = new java.util.ArrayList<Action>();
                     acts.add(Action.card(0, 0, 0, "test", c0.name, "", c0.cardID, String.valueOf(c0.uuid)));
+                    // A second step keeps the plan from "finishing" after the card, which would
+                    // stop the autopilot for a different reason and hide the drift behaviour.
+                    acts.add(Action.endTurn());
                     // Digest "test" can never match a real board: this is exactly what a step that
                     // came out differently looks like to the settle code.
-                    Gameplay.installPlanForTest(Solver.resultForTest(acts, new int[]{live},
-                            new int[]{80}), 0);
+                    Gameplay.installPlanForTest(Solver.resultForTest(acts,
+                            new int[]{live, live + 1}, new int[]{80, 80}), 0);
                     boolean started = Gameplay.executeStep();
                     for (int i = 0; i < 400 && Gameplay.pendingForTest(); i++) {
                         AbstractDungeon.actionManager.update();
@@ -13011,12 +13014,12 @@ Probe.core("S134 B84: a select screen opened by a power (Foresight scry) still g
                     }
                     String st = Gameplay.planStateForTest();
                     Log.info("  S210 drift: started=" + started + " " + st);
-                    Probe.check(st.indexOf("autopilot=false") >= 0,
-                            "a step that came out differently stops the autopilot", st);
+                    Probe.check(st.indexOf("autopilot=true") >= 0,
+                            "a step that came out differently keeps the autopilot running", st);
                     Probe.check(st.indexOf("plan=-") < 0,
                             "the plan is kept (nothing is recomputed)", st);
-                    Probe.check(st.contains("\u4e0d\u4e00\u6837"),
-                            "the status says the step came out differently", st);
+                    Probe.check(st.contains("step=1"),
+                            "the walk moved past the step that came out differently", st);
                 } catch (Throwable t) {
                     Probe.check(false, "the divergence gate ran", String.valueOf(t));
                 } finally {
