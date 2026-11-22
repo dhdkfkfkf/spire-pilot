@@ -6,7 +6,7 @@ so an effect whose update() changes real state -- a card's attributes, a pile, t
 that end state applied before it is dropped. mirror/EffectSettle does that for the classes found here.
 
 Usage:
-  F:\python\python.exe tools\audit\vfx_state.py <decompiled-src-root> [out.txt]
+  python tools\audit\vfx_state.py <decompiled-src-root> [out.txt]
 
 <decompiled-src-root> is a CFR dump of the game jar that still contains com/megacrit/... (build/decomp6).
 The script walks every .java under it, builds the "extends AbstractGameEffect" closure, and prints the

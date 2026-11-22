@@ -1,6 +1,6 @@
 # spire-pilot 会话约定
 
-本文件补充 `..\AGENTS.md` 的省 token 约定，只写本项目特有的事实。
+本文件即本项目约定，只写本项目特有的事实。
 
 ## 本项目的大文件（禁止整读）
 
@@ -10,6 +10,9 @@
 | `research\javap\*.txt` | 单个 250–530KB | 按类名/方法名 grep 拿行号 → 只读该段；不要通读转储 |
 | `src\main\java\sts1solver\probe\Probe.java` | 约 580KB | 只按方法定位后 `edit` 定点改，禁止整文件重写/整读 |
 | `mod\spire-pilot.jar`、`dist\` 产物 | 二进制 | 不读内容；用 `jar tf`/`-List` 看条目 |
+
+> 迁移说明：`evidence\` 与 `research\javap\` 都被 `.gitignore` 排除，未随仓库带过来；
+> 表里的读取规则在它们重建后继续适用。
 
 ## 工作方式
 
@@ -28,3 +31,17 @@
   不混 emoji。
 - 上传包在 `dist\workshop-ws\`，真人双击 `upload.cmd`；上传前确认游戏与 ModTheSpire 已关闭、
   Steam 已登录。
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in this repo's GitHub Issues (`dhdkfkfkf/spire-pilot`), via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`.

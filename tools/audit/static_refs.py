@@ -10,7 +10,7 @@ This script prints what is left: non-final static REFERENCE fields, i.e. objects
 sandbox is installed. Scan the game jar and each mod jar separately.
 
 Usage:
-  F:\python\python.exe tools\audit\static_refs.py <jar> [jar ...]
+  python tools\audit\static_refs.py <jar> [jar ...]
 """
 import io, struct, sys, zipfile
 

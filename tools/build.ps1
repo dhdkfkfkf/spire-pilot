@@ -39,6 +39,13 @@ function Resolve-Jdk {
     $candidates = @()
     if ($Explicit) { $candidates += $Explicit }
     if ($env:JAVA_HOME) { $candidates += $env:JAVA_HOME }
+    # A JDK staged under the user profile survives tool/temp cleanup. The migration moved the only
+    # Java 8 JDK here from the old Trae temp directory.
+    $userJdks = Join-Path $env:USERPROFILE '.jdks'
+    if (Test-Path $userJdks) {
+        $candidates += Get-ChildItem $userJdks -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending | ForEach-Object { $_.FullName }
+    }
     $candidates += @(
         'F:\Stata\utilities\java\windows-x64\zulu-jdk21.0.11'
         'F:\PyCharm 2026.2.1\jbr'

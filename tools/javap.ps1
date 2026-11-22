@@ -3,7 +3,20 @@
 param([Parameter(Mandatory=$true, ValueFromRemainingArguments=$true)][string[]]$Classes)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$javap = 'F:\Stata\utilities\java\windows-x64\zulu-jdk21.0.11\bin\javap.exe'
+$candidates = @()
+if ($env:JAVA_HOME) { $candidates += $env:JAVA_HOME }
+$userJdks = Join-Path $env:USERPROFILE '.jdks'
+if (Test-Path $userJdks) {
+    $candidates += Get-ChildItem $userJdks -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending | ForEach-Object { $_.FullName }
+}
+$candidates += @(
+    'C:\Program Files\Java\jdk1.8.0_291'
+    'C:\Program Files\Eclipse Adoptium\jdk-8'
+)
+$jdk = $candidates | Where-Object { Test-Path (Join-Path $_ 'bin\javap.exe') } | Select-Object -First 1
+if (-not $jdk) { throw "No JDK found. Set JAVA_HOME, or put one under $env:USERPROFILE\.jdks." }
+$javap = Join-Path $jdk 'bin\javap.exe'
 $gameJar = 'D:\Steam\steamapps\common\SlayTheSpire\desktop-1.0.jar'
 $mtsJar = 'D:\Steam\steamapps\workshop\content\646570\1605060445\ModTheSpire.jar'
 $bmJar = 'D:\Steam\steamapps\workshop\content\646570\1605833019\BaseMod.jar'
