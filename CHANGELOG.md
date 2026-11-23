@@ -12,6 +12,25 @@ Spire Pilot 的完整版本历史。**每个版本只做一件事**，写清改�
 
 ## 1.x — 面向玩家的版本
 
+### 1.7.6 — 搜索分支不再因能力闪光特效被丢弃
+
+- **现象**：配字修实战时面板一直显示「引擎异常（搜索分支被丢弃）」，日志里是
+  `NullPointerException at FlashPowerEffect.<init>:29`。
+- **根因**：沙盒里给某个 mod Power 播「获得能力」闪光时，`FlashPowerEffect` 会读
+  `power.region128`（`AbstractPower.loadRegion(name)` 用 `findRegion("128/" + name)` 取）。
+  该能力没有对应的图集区域，`region128` 是 null，构造直接 NPE；异常从
+  `ApplyPowerAction.update()` 冒出来，整条搜索分支被丢弃。
+- **修复**：新增 `guard/patches/PowerFlashPatch`，在镜像世界安装期间跳过
+  `AbstractPower.flash()` / `flashWithoutSound()`。二者只往两个特效列表里加
+  `GainPowerEffect` / `FlashPowerEffect`，不改变任何战斗状态；实机动画完全不变。
+- **门禁**：`S306` 新增——沙盒里给怪物挂一个「没有图集区域」的 Power 不再抛异常，
+  `zixiu:BurnPower` 照常落地。
+
+#### 1.7.6 验证记录
+
+- `S305,S306,S43,S142,S156,S302,S304` → **43 / 0**。
+- S306 断言：`burn:region128=ok`，无区域 Power 成功挂上且未抛异常。
+
 ### 1.7.5 — 字修的合/拆进入行动空间
 
 - **合/拆成为可规划的动作**：`Action` 新增 `fuse` / `split` 两种 UI 动作，合法性与结果全部来自

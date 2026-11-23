@@ -5933,6 +5933,104 @@ public final class Probe {
             }
         });
 
+        Probe.core("S306 字修 powers in the sandbox: a new power on a monster must not throw",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    if (sts1solver.mirror.ModStatics.resolve("zixiu.compat.PilotBridge") == null) {
+                        Probe.check(true, "zixiu is not enabled on this install (skipped)",
+                                "run with -Mods zixiu,stslib");
+                        return;
+                    }
+                    Object zixiuEnum = Class.forName("zixiu.character.ZixiuEnums")
+                            .getField("ZIXIU").get(null);
+                    if (zixiuEnum == null) {
+                        Probe.check(false, "S306 the 字修 PlayerClass enum is registered", "");
+                        return;
+                    }
+                    Gameplay.reset();
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9306L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.playerClass = "zixiu.character.ZixiuCharacter";
+                    spec.playerClassEnum =
+                            (com.megacrit.cardcrawl.characters.AbstractPlayer.PlayerClass) zixiuEnum;
+                    spec.deck = new String[]{"Strike_R", "Defend_R", "Defend_R"};
+                    spec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.FungiBeast",
+                            "com.megacrit.cardcrawl.monsters.exordium.LouseDefensive"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    World w = World.captureLive();
+                    boolean installed = false;
+                    String error = "";
+                    String hbReport = "";
+                    try {
+                        w.install();
+                        installed = true;
+                        Driver.begin();
+                        com.megacrit.cardcrawl.monsters.AbstractMonster target =
+                                AbstractDungeon.getMonsters().monsters.get(1);
+                        hbReport = "player.hb=" + (AbstractDungeon.player.hb == null ? "null" : "ok")
+                                + " monster.hb=" + (target.hb == null ? "null" : "ok")
+                                + " dead=" + target.isDeadOrEscaped()
+                                + " powers=" + target.powers.size();
+                        AbstractCard companion = (AbstractCard) Class.forName("zixiu.cards.Companion")
+                                .newInstance();
+                        AbstractDungeon.player.hand.group.add(companion);
+                        AbstractDungeon.player.hand.refreshHandLayout();
+                        // BurnPower is the zixiu power the player actually met in play: it is queued
+                        // by 伙 as a NEW power on a monster, which makes ApplyPowerAction call
+                        // powerToApply.flash() -> FlashPowerEffect -> power.owner.hb.cX.
+                        Driver.play(companion, target, 0);
+                        com.megacrit.cardcrawl.powers.AbstractPower burn =
+                                target.getPower("zixiu:BurnPower");
+                        String region = "no-burn-power";
+                        if (burn != null) {
+                            java.lang.reflect.Field rf = sts1solver.reflect.Reflect.find(
+                                    com.megacrit.cardcrawl.powers.AbstractPower.class, "region128");
+                            Object r = rf == null ? null : sts1solver.reflect.Reflect.get(rf, burn);
+                            region = r == null ? "region128=null" : "region128=ok";
+                        }
+                        // The real crash shape: a power whose 128px atlas region is missing. The
+                        // flash is presentation only and must be skipped inside the window.
+                        AbstractDungeon.actionManager.addToBottom(
+                                new com.megacrit.cardcrawl.actions.common.ApplyPowerAction(
+                                        target, AbstractDungeon.player,
+                                        new sts1solver.probe.NoRegionPower(target), 1));
+                        Driver.drain(4000, 800L);
+                        error = target.getPower("ProbeNoRegion") == null
+                                ? "region-less power was not applied" : "ok";
+                        hbReport = hbReport + " burn:" + region;
+                    } catch (Throwable t) {
+                        Throwable cause = t.getCause() == null ? t : t.getCause();
+                        error = cause.toString();
+                        Log.warn("S306 play threw: " + cause);
+                    } finally {
+                        if (installed) {
+                            try {
+                                w.uninstall();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                    Probe.check("ok".equals(error),
+                            "S306 a new BurnPower on a monster survives the sandbox",
+                            "result=" + error + " | " + hbReport);
+                } catch (Throwable t) {
+                    Probe.check(false, "S306 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                }
+            }
+        });
+
         Probe.core("S100 m16202-4: the panel shows card and potion NAMES, not engine ids",
                 new Runnable(){
             @Override
