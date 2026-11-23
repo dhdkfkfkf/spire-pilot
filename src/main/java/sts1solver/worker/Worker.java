@@ -318,8 +318,17 @@ public final class Worker {
         if (a == null) {
             return "end|-1|-1|0|-1||";
         }
+        // A 合字 step carries no id and no choice, so without its own tail two different material
+        // sets would encode identically and the replay would take whichever came first. Prints use
+        // '|', so the tail is a hash of them, separated by \u0001 (never part of any field).
+        String tail = a.isFuse() ? "\u0001" + fuseKey(a) : "";
         return a.kind + "|" + a.handIndex + "|" + a.targetIndex + "|" + a.energyOnUse + "|"
-                + a.potionSlot + "|" + a.cardId + "|" + a.choice;
+                + a.potionSlot + "|" + a.cardId + "|" + a.choice + tail;
+    }
+
+    /** The identity of one fuse decision: which cards it consumes and which word it writes. */
+    private static String fuseKey(Action a) {
+        return Integer.toHexString((a.materialPrints + "\u0001" + a.glyph).hashCode());
     }
 
     /**
@@ -409,7 +418,17 @@ public final class Worker {
                     || a.potionSlot != Integer.parseInt(f[4])) {
                 continue;
             }
-            if (!a.cardId.equals(f[5]) || !a.choice.equals(f[6])) {
+            String choice = f[6];
+            String tail = "";
+            int cut = choice.indexOf('\u0001');
+            if (cut >= 0) {
+                tail = choice.substring(cut + 1);
+                choice = choice.substring(0, cut);
+            }
+            if (!a.cardId.equals(f[5]) || !a.choice.equals(choice)) {
+                continue;
+            }
+            if (a.isFuse() && !fuseKey(a).equals(tail)) {
                 continue;
             }
             return a;

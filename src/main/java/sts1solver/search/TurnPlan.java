@@ -137,6 +137,13 @@ public final class TurnPlan {
                     a.actionClass = "end";
                 } else if (a.isSelection()) {
                     a.actionClass = "sel";
+                } else if (a.isFuse()) {
+                    // 字修's two actions are free card-manipulation, not "other": the beam keeps the
+                    // best node of every class, and folding them into "other" makes them compete
+                    // with 结束回合 for the single slot.
+                    a.actionClass = "fuse";
+                } else if (a.isSplit()) {
+                    a.actionClass = "split";
                 } else {
                     a.actionClass = "other";
                 }

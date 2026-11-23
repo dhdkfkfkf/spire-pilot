@@ -5665,6 +5665,274 @@ public final class Probe {
             }
         });
 
+        Probe.core("S305 字修 合/拆: Legal offers them, the sandbox resolves them, live state is untouched",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    if (sts1solver.mirror.ModStatics.resolve("zixiu.compat.PilotBridge") == null) {
+                        Probe.check(true, "zixiu is not enabled on this install (skipped)",
+                                "run with -Mods zixiu");
+                        return;
+                    }
+                    Object zixiuEnum = Class.forName("zixiu.character.ZixiuEnums")
+                            .getField("ZIXIU").get(null);
+                    Probe.check(zixiuEnum != null, "S305 the 字修 PlayerClass enum is registered", "");
+                    if (zixiuEnum == null) {
+                        return;
+                    }
+                    Gameplay.reset();
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9302L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.playerClass = "zixiu.character.ZixiuCharacter";
+                    spec.playerClassEnum =
+                            (com.megacrit.cardcrawl.characters.AbstractPlayer.PlayerClass) zixiuEnum;
+                    spec.deck = new String[]{"Strike_R", "Defend_R", "Defend_R"};
+                    spec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    Probe.check(sts1solver.mirror.ZixiuFusion.available(),
+                            "S305A the real 字修 player reaches the bridge",
+                            "player=" + AbstractDungeon.player.getClass().getName());
+                    Probe.check(sts1solver.mirror.ZixiuFusion.enabled(),
+                            "S305A 合/拆 are planned: FusionTracker (FRESH + two counters) is mirrored",
+                            "mirror=" + sts1solver.mirror.Statics.report());
+
+                    com.megacrit.cardcrawl.cards.CardGroup hand = AbstractDungeon.player.hand;
+                    // 人 + 木 -> 休 (one word); 口 + 木 -> 呆/杏/困/束 (the chooser decides); two 木
+                    // prove the material dedupe; the 休 card is what 拆 can take.
+                    hand.group.add((AbstractCard) Class.forName("zixiu.cards.Ren").newInstance());
+                    hand.group.add((AbstractCard) Class.forName("zixiu.cards.Mu").newInstance());
+                    hand.group.add((AbstractCard) Class.forName("zixiu.cards.Mu").newInstance());
+                    hand.group.add((AbstractCard) Class.forName("zixiu.cards.Kou").newInstance());
+                    hand.group.add((AbstractCard) Class.forName("zixiu.cards.Xiu").newInstance());
+                    hand.refreshHandLayout();
+                    int liveHand = hand.size();
+
+                    List<Action> legal = Legal.actions();
+                    Action oneWord = null;
+                    Action fourWords = null;
+                    Action splitXiu = null;
+                    int muKou = 0;
+                    for (int i = 0; i < legal.size(); i++) {
+                        Action a = legal.get(i);
+                        if (a.isFuse() && "休".equals(a.glyph)) {
+                            oneWord = a;
+                        }
+                        if (a.isFuse() && a.glyph.isEmpty()
+                                && a.materials.contains("zixiu:Mu")
+                                && a.materials.contains("zixiu:Kou")) {
+                            fourWords = a;
+                            ++muKou;
+                        }
+                        if (a.isSplit() && "zixiu:Xiu".equals(a.cardId)) {
+                            splitXiu = a;
+                        }
+                    }
+                    Probe.check(oneWord != null, "S305B Legal offers 人+木 -> 休",
+                            "actions=" + legal.size());
+                    Probe.check(fourWords != null && muKou == 1,
+                            "S305B 口+木 is ONE, glyph-less branch (the chooser decides) and two 木 are one material",
+                            "muKou=" + muKou + " label="
+                                    + (fourWords == null ? "-" : fourWords.label));
+                    Probe.check(splitXiu != null, "S305B Legal offers 拆 for a 休 card",
+                            "label=" + (splitXiu == null ? "-" : splitXiu.label));
+                    Probe.check(sts1solver.mirror.Digest.ofCurrent().contains("zx="),
+                            "S305B the digest carries the 合/拆 counters and 墨迹未干",
+                            sts1solver.mirror.Digest.ofCurrent());
+
+                    // --- one-word fuse inside a sandbox: materials exhaust, 休 lands, FRESH is set
+                    if (oneWord != null) {
+                        World w = World.captureLive();
+                        boolean installed = false;
+                        try {
+                            w.install();
+                            installed = true;
+                            Driver.begin();
+                            Legal.apply(oneWord);
+                            int ren = 0;
+                            int mu = 0;
+                            int xiu = 0;
+                            for (int i = 0; i < AbstractDungeon.player.hand.size(); i++) {
+                                AbstractCard c = AbstractDungeon.player.hand.group.get(i);
+                                if ("zixiu:Ren".equals(c.cardID)) {
+                                    ++ren;
+                                } else if ("zixiu:Mu".equals(c.cardID)) {
+                                    ++mu;
+                                } else if ("zixiu:Xiu".equals(c.cardID)) {
+                                    ++xiu;
+                                }
+                            }
+                            boolean fresh = false;
+                            for (int i = 0; i < AbstractDungeon.player.hand.size(); i++) {
+                                AbstractCard c = AbstractDungeon.player.hand.group.get(i);
+                                if ("zixiu:Xiu".equals(c.cardID)
+                                        && sts1solver.mirror.ZixiuFusion.isFresh(c)) {
+                                    fresh = true;
+                                }
+                            }
+                            Probe.check(ren == 0 && mu == 1,
+                                    "S305C the two materials left the sandbox hand",
+                                    "Ren=" + ren + " Mu=" + mu);
+                            Probe.check(xiu == 2
+                                            && sts1solver.mirror.ZixiuFusion.fusionsThisTurn() == 1,
+                                    "S305C 休 landed in hand and the fusion was counted",
+                                    "Xiu=" + xiu + " fusions="
+                                            + sts1solver.mirror.ZixiuFusion.fusionsThisTurn());
+                            Probe.check(fresh, "S305C the fused word is 墨迹未干",
+                                    "state=" + sts1solver.mirror.ZixiuFusion.digest());
+                            int freshSplit = 0;
+                            List<Action> after = Legal.actions();
+                            for (int i = 0; i < after.size(); i++) {
+                                Action a = after.get(i);
+                                if (a.isSplit() && "zixiu:Xiu".equals(a.cardId)) {
+                                    ++freshSplit;
+                                }
+                            }
+                            Probe.check(freshSplit == 1,
+                                    "S305C 墨迹未干 blocks only the fresh copy: one 拆 remains",
+                                    "splits=" + freshSplit);
+                            boolean oldSplittable = false;
+                            for (int i = 0; i < AbstractDungeon.player.hand.size(); i++) {
+                                AbstractCard c = AbstractDungeon.player.hand.group.get(i);
+                                if ("zixiu:Xiu".equals(c.cardID)
+                                        && !sts1solver.mirror.ZixiuFusion.isFresh(c)) {
+                                    oldSplittable = sts1solver.mirror.ZixiuFusion.canSplit(c);
+                                }
+                            }
+                            Probe.check(oldSplittable,
+                                    "S305C the old 休 is still splittable in the sandbox", "");
+                        } finally {
+                            if (installed) {
+                                try {
+                                    w.uninstall();
+                                } catch (Throwable ignored) {
+                                }
+                            }
+                        }
+                    }
+
+                    // --- split inside a sandbox
+                    if (splitXiu != null) {
+                        World w = World.captureLive();
+                        boolean installed = false;
+                        try {
+                            w.install();
+                            installed = true;
+                            Driver.begin();
+                            Legal.apply(splitXiu);
+                            int xiu = 0;
+                            int parts = 0;
+                            for (int i = 0; i < AbstractDungeon.player.hand.size(); i++) {
+                                AbstractCard c = AbstractDungeon.player.hand.group.get(i);
+                                if ("zixiu:Xiu".equals(c.cardID)) {
+                                    ++xiu;
+                                } else if ("zixiu:Ren".equals(c.cardID)
+                                        || "zixiu:Mu".equals(c.cardID)) {
+                                    ++parts;
+                                }
+                            }
+                            Probe.check(xiu == 0 && parts == 5,
+                                    "S305D 拆 consumed 休 and put 人+木 back",
+                                    "Xiu=" + xiu + " parts=" + parts);
+                            Probe.check(sts1solver.mirror.ZixiuFusion.splitsThisTurn() == 1,
+                                    "S305D the split was counted",
+                                    "splits=" + sts1solver.mirror.ZixiuFusion.splitsThisTurn());
+                        } finally {
+                            if (installed) {
+                                try {
+                                    w.uninstall();
+                                } catch (Throwable ignored) {
+                                }
+                            }
+                        }
+                    }
+
+                    // --- several words: the mod's chooser is the next step, not a bridge decision
+                    if (fourWords != null) {
+                        World w = World.captureLive();
+                        boolean installed = false;
+                        try {
+                            w.install();
+                            installed = true;
+                            Driver.begin();
+                            Legal.apply(fourWords);
+                            Probe.check(Driver.selectionKind() == Driver.SelectionKind.REWARD,
+                                    "S305E 口+木 opens the word chooser (a REWARD screen)",
+                                    Driver.cardRewardSummary());
+                            List<Action> answers = Legal.selectionActions();
+                            Probe.check(!answers.isEmpty(),
+                                    "S305E the chooser is a normal selection step",
+                                    "answers=" + answers.size());
+                            if (!answers.isEmpty()) {
+                                Legal.apply(answers.get(0));
+                                int fresh = 0;
+                                for (int i = 0; i < AbstractDungeon.player.hand.size(); i++) {
+                                    AbstractCard c = AbstractDungeon.player.hand.group.get(i);
+                                    if (sts1solver.mirror.ZixiuFusion.isFresh(c)) {
+                                        ++fresh;
+                                    }
+                                }
+                                Probe.check(fresh == 1,
+                                        "S305E the chosen word reached the hand, 墨迹未干",
+                                        "fresh=" + fresh + " hand=" + Driver.namesOf(
+                                                AbstractDungeon.player.hand.group));
+                                Probe.check(sts1solver.mirror.ZixiuFusion.fusionsThisTurn() == 1,
+                                        "S305E the chooser does not count a second fusion",
+                                        "fusions="
+                                                + sts1solver.mirror.ZixiuFusion.fusionsThisTurn());
+                            }
+                        } finally {
+                            if (installed) {
+                                try {
+                                    w.uninstall();
+                                } catch (Throwable ignored) {
+                                }
+                            }
+                        }
+                    }
+
+                    // --- the live fight never sees any of it
+                    Probe.check(AbstractDungeon.player.hand.size() == liveHand,
+                            "S305F the live hand is unchanged",
+                            "before=" + liveHand + " after="
+                                    + AbstractDungeon.player.hand.size());
+                    Probe.check(sts1solver.mirror.ZixiuFusion.fusionsThisTurn() == 0
+                                    && sts1solver.mirror.ZixiuFusion.splitsThisTurn() == 0,
+                            "S305F the live 合/拆 counters are untouched",
+                            "fusions=" + sts1solver.mirror.ZixiuFusion.fusionsThisTurn()
+                                    + " splits=" + sts1solver.mirror.ZixiuFusion.splitsThisTurn());
+                    int liveFresh = -1;
+                    try {
+                        java.lang.reflect.Field ff = Class.forName("zixiu.core.FusionTracker")
+                                .getDeclaredField("FRESH");
+                        ff.setAccessible(true);
+                        Object fs = ff.get(null);
+                        liveFresh = fs instanceof java.util.Set
+                                ? ((java.util.Set<?>) fs).size() : -1;
+                    } catch (Throwable ignored) {
+                    }
+                    Probe.check(liveFresh == 0,
+                            "S305F the live 墨迹未干 set is untouched",
+                            "FRESH=" + liveFresh);
+                } catch (Throwable t) {
+                    Probe.check(false, "S305 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                    sts1solver.mirror.ScreenAssist.setForTest(null);
+                    sts1solver.mirror.RolloutChoices.setForTest(null);
+                    Gameplay.setBudgetCapForTest(0L);
+                }
+            }
+        });
+
         Probe.core("S100 m16202-4: the panel shows card and potion NAMES, not engine ids",
                 new Runnable(){
             @Override

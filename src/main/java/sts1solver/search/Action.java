@@ -24,7 +24,10 @@ public final class Action {
     public final String cardName;
     /** Target monster name, or "" when the action has no target. */
     public final String targetName;
-    /** "card", "potion", "end", "sel" (a picker answer), "noble" or "wand" (mod UI effects). */
+    /**
+     * "card", "potion", "end", "sel" (a picker answer), "noble" / "wand" / "fuse" / "split"
+     * (mod UI effects).
+     */
     public final String kind;
     /** Cards chosen to answer a card-select screen (comma separated ids), or "". */
     public final String choice;
@@ -70,6 +73,31 @@ public final class Action {
     public final String cardPrint;
     /** The same, one print per entry of {@link #choice}, or "". */
     public final String choicePrints;
+
+    /**
+     * 字修 合字 (fuse): the 2-3 hand cards consumed, as ids in the order the search picked them
+     * ("," separated), or "".
+     *
+     * <p>A / b / c are deliberately NOT {@link #choice}: that field means "the answer to a card
+     * screen", and a step carrying it makes the executor arm a pending answer
+     * ({@code Gameplay.planPendingChoice}). A fuse step CONSUMES cards and may then open the mod's
+     * own word chooser, so the two meanings must not share a field.
+     */
+    public String materials = "";
+    /** One print per entry of {@link #materials} (the identity that survives forks), or "". */
+    public String materialPrints = "";
+    /** One uuid per entry of {@link #materials}, or "". */
+    public String materialUuids = "";
+    /** How to write the materials in the panel (card names, "+" separated), or "". */
+    public String materialDisplay = "";
+    /**
+     * 字修 合字: the glyph this step writes ("呆"), or "" when the material set has several results.
+     *
+     * <p>An empty glyph means the mod's own chooser decides, so the step ends on a card-reward
+     * screen and the NEXT plan step is the {@code Action.selection} that answers it -- the search
+     * must branch on the choice, not this bridge.
+     */
+    public String glyph = "";
 
     /**
      * 1.0.6 (C1): what this decision IS ("attack" / "skill" / "power" / "potion" / "end" / "sel" /
@@ -302,6 +330,12 @@ public final class Action {
         a.movedDisplay = movedDisplay;
         a.escaped = escaped;
         a.rngNormalized = rngNormalized;
+        // The 字修 identity travels with every copy of the decision, like the click script.
+        a.materials = materials;
+        a.materialPrints = materialPrints;
+        a.materialUuids = materialUuids;
+        a.materialDisplay = materialDisplay;
+        a.glyph = glyph;
         return a;
     }
 
@@ -384,6 +418,12 @@ public final class Action {
         a.movedDisplay = movedDisplay;
         a.escaped = escaped;
         a.rngNormalized = rngNormalized;
+        // The 字修 identity travels with every copy of the decision, like the click script.
+        a.materials = materials;
+        a.materialPrints = materialPrints;
+        a.materialUuids = materialUuids;
+        a.materialDisplay = materialDisplay;
+        a.glyph = glyph;
         return a;
     }
 
@@ -403,6 +443,12 @@ public final class Action {
         a.movedDisplay = movedDisplay;
         a.escaped = escaped;
         a.rngNormalized = rngNormalized;
+        // The 字修 identity travels with every copy of the decision, like the click script.
+        a.materials = materials;
+        a.materialPrints = materialPrints;
+        a.materialUuids = materialUuids;
+        a.materialDisplay = materialDisplay;
+        a.glyph = glyph;
         return a;
     }
 
@@ -447,6 +493,37 @@ public final class Action {
         return new Action(-1, -1, 0, -1, label, "法杖造牌", "", "wand");
     }
 
+    /**
+     * 字修 合字: consume 2-3 hand cards and write one glyph.
+     *
+     * <p>Legality, the legal results and the effect live in {@link sts1solver.mirror.ZixiuFusion};
+     * this only names the decision. {@code glyph} is "" when several words fit and the mod's own
+     * chooser has to be answered (the next step is a {@link #selection}).
+     */
+    public static Action fuse(String label, String materialIds, String materialDisplay,
+                              String materialUuids, String materialPrints, String glyph) {
+        Action a = new Action(-1, -1, 0, -1, label, "合字", "", "fuse");
+        a.materials = materialIds == null ? "" : materialIds;
+        a.materialDisplay = materialDisplay == null ? "" : materialDisplay;
+        a.materialUuids = materialUuids == null ? "" : materialUuids;
+        a.materialPrints = materialPrints == null ? "" : materialPrints;
+        a.glyph = glyph == null ? "" : glyph;
+        return a;
+    }
+
+    /**
+     * 字修 拆字: exhaust one glyph card and take its parts.
+     *
+     * <p>The card is named by the ordinary identity fields ({@code cardId}/{@code cardName}/
+     * {@code cardUuid}/{@code cardPrint}); {@code handIndex} stays -1 because this is not a card
+     * play (no energy, no target, no card queue item).
+     */
+    public static Action split(String label, String cardId, String cardName, String cardUuid,
+                               String cardPrint) {
+        return new Action(-1, -1, 0, -1, label, cardName, "", "split",
+                "", cardId, cardUuid, "", "", cardPrint, "");
+    }
+
     public boolean isPotion() {
         return potionSlot >= 0;
     }
@@ -457,6 +534,14 @@ public final class Action {
 
     public boolean isWand() {
         return "wand".equals(kind);
+    }
+
+    public boolean isFuse() {
+        return "fuse".equals(kind);
+    }
+
+    public boolean isSplit() {
+        return "split".equals(kind);
     }
 
     /**

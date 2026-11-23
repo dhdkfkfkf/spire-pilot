@@ -23,6 +23,7 @@ import sts1solver.mirror.FernWand;
 import sts1solver.mirror.RenderState;
 import sts1solver.mirror.VfxGuard;
 import sts1solver.mirror.World;
+import sts1solver.mirror.ZixiuFusion;
 import sts1solver.modsupport.ContentOrigin;
 import sts1solver.reflect.Reflect;
 import sts1solver.search.Action;
@@ -3800,6 +3801,27 @@ public final class Gameplay {
                 lastActionAtMs = now();
                 Log.info("step wand: " + action.label + " charge=" + chargeBefore
                         + " -> " + FernWand.charge() + " damage=" + damage);
+                return true;
+            }
+            if (action.isFuse()) {
+                // 字修: the same bridge the sandbox uses, so the live fight consumes/resolves
+                // exactly what the plan simulated. A multi-result set ends on the mod's chooser;
+                // the plan's next step answers that screen like any other selection.
+                if (!ZixiuFusion.fuse(action)) {
+                    Gameplay.fail("合字做不了（材料不在手上了）");
+                    return false;
+                }
+                lastActionAtMs = now();
+                Log.info("step fuse: " + action.label + " fusions=" + ZixiuFusion.fusionsThisTurn());
+                return true;
+            }
+            if (action.isSplit()) {
+                if (!ZixiuFusion.split(action)) {
+                    Gameplay.fail("拆字做不了（这张牌不在手上或墨迹未干）");
+                    return false;
+                }
+                lastActionAtMs = now();
+                Log.info("step split: " + action.label + " splits=" + ZixiuFusion.splitsThisTurn());
                 return true;
             }
             if (action.isEndTurn()) {

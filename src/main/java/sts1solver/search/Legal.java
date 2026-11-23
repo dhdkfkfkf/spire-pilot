@@ -143,6 +143,7 @@ public final class Legal {
             if (FernWand.canUse()) {
                 out.add(Action.wand(FernWand.label()));
             }
+            addZixiuActions(out, hand);
             out.add(Action.endTurn());
         } catch (Throwable t) {
             return ActionGenerationResult.incomplete(out,
@@ -150,6 +151,125 @@ public final class Legal {
                             + (t.getMessage() == null ? "" : ": " + t.getMessage()), t);
         }
         return ActionGenerationResult.complete(out);
+    }
+
+    /**
+     * 字修: 合 (2–3 materials) and 拆 (one glyph card).
+     *
+     * <p>Both are free and unlimited in the mod, so only ONE layer is generated per node and the
+     * search's own expansion does the rest -- enumerating chains here is how the action space blows
+     * up. Materials are deduped by their print (the game cannot tell two copies apart, and either
+     * one leaves the same board), which is the "one decision per part multiset" rule without
+     * generating every permutation. {@code Limits.combos()} caps the fuse sets.
+     *
+     * <p>A set with ONE result carries that glyph and executes synchronously. A set with SEVERAL
+     * (口+木 -&gt; 呆/杏/困/束) carries no glyph: the mod's own chooser picks, which is a card-reward
+     * screen, so the very next plan step is the {@link Action#selection} that answers it.
+     *
+     * <p>{@link sts1solver.mirror.ZixiuFusion#enabled()} is the whole gate: no mod, another
+     * character, or a static set the mirror does not own means no action at all (never a plan that
+     * would rewrite the live 墨迹未干 set).
+     */
+    private static void addZixiuActions(List<Action> out, List<AbstractCard> hand) {
+        if (!sts1solver.mirror.ZixiuFusion.enabled()) {
+            return;
+        }
+        List<AbstractCard> materials = new ArrayList<AbstractCard>();
+        Set<String> seen = new LinkedHashSet<String>();
+        for (int i = 0; i < hand.size(); i++) {
+            AbstractCard c = hand.get(i);
+            if (c == null) {
+                continue;
+            }
+            if (sts1solver.mirror.ZixiuFusion.canFuse(c)
+                    && seen.add(sts1solver.mirror.CardPrint.of(c))) {
+                materials.add(c);
+            }
+        }
+        int budget = Math.max(0, Limits.combos());
+        int added = 0;
+        for (int size = 2; size <= 3 && added < budget; size++) {
+            added = addFusions(out, materials, 0, size, new ArrayList<AbstractCard>(), added, budget);
+        }
+        // 拆: one per distinct card. The mod's own check already excludes 墨迹未干, so a card fused
+        // this turn is not a split branch until the turn ends.
+        Set<String> splitSeen = new LinkedHashSet<String>();
+        for (int i = 0; i < hand.size(); i++) {
+            AbstractCard c = hand.get(i);
+            if (c == null || !sts1solver.mirror.ZixiuFusion.canSplit(c)
+                    || !splitSeen.add(sts1solver.mirror.CardPrint.of(c))) {
+                continue;
+            }
+            int parts = sts1solver.mirror.ZixiuFusion.splitPartNames(c).size();
+            String label = "拆字：" + c.name + (parts > 0 ? "（" + parts + " 部件）" : "");
+            out.add(Action.split(label, c.cardID, c.name, uuidOf(c),
+                    sts1solver.mirror.CardPrint.of(c)));
+        }
+    }
+
+    /** Every {@code need}-sized set of materials, in hand order; returns how many were added. */
+    private static int addFusions(List<Action> out, List<AbstractCard> materials, int from, int need,
+                                  List<AbstractCard> pick, int added, int budget) {
+        if (added >= budget) {
+            return added;
+        }
+        if (need == 0) {
+            List<String> glyphs = sts1solver.mirror.ZixiuFusion.fusionResults(pick);
+            if (glyphs.isEmpty()) {
+                return added;
+            }
+            out.add(Action.fuse(fuseLabel(pick, glyphs), joined(pick, CardField.ID),
+                    joined(pick, CardField.NAME), joined(pick, CardField.UUID),
+                    printsOf(pick), glyphs.size() == 1 ? glyphs.get(0) : ""));
+            return added + 1;
+        }
+        for (int i = from; i <= materials.size() - need; i++) {
+            pick.add(materials.get(i));
+            added = addFusions(out, materials, i + 1, need - 1, pick, added, budget);
+            pick.remove(pick.size() - 1);
+            if (added >= budget) {
+                break;
+            }
+        }
+        return added;
+    }
+
+    /** "口+木 → 呆" / "口+木 → 呆/杏/困/束": what the panel and the log print. */
+    private static String fuseLabel(List<AbstractCard> cards, List<String> glyphs) {
+        StringBuilder names = new StringBuilder();
+        for (int i = 0; i < cards.size(); i++) {
+            names.append(i == 0 ? "" : "+").append(cards.get(i).name);
+        }
+        StringBuilder words = new StringBuilder();
+        for (int i = 0; i < glyphs.size(); i++) {
+            words.append(i == 0 ? "" : "/").append(glyphs.get(i));
+        }
+        return "合字：" + names + " → " + words;
+    }
+
+    private enum CardField { ID, NAME, UUID }
+
+    /** One field of several cards, "," separated, in the same order. */
+    private static String joined(List<AbstractCard> cards, CardField field) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < cards.size(); i++) {
+            AbstractCard c = cards.get(i);
+            if (i > 0) {
+                sb.append(',');
+            }
+            switch (field) {
+                case NAME:
+                    sb.append(c.name);
+                    break;
+                case UUID:
+                    sb.append(uuidOf(c));
+                    break;
+                default:
+                    sb.append(c.cardID);
+                    break;
+            }
+        }
+        return sb.toString();
     }
 
     /**
@@ -382,6 +502,22 @@ public final class Legal {
             }
             return Driver.drain();
         }
+        if (a.isFuse()) {
+            // The bridge consumes the materials and either writes the word synchronously or opens
+            // the mod's chooser (which drain reports as a waiting selection, answered next step).
+            if (!sts1solver.mirror.ZixiuFusion.fuse(a)) {
+                throw new ReplayException("the line cannot be replayed: " + describe(a)
+                        + " -- the fusion materials are no longer in hand");
+            }
+            return Driver.drain();
+        }
+        if (a.isSplit()) {
+            if (!sts1solver.mirror.ZixiuFusion.split(a)) {
+                throw new ReplayException("the line cannot be replayed: " + describe(a)
+                        + " -- the card can no longer be split");
+            }
+            return Driver.drain();
+        }
         if (a.isCard()) {
             AbstractCard card = handCard(a);
             AbstractMonster target = null;
@@ -523,7 +659,7 @@ public final class Legal {
         if (a.isEndTurn()) {
             return "结束回合";
         }
-        if (a.isNoble() || a.isWand()) {
+        if (a.isNoble() || a.isWand() || a.isFuse() || a.isSplit()) {
             return a.label;
         }
         if (a.cardName != null && !a.cardName.isEmpty()) {

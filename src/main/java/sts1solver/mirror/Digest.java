@@ -79,6 +79,13 @@ public final class Digest {
                 if (!fern.isEmpty()) {
                     sb.append(" fern=").append(fern);
                 }
+                // 字修 合/拆: the turn counters live in the mod, and 墨迹未干 is an identity set over
+                // the hand. Two boards with the same hand but a different fresh mask have different
+                // legal splits, so they must not share a transposition.
+                String zixiu = ZixiuFusion.digest();
+                if (!zixiu.isEmpty()) {
+                    sb.append(" zx=").append(zixiu);
+                }
                 // 送葬人作者 2026-11-21: the mod's pending settle work is a queue inside the mod, not
                 // a power on the player, so two boards that differ only in that queue used to merge
                 // into one transposition. The probe answers null without the mod (byte-identical

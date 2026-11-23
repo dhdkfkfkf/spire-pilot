@@ -175,6 +175,13 @@ public final class Statics {
             // on installs that do not enable CaiNongMod (gate S142), the way ModProbeCounter keeps
             // the mod-scalar sweep gated (gate S77). Nothing in production reads it.
             {"demoMod.probe.ModProbeCards", "HELD"},
+            // 字修 (zixiu) 墨迹未干: a static-final identity set of the cards fused THIS turn. The
+            // mod's scalar sweep cannot see it (final + a Set), so a simulated split would clear and
+            // refill the LIVE set -- after one search the player's freshly fused word would be
+            // splittable (or a live card would be marked fresh against the wrong object). Deep-copied
+            // with the same cloner as the hand, so an element maps to the clone of that very card and
+            // `isFresh` means the same thing in the sandbox. Gated by ZixiuFusion.isolated().
+            {"zixiu.core.FusionTracker", "FRESH"},
     };
 
     /**
