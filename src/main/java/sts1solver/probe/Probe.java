@@ -5715,18 +5715,23 @@ public final class Probe {
 
                     List<Action> legal = Legal.actions();
                     Action oneWord = null;
-                    Action fourWords = null;
+                    Action muKouBranch = null;
                     Action splitXiu = null;
                     int muKou = 0;
+                    int glyphless = 0;
                     for (int i = 0; i < legal.size(); i++) {
                         Action a = legal.get(i);
                         if (a.isFuse() && "休".equals(a.glyph)) {
                             oneWord = a;
                         }
-                        if (a.isFuse() && a.glyph.isEmpty()
-                                && a.materials.contains("zixiu:Mu")
+                        if (a.isFuse() && a.glyph.isEmpty()) {
+                            ++glyphless;
+                        }
+                        if (a.isFuse() && a.materials.contains("zixiu:Mu")
                                 && a.materials.contains("zixiu:Kou")) {
-                            fourWords = a;
+                            if (muKou == 0) {
+                                muKouBranch = a;
+                            }
                             ++muKou;
                         }
                         if (a.isSplit() && "zixiu:Xiu".equals(a.cardId)) {
@@ -5735,10 +5740,12 @@ public final class Probe {
                     }
                     Probe.check(oneWord != null, "S305B Legal offers 人+木 -> 休",
                             "actions=" + legal.size());
-                    Probe.check(fourWords != null && muKou == 1,
-                            "S305B 口+木 is ONE, glyph-less branch (the chooser decides) and two 木 are one material",
-                            "muKou=" + muKou + " label="
-                                    + (fourWords == null ? "-" : fourWords.label));
+                    // 口+木 fits 呆/杏/困/束: four branches, one per word, none glyph-less. A single
+                    // glyph-less branch would mean the plan depends on the mod's async chooser.
+                    Probe.check(muKou >= 1 && glyphless == 0,
+                            "S305B 口+木 is one branch PER word, every fuse names its glyph",
+                            "muKou=" + muKou + " glyphless=" + glyphless + " label="
+                                    + (muKouBranch == null ? "-" : muKouBranch.label));
                     Probe.check(splitXiu != null, "S305B Legal offers 拆 for a 休 card",
                             "label=" + (splitXiu == null ? "-" : splitXiu.label));
                     Probe.check(sts1solver.mirror.Digest.ofCurrent().contains("zx="),
@@ -5852,40 +5859,33 @@ public final class Probe {
                         }
                     }
 
-                    // --- several words: the mod's chooser is the next step, not a bridge decision
-                    if (fourWords != null) {
+                    // --- several words: ONE branch per word, resolved synchronously (no chooser)
+                    if (muKouBranch != null) {
                         World w = World.captureLive();
                         boolean installed = false;
                         try {
                             w.install();
                             installed = true;
                             Driver.begin();
-                            Legal.apply(fourWords);
-                            Probe.check(Driver.selectionKind() == Driver.SelectionKind.REWARD,
-                                    "S305E 口+木 opens the word chooser (a REWARD screen)",
+                            Legal.apply(muKouBranch);
+                            Probe.check(Driver.selectionKind() == Driver.SelectionKind.NONE,
+                                    "S305E a multi-word fuse opens NO screen: the branch names its word",
                                     Driver.cardRewardSummary());
-                            List<Action> answers = Legal.selectionActions();
-                            Probe.check(!answers.isEmpty(),
-                                    "S305E the chooser is a normal selection step",
-                                    "answers=" + answers.size());
-                            if (!answers.isEmpty()) {
-                                Legal.apply(answers.get(0));
-                                int fresh = 0;
-                                for (int i = 0; i < AbstractDungeon.player.hand.size(); i++) {
-                                    AbstractCard c = AbstractDungeon.player.hand.group.get(i);
-                                    if (sts1solver.mirror.ZixiuFusion.isFresh(c)) {
-                                        ++fresh;
-                                    }
+                            int fresh = 0;
+                            for (int i = 0; i < AbstractDungeon.player.hand.size(); i++) {
+                                AbstractCard c = AbstractDungeon.player.hand.group.get(i);
+                                if (sts1solver.mirror.ZixiuFusion.isFresh(c)) {
+                                    ++fresh;
                                 }
-                                Probe.check(fresh == 1,
-                                        "S305E the chosen word reached the hand, 墨迹未干",
-                                        "fresh=" + fresh + " hand=" + Driver.namesOf(
-                                                AbstractDungeon.player.hand.group));
-                                Probe.check(sts1solver.mirror.ZixiuFusion.fusionsThisTurn() == 1,
-                                        "S305E the chooser does not count a second fusion",
-                                        "fusions="
-                                                + sts1solver.mirror.ZixiuFusion.fusionsThisTurn());
                             }
+                            Probe.check(fresh == 1,
+                                    "S305E the named word reached the sandbox hand, 墨迹未干",
+                                    "fresh=" + fresh + " hand=" + Driver.namesOf(
+                                            AbstractDungeon.player.hand.group));
+                            Probe.check(sts1solver.mirror.ZixiuFusion.fusionsThisTurn() == 1,
+                                    "S305E the word is counted exactly once",
+                                    "fusions="
+                                            + sts1solver.mirror.ZixiuFusion.fusionsThisTurn());
                         } finally {
                             if (installed) {
                                 try {
@@ -6022,6 +6022,86 @@ public final class Probe {
                             "result=" + error + " | " + hbReport);
                 } catch (Throwable t) {
                     Probe.check(false, "S306 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                }
+            }
+        });
+
+        Probe.core("S307 字修 deferred insert: the queue is sandbox-local, the live hand cannot grow",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    if (sts1solver.mirror.ModStatics.resolve("zixiu.ui.DeferredCardInsert") == null) {
+                        Probe.check(true, "zixiu is not enabled on this install (skipped)",
+                                "run with -Mods zixiu,stslib");
+                        return;
+                    }
+                    java.lang.reflect.Method enqueue = Class.forName("zixiu.ui.DeferredCardInsert")
+                            .getMethod("enqueue", AbstractCard.class);
+                    java.lang.reflect.Method pending = Class.forName("zixiu.ui.DeferredCardInsert")
+                            .getMethod("pending");
+                    Probe.check(sts1solver.mirror.Statics.mirrorKeys()
+                                    .contains("zixiu.ui.DeferredCardInsert#PENDING"),
+                            "S307A the deferred queue is in the static mirror",
+                            "sandbox will not share the live list");
+
+                    Object zixiuEnum = Class.forName("zixiu.character.ZixiuEnums")
+                            .getField("ZIXIU").get(null);
+                    Gameplay.reset();
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9307L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.playerClass = "zixiu.character.ZixiuCharacter";
+                    spec.playerClassEnum =
+                            (com.megacrit.cardcrawl.characters.AbstractPlayer.PlayerClass) zixiuEnum;
+                    spec.deck = new String[]{"Strike_R", "Defend_R"};
+                    spec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    int liveBefore = ((Number) pending.invoke(null)).intValue();
+                    int liveHand = AbstractDungeon.player.hand.size();
+                    World w = World.captureLive();
+                    boolean installed = false;
+                    int sandboxPending = -1;
+                    try {
+                        w.install();
+                        installed = true;
+                        Driver.begin();
+                        AbstractCard card = (AbstractCard) Class.forName("zixiu.cards.Mu")
+                                .newInstance();
+                        enqueue.invoke(null, card);
+                        enqueue.invoke(null, card);
+                        sandboxPending = ((Number) pending.invoke(null)).intValue();
+                        Probe.check(sandboxPending == liveBefore + 2,
+                                "S307B the sandbox queues into its OWN list",
+                                "sandbox=" + sandboxPending + " live=" + liveBefore);
+                    } finally {
+                        if (installed) {
+                            try {
+                                w.uninstall();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                    int liveAfter = ((Number) pending.invoke(null)).intValue();
+                    Probe.check(liveAfter == liveBefore,
+                            "S307C the live queue is untouched by the search",
+                            "before=" + liveBefore + " after=" + liveAfter
+                                    + " (sandbox had " + sandboxPending + ")");
+                    Probe.check(AbstractDungeon.player.hand.size() == liveHand,
+                            "S307C the live hand did not gain a deferred card",
+                            "before=" + liveHand + " after="
+                                    + AbstractDungeon.player.hand.size());
+                } catch (Throwable t) {
+                    Probe.check(false, "S307 ran without throwing", String.valueOf(t));
                 } finally {
                     try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
                     try { Gameplay.reset(); } catch (Throwable ignored) {}

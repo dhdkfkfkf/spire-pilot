@@ -22,27 +22,33 @@ import java.util.List;
  * <p>Everything is reflective: no compile-time dependency on the mod, and a missing card, a renamed
  * class or an older author version simply answers "not available" instead of failing the search.
  *
- * <p>Two things must be mirrored before a simulated fuse/split is safe:
+ * <p>Three things must be mirrored before a simulated fuse/split is safe:
  * <ul>
  *   <li>{@code FusionTracker.splitsThisTurn} / {@code fusionsThisTurn} -- ordinary mod statics, the
  *       generated sweep already mirrors them;</li>
  *   <li>{@code FusionTracker.FRESH} (墨迹未干) -- a {@code static final} identity SET, which the
  *       scalar sweep by definition does not touch. It is listed in {@link Statics#MOD_CONTAINERS},
  *       because a sandbox that wrote into the live set would make the player's freshly fused card
- *       unsplittable for the rest of the real turn. {@link #isolated()} refuses to plan either
- *       action when that row did not resolve.</li>
+ *       unsplittable for the rest of the real turn;</li>
+ *   <li>{@code DeferredCardInsert.PENDING} -- the static queue a fused word waits in until the mouse
+ *       is released. Left shared, every simulated fusion pushed a card into the LIVE queue and the
+ *       live PostUpdateSubscriber emptied it into the player's hand (measured 4 -&gt; 112 cards after
+ *       one solve).</li>
  * </ul>
+ * {@link #isolated()} refuses to plan either action when one of those rows did not resolve.
  */
 public final class ZixiuFusion {
 
     private static final String BRIDGE = "zixiu.compat.PilotBridge";
-    private static final String HAND_ACTIONS = "zixiu.ui.HandActions";
     private static final String CHARACTER = "zixiu.character.ZixiuCharacter";
     /** Owner#field keys that must be in the mirror before a simulated fuse/split is trustworthy. */
     private static final String[] REQUIRED_KEYS = {
             "zixiu.core.FusionTracker#FRESH",
             "zixiu.core.FusionTracker#splitsThisTurn",
             "zixiu.core.FusionTracker#fusionsThisTurn",
+            // The deferred-insert queue: without this row a search pours its fused words straight
+            // into the player's hand (4 -> 112 cards measured), so 合/拆 are not planned at all.
+            "zixiu.ui.DeferredCardInsert#PENDING",
     };
 
     private static boolean loaded;
@@ -56,7 +62,6 @@ public final class ZixiuFusion {
     private static Method fusionsThisTurn;
     private static Method resolveFusion;
     private static Method resolveSplit;
-    private static Method executeFusion;
     private static Boolean isolated;
 
     private ZixiuFusion() {
@@ -79,10 +84,11 @@ public final class ZixiuFusion {
             fusionsThisTurn = bridge.getMethod("fusionsThisTurn");
             resolveFusion = bridge.getMethod("resolveFusion", java.util.List.class, String.class);
             resolveSplit = bridge.getMethod("resolveSplit", AbstractCard.class);
-            // The ambiguous case (口+木 -> 呆/杏/困/束) has no single glyph to resolve with. The
-            // mod's own entry point consumes the materials and opens its word chooser, which is a
-            // card-reward screen the executor already knows how to answer as a separate step.
-            executeFusion = Class.forName(HAND_ACTIONS).getMethod("executeFusion", java.util.List.class);
+            // The ambiguous case (口+木 -> 呆/杏/困/束) is NOT driven through the mod's chooser:
+            // executeFusion consumes the materials and hands the result to ChooseWordAction, whose
+            // delivery is asynchronous (DeferredCardInsert, a BaseMod PostUpdate subscriber, or a
+            // ShowCardAndAddToHandEffect) -- and a sandbox runs neither hook, so the word would
+            // vanish. Each glyph is planned as its own fuse action instead; see Legal.addFusions.
             Log.info("zixiu: fusion bridge ready");
         } catch (Throwable t) {
             reset();
@@ -102,7 +108,6 @@ public final class ZixiuFusion {
         fusionsThisTurn = null;
         resolveFusion = null;
         resolveSplit = null;
-        executeFusion = null;
     }
 
     /** True when the mod is loaded and the live player is 字修 (the bridge is character-locked). */
@@ -290,14 +295,16 @@ public final class ZixiuFusion {
             }
         }
         try {
-            if (a.glyph != null && !a.glyph.isEmpty()) {
-                if (!fusionResults(cards).contains(a.glyph)) {
-                    return false;
-                }
-                resolveFusion.invoke(null, cards, a.glyph);
-                return true;
+            // Every planned fuse step names its glyph. A set with several results is planned as one
+            // action per glyph, so the search still chooses the word -- without the mod's async
+            // chooser delivery, which a sandbox never runs.
+            if (a.glyph == null || a.glyph.isEmpty()) {
+                return false;
             }
-            executeFusion.invoke(null, cards);
+            if (!fusionResults(cards).contains(a.glyph)) {
+                return false;
+            }
+            resolveFusion.invoke(null, cards, a.glyph);
             return true;
         } catch (Throwable t) {
             Log.warn("zixiu: fuse failed: " + t);

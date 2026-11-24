@@ -182,6 +182,14 @@ public final class Statics {
             // with the same cloner as the hand, so an element maps to the clone of that very card and
             // `isFresh` means the same thing in the sandbox. Gated by ZixiuFusion.isolated().
             {"zixiu.core.FusionTracker", "FRESH"},
+            // 字修 (zixiu) 待插入队列: a static List<AbstractCard> that holds a fused word until the
+            // mouse is released (ChooseWordAction.putIntoHand -> DeferredCardInsert.enqueue). It is a
+            // plain static field, so nothing else mirrors it. Left shared, EVERY simulated fusion in a
+            // search pushed a card into the LIVE queue, and the live PostUpdateSubscriber flushed them
+            // into the player's real hand: measured 4 -> 112 cards after one solve, and the plan then
+            // stopped on "the planned card is no longer in hand". Deep-copied with the hand cloner and
+            // restored on uninstall, so the sandbox queues into its own list.
+            {"zixiu.ui.DeferredCardInsert", "PENDING"},
     };
 
     /**

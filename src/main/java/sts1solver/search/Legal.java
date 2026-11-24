@@ -162,9 +162,10 @@ public final class Legal {
      * one leaves the same board), which is the "one decision per part multiset" rule without
      * generating every permutation. {@code Limits.combos()} caps the fuse sets.
      *
-     * <p>A set with ONE result carries that glyph and executes synchronously. A set with SEVERAL
-     * (口+木 -&gt; 呆/杏/困/束) carries no glyph: the mod's own chooser picks, which is a card-reward
-     * screen, so the very next plan step is the {@link Action#selection} that answers it.
+     * <p>Every result is its own action: 口+木 -&gt; 呆/杏/困/束 is four {@code fuse} branches, each
+     * naming one glyph and executing synchronously through {@code resolveFusion}. The mod's chooser
+     * is not used -- its delivery is asynchronous and a sandbox never runs the hook that lands the
+     * card.
      *
      * <p>{@link sts1solver.mirror.ZixiuFusion#enabled()} is the whole gate: no mod, another
      * character, or a static set the mirror does not own means no action at all (never a plan that
@@ -215,13 +216,17 @@ public final class Legal {
         }
         if (need == 0) {
             List<String> glyphs = sts1solver.mirror.ZixiuFusion.fusionResults(pick);
-            if (glyphs.isEmpty()) {
-                return added;
+            // One action PER result. 口+木 -> 呆/杏/困/束 is a decision, so the search branches on
+            // it exactly like a card decides its target. Driving this through the mod's chooser
+            // instead would need its async delivery (DeferredCardInsert / ShowCardAndAddToHand),
+            // and a sandbox runs neither -- the word would silently never reach the hand.
+            for (int g = 0; g < glyphs.size() && added < budget; g++) {
+                out.add(Action.fuse(fuseLabel(pick, glyphs.get(g)), joined(pick, CardField.ID),
+                        joined(pick, CardField.NAME), joined(pick, CardField.UUID),
+                        printsOf(pick), glyphs.get(g)));
+                ++added;
             }
-            out.add(Action.fuse(fuseLabel(pick, glyphs), joined(pick, CardField.ID),
-                    joined(pick, CardField.NAME), joined(pick, CardField.UUID),
-                    printsOf(pick), glyphs.size() == 1 ? glyphs.get(0) : ""));
-            return added + 1;
+            return added;
         }
         for (int i = from; i <= materials.size() - need; i++) {
             pick.add(materials.get(i));
@@ -234,17 +239,13 @@ public final class Legal {
         return added;
     }
 
-    /** "口+木 → 呆" / "口+木 → 呆/杏/困/束": what the panel and the log print. */
-    private static String fuseLabel(List<AbstractCard> cards, List<String> glyphs) {
+    /** "口+木 → 呆": one branch, one word. */
+    private static String fuseLabel(List<AbstractCard> cards, String glyph) {
         StringBuilder names = new StringBuilder();
         for (int i = 0; i < cards.size(); i++) {
             names.append(i == 0 ? "" : "+").append(cards.get(i).name);
         }
-        StringBuilder words = new StringBuilder();
-        for (int i = 0; i < glyphs.size(); i++) {
-            words.append(i == 0 ? "" : "/").append(glyphs.get(i));
-        }
-        return "合字：" + names + " → " + words;
+        return "合字：" + names + " → " + glyph;
     }
 
     private enum CardField { ID, NAME, UUID }

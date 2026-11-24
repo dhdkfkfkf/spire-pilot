@@ -91,11 +91,12 @@ public final class Action {
     /** How to write the materials in the panel (card names, "+" separated), or "". */
     public String materialDisplay = "";
     /**
-     * 字修 合字: the glyph this step writes ("呆"), or "" when the material set has several results.
+     * 字修 合字: the glyph this step writes ("呆").
      *
-     * <p>An empty glyph means the mod's own chooser decides, so the step ends on a card-reward
-     * screen and the NEXT plan step is the {@code Action.selection} that answers it -- the search
-     * must branch on the choice, not this bridge.
+     * <p>A material set with several results is planned as one {@code fuse} step PER glyph, so the
+     * search chooses the word by branching -- the same way a card chooses its target. The mod's own
+     * chooser is deliberately not used: its result arrives through an async delivery
+     * (DeferredCardInsert / ShowCardAndAddToHandEffect) that a sandbox never runs.
      */
     public String glyph = "";
 
@@ -497,8 +498,8 @@ public final class Action {
      * 字修 合字: consume 2-3 hand cards and write one glyph.
      *
      * <p>Legality, the legal results and the effect live in {@link sts1solver.mirror.ZixiuFusion};
-     * this only names the decision. {@code glyph} is "" when several words fit and the mod's own
-     * chooser has to be answered (the next step is a {@link #selection}).
+     * this only names the decision. One step per glyph: a set that fits several words is several
+     * branches, not a chooser screen.
      */
     public static Action fuse(String label, String materialIds, String materialDisplay,
                               String materialUuids, String materialPrints, String glyph) {
