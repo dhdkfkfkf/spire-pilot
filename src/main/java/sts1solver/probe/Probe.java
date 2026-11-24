@@ -5792,6 +5792,52 @@ public final class Probe {
                                             + sts1solver.mirror.ZixiuFusion.fusionsThisTurn());
                             Probe.check(fresh, "S305C the fused word is 墨迹未干",
                                     "state=" + sts1solver.mirror.ZixiuFusion.digest());
+                            // The 拆合 rule (1.0.0): both modes take the used cards out of hand, but
+                            // to different piles -- and only mode 1 makes the result ethereal.
+                            int mode = sts1solver.mirror.ZixiuFusion.fusionMode();
+                            int discRen = 0;
+                            int discMu = 0;
+                            int exhRen = 0;
+                            int exhMu = 0;
+                            for (int i = 0; i < AbstractDungeon.player.discardPile.size(); i++) {
+                                AbstractCard c = AbstractDungeon.player.discardPile.group.get(i);
+                                if ("zixiu:Ren".equals(c.cardID)) {
+                                    ++discRen;
+                                } else if ("zixiu:Mu".equals(c.cardID)) {
+                                    ++discMu;
+                                }
+                            }
+                            for (int i = 0; i < AbstractDungeon.player.exhaustPile.size(); i++) {
+                                AbstractCard c = AbstractDungeon.player.exhaustPile.group.get(i);
+                                if ("zixiu:Ren".equals(c.cardID)) {
+                                    ++exhRen;
+                                } else if ("zixiu:Mu".equals(c.cardID)) {
+                                    ++exhMu;
+                                }
+                            }
+                            boolean fusedEthereal = false;
+                            for (int i = 0; i < AbstractDungeon.player.hand.size(); i++) {
+                                AbstractCard c = AbstractDungeon.player.hand.group.get(i);
+                                if ("zixiu:Xiu".equals(c.cardID)
+                                        && sts1solver.mirror.ZixiuFusion.isFresh(c)) {
+                                    fusedEthereal = c.isEthereal;
+                                }
+                            }
+                            if (mode == 1) {
+                                Probe.check(discRen == 1 && discMu == 1 && exhRen == 0 && exhMu == 0,
+                                        "S305C 方案 1: the used cards go to the DISCARD pile",
+                                        "discard Ren=" + discRen + " Mu=" + discMu
+                                                + " exhaust Ren=" + exhRen + " Mu=" + exhMu);
+                                Probe.check(fusedEthereal, "S305C 方案 1: the result is 虚无",
+                                        "isEthereal=" + fusedEthereal);
+                            } else {
+                                Probe.check(exhRen == 1 && exhMu == 1 && discRen == 0 && discMu == 0,
+                                        "S305C 方案 2: the used cards go to the EXHAUST pile",
+                                        "discard Ren=" + discRen + " Mu=" + discMu
+                                                + " exhaust Ren=" + exhRen + " Mu=" + exhMu);
+                                Probe.check(!fusedEthereal, "S305C 方案 2: the result is kept",
+                                        "isEthereal=" + fusedEthereal);
+                            }
                             int freshSplit = 0;
                             List<Action> after = Legal.actions();
                             for (int i = 0; i < after.size(); i++) {
