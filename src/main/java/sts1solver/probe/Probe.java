@@ -6354,6 +6354,15 @@ public final class Probe {
                         Probe.check(sts1solver.mirror.ZixiuFusion.chain() == 3,
                                 "S308 the sandbox chain is the one the card read",
                                 "chain=" + sts1solver.mirror.ZixiuFusion.chain());
+                        // Upgraded: base 6 AND the per-layer bonus 3 -> 6 + 3x3 = 15.
+                        AbstractCard up = (AbstractCard) Class.forName("zixiu.cards.Cong")
+                                .newInstance();
+                        up.upgrade();
+                        up.calculateCardDamage(target);
+                        Probe.check(up.damage == 15 && up.baseDamage == 6 && up.magicNumber == 3,
+                                "S308 upgraded 从 is 6 + 3x3 = 15 (both numbers grow)",
+                                "damage=" + up.damage + " base=" + up.baseDamage
+                                        + " magic=" + up.magicNumber);
                     } finally {
                         if (installed) {
                             try {

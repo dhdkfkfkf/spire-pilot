@@ -378,6 +378,14 @@ public final class TurnPlan {
     }
 
     /** Damage this card can put on the board, hits included; 0 for a card without damage. */
+    /**
+     * A card's damage as the sandbox currently reports it.
+     *
+     * <p>This is a SNAPSHOT, never a cache: a mod card may scale its damage from live state (字修's
+     * 「从」 is 4(6) + 连书 x 2(3), single hit, read before the play resolves), and the card's own
+     * applyPowers/calculateCardDamage is what produces the number. Every ordering pass re-reads it;
+     * nothing may remember the value across steps, or a plan would be ordered against an old chain.
+     */
     static int damageOf(AbstractCard c) {
         if (c == null) {
             return 0;
