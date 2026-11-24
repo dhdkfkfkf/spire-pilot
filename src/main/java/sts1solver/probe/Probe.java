@@ -6385,6 +6385,110 @@ public final class Probe {
             }
         });
 
+        Probe.core("S309 字修 连书 crosses the turn boundary; only the turn counters reset",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    if (sts1solver.mirror.ModStatics.resolve("zixiu.core.FusionTracker") == null) {
+                        Probe.check(true, "zixiu is not enabled on this install (skipped)",
+                                "run with -Mods zixiu,stslib");
+                        return;
+                    }
+                    Object zixiuEnum = Class.forName("zixiu.character.ZixiuEnums")
+                            .getField("ZIXIU").get(null);
+                    Gameplay.reset();
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9309L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.playerClass = "zixiu.character.ZixiuCharacter";
+                    spec.playerClassEnum =
+                            (com.megacrit.cardcrawl.characters.AbstractPlayer.PlayerClass) zixiuEnum;
+                    spec.deck = new String[]{"Strike_R", "Defend_R", "Defend_R"};
+                    spec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    java.lang.reflect.Field chainF = Class.forName("zixiu.core.FusionTracker")
+                            .getDeclaredField("chain");
+                    chainF.setAccessible(true);
+                    java.lang.reflect.Method recordWord = Class.forName("zixiu.core.FusionTracker")
+                            .getMethod("recordWord", java.util.Collection.class);
+                    java.lang.reflect.Method recordFusion = Class.forName("zixiu.core.FusionTracker")
+                            .getMethod("recordFusion");
+                    java.lang.reflect.Method recordSplit = Class.forName("zixiu.core.FusionTracker")
+                            .getMethod("recordSplit");
+                    int liveChain = chainF.getInt(null);
+                    int liveFusions = sts1solver.mirror.ZixiuFusion.fusionsThisTurn();
+                    int liveCombat = sts1solver.mirror.ZixiuFusion.fusionsThisCombat();
+
+                    World w = World.captureLive();
+                    boolean installed = false;
+                    try {
+                        w.install();
+                        installed = true;
+                        Driver.begin();
+                        Object part = Class.forName("zixiu.lexicon.Component")
+                                .getEnumConstants()[0];
+                        java.util.List<Object> one = java.util.Collections.singletonList(part);
+                        recordWord.invoke(null, one);
+                        recordWord.invoke(null, one);
+                        recordFusion.invoke(null);
+                        recordSplit.invoke(null);
+                        int chainBefore = chainF.getInt(null);
+                        int combatBefore = sts1solver.mirror.ZixiuFusion.fusionsThisCombat();
+                        int turnBefore = com.megacrit.cardcrawl.actions.GameActionManager.turn;
+                        Probe.check(chainBefore == 1
+                                        && sts1solver.mirror.ZixiuFusion.fusionsThisTurn() == 1,
+                                "S309 the setup built chain 1 and one fusion",
+                                "chain=" + chainBefore + " fusions="
+                                        + sts1solver.mirror.ZixiuFusion.fusionsThisTurn());
+                        Driver.endTurn();
+                        Driver.drain(4000, 1500L);
+                        Probe.check(com.megacrit.cardcrawl.actions.GameActionManager.turn
+                                        > turnBefore,
+                                "S309 the turn actually advanced",
+                                "turn " + turnBefore + " -> "
+                                        + com.megacrit.cardcrawl.actions.GameActionManager.turn);
+                        Probe.check(sts1solver.mirror.ZixiuFusion.fusionsThisTurn() == 0
+                                        && sts1solver.mirror.ZixiuFusion.splitsThisTurn() == 0,
+                                "S309 the mod's turn hook RAN: FRESH/回合计数 cleared",
+                                "fusions=" + sts1solver.mirror.ZixiuFusion.fusionsThisTurn()
+                                        + " splits="
+                                        + sts1solver.mirror.ZixiuFusion.splitsThisTurn());
+                        Probe.check(chainF.getInt(null) == chainBefore,
+                                "S309 连书 survives the turn boundary",
+                                "chain " + chainBefore + " -> " + chainF.getInt(null));
+                        Probe.check(sts1solver.mirror.ZixiuFusion.fusionsThisCombat() == combatBefore,
+                                "S309 因's combat counter is NOT reset by a turn",
+                                "combat="
+                                        + sts1solver.mirror.ZixiuFusion.fusionsThisCombat());
+                    } finally {
+                        if (installed) {
+                            try {
+                                w.uninstall();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                    Probe.check(chainF.getInt(null) == liveChain
+                                    && sts1solver.mirror.ZixiuFusion.fusionsThisTurn() == liveFusions
+                                    && sts1solver.mirror.ZixiuFusion.fusionsThisCombat() == liveCombat,
+                            "S309 the live 连书 / counters are untouched",
+                            "chain " + liveChain + " -> " + chainF.getInt(null));
+                } catch (Throwable t) {
+                    Probe.check(false, "S309 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                }
+            }
+        });
+
         Probe.core("S100 m16202-4: the panel shows card and potion NAMES, not engine ids",
                 new Runnable(){
             @Override
