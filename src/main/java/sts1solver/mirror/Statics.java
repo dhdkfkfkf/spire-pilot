@@ -193,6 +193,24 @@ public final class Statics {
     };
 
     /**
+     * Mod containers the mod REASSIGNS (not {@code final}), and that may be null between uses.
+     *
+     * <p>{@link #MOD_CONTAINERS} rewrites a static-final container IN PLACE, which needs a live
+     * object to rewrite. For a field that starts null and is assigned a new set on every use
+     * (zixiu 连书's {@code FusionTracker.lastWordParts}), that mechanism has nothing to rewrite:
+     * the field stays null, and the sandbox's own assignment lands on the LIVE static. These are
+     * swapped instead -- a copy per world, the live value restored on uninstall -- which also keeps
+     * a null starting state honest.
+     */
+    private static final String[][] MOD_SWAPPED_CONTAINERS = {
+            // zixiu 连书: the part set of the last word played this turn (null before the first one).
+            // recordWord() READS it to decide chain+1 vs 0 and then REPLACES it. Left shared, a
+            // sandbox word would set the live player's last-parts and the damage of live plays
+            // (2 x chain) would be computed against the simulation's word.
+            {"zixiu.core.FusionTracker", "lastWordParts"},
+    };
+
+    /**
      * Save files. {@code UnlockTracker.markCardAsSeen} puts a key into {@code seenPref.data} and
      * flushes it to disk; the same is true for relics, bosses and achievements. The sandbox redirects
      * the filepath and swaps in a copy of the data, then restores both on uninstall.
@@ -419,6 +437,19 @@ public final class Statics {
                 mirroredContainerKeys.add(MOD_CONTAINERS[i][0] + '#' + MOD_CONTAINERS[i][1]);
                 mirroredContainers.append(mirroredContainers.length() == 0 ? "" : ", ")
                         .append(MOD_CONTAINERS[i][0]).append('#').append(MOD_CONTAINERS[i][1]);
+            }
+        }
+        // Reassignable / nullable mod containers: swapped per world instead of rewritten in place.
+        for (int i = 0; i < MOD_SWAPPED_CONTAINERS.length; i++) {
+            Class<?> owner = ModStatics.resolve(MOD_SWAPPED_CONTAINERS[i][0]);
+            if (owner != null
+                    && add(out, seen, owner, MOD_SWAPPED_CONTAINERS[i][1], Kind.CONTAINER)) {
+                modContainers++;
+                mirroredContainerKeys.add(MOD_SWAPPED_CONTAINERS[i][0] + '#'
+                        + MOD_SWAPPED_CONTAINERS[i][1]);
+                mirroredContainers.append(mirroredContainers.length() == 0 ? "" : ", ")
+                        .append(MOD_SWAPPED_CONTAINERS[i][0]).append('#')
+                        .append(MOD_SWAPPED_CONTAINERS[i][1]);
             }
         }
         // Says out loud which mod card memories are mirrored, once per process: without this line a

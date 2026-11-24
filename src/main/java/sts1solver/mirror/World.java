@@ -318,8 +318,9 @@ public final class World {
                         break;
                     case CONTAINER:
                         // A NEW container on purpose: the live list/map object is left untouched, so
-                        // a simulated write cannot land in it even by aliasing.
-                        s.field.set(null, freshContainer(cells[i]));
+                        // a simulated write cannot land in it even by aliasing. The declared type
+                        // matters for a field that starts null: a Set must stay a Set.
+                        s.field.set(null, freshContainer(cells[i], s.field.getType()));
                         break;
                     case MUTABLE_CONTAINER:
                         // Cannot swap a static final field (JDK 21 throws on Field.set), so the
@@ -821,7 +822,7 @@ public final class World {
         return false;
     }
 
-    private static Object freshContainer(Object contents) {
+    private static Object freshContainer(Object contents, Class<?> declared) {
         if (contents instanceof List) {
             return new ArrayList<Object>((List<?>) contents);
         }
@@ -832,7 +833,16 @@ public final class World {
             return new HashMap<Object, Object>((Map<?, ?>) contents);
         }
         // A captured-null container becomes an empty one: writing null into a static the game
-        // dereferences would turn a mirror into a crash.
+        // dereferences would turn a mirror into a crash. The empty one has to FIT the field: a
+        // nullable {@code Set} (zixiu's lastWordParts) cannot receive an ArrayList.
+        if (contents == null && declared != null) {
+            if (java.util.Set.class.isAssignableFrom(declared)) {
+                return new java.util.LinkedHashSet<Object>();
+            }
+            if (Map.class.isAssignableFrom(declared)) {
+                return new HashMap<Object, Object>();
+            }
+        }
         return new ArrayList<Object>();
     }
 

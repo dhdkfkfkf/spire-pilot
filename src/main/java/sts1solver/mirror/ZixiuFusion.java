@@ -62,6 +62,9 @@ public final class ZixiuFusion {
     private static Method fusionsThisTurn;
     private static Method resolveFusion;
     private static Method resolveSplit;
+    /** 连书 state (0.3.7), read straight off FusionTracker: the bridge does not expose it. */
+    private static java.lang.reflect.Field chainField;
+    private static java.lang.reflect.Field lastWordPartsField;
     private static Boolean isolated;
 
     private ZixiuFusion() {
@@ -84,6 +87,18 @@ public final class ZixiuFusion {
             fusionsThisTurn = bridge.getMethod("fusionsThisTurn");
             resolveFusion = bridge.getMethod("resolveFusion", java.util.List.class, String.class);
             resolveSplit = bridge.getMethod("resolveSplit", AbstractCard.class);
+            // 连书 (0.3.7+) is OPTIONAL: older builds have neither field, and the bridge must stay
+            // usable there. isolated() adds the mirror requirement only when the field exists.
+            try {
+                Class<?> tracker = Class.forName("zixiu.core.FusionTracker");
+                chainField = tracker.getDeclaredField("chain");
+                chainField.setAccessible(true);
+                lastWordPartsField = tracker.getDeclaredField("lastWordParts");
+                lastWordPartsField.setAccessible(true);
+            } catch (Throwable ignored) {
+                chainField = null;
+                lastWordPartsField = null;
+            }
             // The ambiguous case (口+木 -> 呆/杏/困/束) is NOT driven through the mod's chooser:
             // executeFusion consumes the materials and hands the result to ChooseWordAction, whose
             // delivery is asynchronous (DeferredCardInsert, a BaseMod PostUpdate subscriber, or a
@@ -108,6 +123,8 @@ public final class ZixiuFusion {
         fusionsThisTurn = null;
         resolveFusion = null;
         resolveSplit = null;
+        chainField = null;
+        lastWordPartsField = null;
     }
 
     /** True when the mod is loaded and the live player is 字修 (the bridge is character-locked). */
@@ -142,6 +159,19 @@ public final class ZixiuFusion {
                         ok = false;
                         missing += (missing.isEmpty() ? "" : ", ") + REQUIRED_KEYS[i];
                     }
+                }
+                // 连书 (0.3.7+): present only in newer builds. When the field exists it MUST be
+                // mirrored -- chain decides the next word's damage (2 x chain) -- but an older mod
+                // without it simply skips the requirement instead of losing 合/拆.
+                if (chainField != null && !keys.contains("zixiu.core.FusionTracker#chain")) {
+                    ok = false;
+                    missing += (missing.isEmpty() ? "" : ", ") + "zixiu.core.FusionTracker#chain";
+                }
+                if (lastWordPartsField != null
+                        && !keys.contains("zixiu.core.FusionTracker#lastWordParts")) {
+                    ok = false;
+                    missing += (missing.isEmpty() ? "" : ", ")
+                            + "zixiu.core.FusionTracker#lastWordParts";
                 }
             } catch (Throwable t) {
                 ok = false;
@@ -255,6 +285,51 @@ public final class ZixiuFusion {
             return ((Number) splitsThisTurn.invoke(null)).intValue();
         } catch (Throwable t) {
             return -1;
+        }
+    }
+
+    /**
+     * 连书: how many consecutive words shared a part with the previous one. Every enemy takes
+     * {@code 2 x chain}, so two boards that differ only here score differently -- it belongs in the
+     * transposition key. -1 when the mod is absent.
+     */
+    public static int chain() {
+        if (!load()) {
+            return -1;
+        }
+        try {
+            return chainField == null ? -1 : chainField.getInt(null);
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    /**
+     * The parts of the LAST word played this turn (the set 连书 compares against), or "" when unset.
+     *
+     * <p>Reading it needs the field, not a method: the mod replaces the whole set on every word, so
+     * the set itself is state that must keep two boards apart.
+     */
+    public static String lastPartsSignature() {
+        if (!load() || lastWordPartsField == null) {
+            return "";
+        }
+        try {
+            Object v = lastWordPartsField.get(null);
+            if (!(v instanceof java.util.Collection)) {
+                return "";
+            }
+            java.util.Collection<?> parts = (java.util.Collection<?>) v;
+            StringBuilder sb = new StringBuilder();
+            for (Object p : parts) {
+                if (p == null) {
+                    continue;
+                }
+                sb.append(sb.length() == 0 ? "" : ".").append(String.valueOf(p));
+            }
+            return sb.toString();
+        } catch (Throwable t) {
+            return "";
         }
     }
 
@@ -479,6 +554,12 @@ public final class ZixiuFusion {
             }
             StringBuilder sb = new StringBuilder(16);
             sb.append(fused).append('/').append(splitCount).append('/');
+            // 连书 (0.3.7+): the next word deals 2 x chain, and the chain depends on which parts the
+            // LAST word had. Two boards that differ only there score differently, so both go in.
+            int chainNow = chain();
+            if (chainNow >= 0) {
+                sb.append(chainNow).append('/').append(lastPartsSignature()).append('/');
+            }
             List<AbstractCard> hand = AbstractDungeon.player.hand.group;
             for (int i = 0; i < hand.size(); i++) {
                 sb.append(isFresh(hand.get(i)) ? '1' : '0');

@@ -6066,8 +6066,33 @@ public final class Probe {
                     Synthetic.build(spec, new Synthetic.SyntheticStep());
                     Driver.drain(4000, 800L);
 
+                    // 连书 (0.3.7+): chain and the last word's parts both decide the next word's
+                    // damage. Optional on older builds.
+                    java.lang.reflect.Field chainF = null;
+                    java.lang.reflect.Field partsF = null;
+                    try {
+                        chainF = Class.forName("zixiu.core.FusionTracker").getDeclaredField("chain");
+                        chainF.setAccessible(true);
+                        partsF = Class.forName("zixiu.core.FusionTracker")
+                                .getDeclaredField("lastWordParts");
+                        partsF.setAccessible(true);
+                    } catch (Throwable ignored) {
+                        chainF = null;
+                        partsF = null;
+                    }
+                    if (chainF != null) {
+                        Probe.check(sts1solver.mirror.Statics.mirrorKeys()
+                                        .contains("zixiu.core.FusionTracker#chain")
+                                        && sts1solver.mirror.Statics.mirrorKeys()
+                                        .contains("zixiu.core.FusionTracker#lastWordParts"),
+                                "S307D 连书 state (chain + last word parts) is in the static mirror",
+                                "both decide the next word's damage (2 x chain)");
+                    }
+
                     int liveBefore = ((Number) pending.invoke(null)).intValue();
                     int liveHand = AbstractDungeon.player.hand.size();
+                    int liveChainBefore = chainF == null ? -1 : chainF.getInt(null);
+                    Object livePartsBefore = partsF == null ? null : partsF.get(null);
                     World w = World.captureLive();
                     boolean installed = false;
                     int sandboxPending = -1;
@@ -6080,6 +6105,22 @@ public final class Probe {
                         enqueue.invoke(null, card);
                         enqueue.invoke(null, card);
                         sandboxPending = ((Number) pending.invoke(null)).intValue();
+                        if (chainF != null) {
+                            Object part = Class.forName("zixiu.lexicon.Component")
+                                    .getEnumConstants()[0];
+                            java.lang.reflect.Method recordWord =
+                                    Class.forName("zixiu.core.FusionTracker")
+                                            .getMethod("recordWord", java.util.Collection.class);
+                            java.util.List<Object> one = java.util.Collections.singletonList(part);
+                            recordWord.invoke(null, one);
+                            recordWord.invoke(null, one);
+                            Probe.check(chainF.getInt(null) == 1,
+                                    "S307D 连书 chains in the sandbox (same part twice -> 1)",
+                                    "chain=" + chainF.getInt(null));
+                            Probe.check(sts1solver.mirror.ZixiuFusion.digest().contains("/1/"),
+                                    "S307D the digest carries the chain and the last word's parts",
+                                    sts1solver.mirror.ZixiuFusion.digest());
+                        }
                         Probe.check(sandboxPending == liveBefore + 2,
                                 "S307B the sandbox queues into its OWN list",
                                 "sandbox=" + sandboxPending + " live=" + liveBefore);
@@ -6100,6 +6141,14 @@ public final class Probe {
                             "S307C the live hand did not gain a deferred card",
                             "before=" + liveHand + " after="
                                     + AbstractDungeon.player.hand.size());
+                    if (chainF != null) {
+                        Probe.check(chainF.getInt(null) == liveChainBefore
+                                        && (partsF.get(null) == null
+                                        ? livePartsBefore == null
+                                        : partsF.get(null).equals(livePartsBefore)),
+                                "S307D the live 连书 state is untouched",
+                                "chain " + liveChainBefore + " -> " + chainF.getInt(null));
+                    }
                 } catch (Throwable t) {
                     Probe.check(false, "S307 ran without throwing", String.valueOf(t));
                 } finally {

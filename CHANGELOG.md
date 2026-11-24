@@ -12,6 +12,24 @@ Spire Pilot 的完整版本历史。**每个版本只做一件事**，写清改�
 
 ## 1.x — 面向玩家的版本
 
+### 1.7.8 — 字修 0.3.7 的连书也进入沙盒
+
+- 按字修作者的接口清单（`docs/pilot-compat.md`）补齐 0.3.7 的状态：
+  - **`FusionTracker.chain`**：mod 静态扫描已覆盖（非 final 的 int）；**镜像门**在字段存在时要求它，
+    旧版字修没有该字段则自动跳过。
+  - **`FusionTracker.lastWordParts`**：可置空、每次出字都会被整体替换的 `Set`。用
+    `MUTABLE_CONTAINER` 在 null 时没有对象可改写，沙盒会直接写真实静态字段，所以新增
+    `MOD_SWAPPED_CONTAINERS`（`Kind.CONTAINER`，按世界换对象、卸载还原），并让
+    `freshContainer` 对「声明类型是 Set 的 null」生成空 Set 而不是 ArrayList。
+  - **判等**：`zx=` 增加 `chain` 与上一字的部件签名（`0/0/1/REN/…`），两个只差连书的局面不再合并。
+- **没有采纳的两条**：
+  - 复位协议（`FusionTracker.clear()` / `DeferredCardInsert.reset()`）：世界本身就是按窗口复制、
+    卸载还原的，进沙盒清理会把**真实**的墨迹未干/计数/连书抹掉；沙盒要的是从实时状态开始，不是空状态。
+  - 「计划校验排除虚无牌」：`isEthereal` 已写进 `CardPrint` 的指纹，计划身份本来就区分得开；
+    回合结束的消耗由镜像里的引擎自己跑。
+- **门禁**：`S307` 增加 `chain`/`lastWordParts` 镜像、沙盒连书、摘要与实时隔离断言；
+  `S305,S306,S307,S43,S142,S156,S302,S304` → **50 / 0**。
+
 ### 1.7.7 — 计算不会再往你的手牌里灌牌
 
 - **现象**：配字修点「计算」，结束后手牌涨到 100 多张，计划里的牌对不上、自动停在
