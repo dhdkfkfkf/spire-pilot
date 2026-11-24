@@ -6294,6 +6294,88 @@ public final class Probe {
             }
         });
 
+        Probe.core("S308 字修 从: a single hit of base + 2 x 连书, read at play time",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    if (sts1solver.mirror.ModStatics.resolve("zixiu.cards.Cong") == null) {
+                        Probe.check(true, "zixiu has no 从 on this install (skipped)",
+                                "run with -Mods zixiu,stslib");
+                        return;
+                    }
+                    Object zixiuEnum = Class.forName("zixiu.character.ZixiuEnums")
+                            .getField("ZIXIU").get(null);
+                    Gameplay.reset();
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9308L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.playerClass = "zixiu.character.ZixiuCharacter";
+                    spec.playerClassEnum =
+                            (com.megacrit.cardcrawl.characters.AbstractPlayer.PlayerClass) zixiuEnum;
+                    spec.deck = new String[]{"Strike_R", "Defend_R"};
+                    spec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    java.lang.reflect.Field chainF = Class.forName("zixiu.core.FusionTracker")
+                            .getDeclaredField("chain");
+                    chainF.setAccessible(true);
+                    int liveChain = chainF.getInt(null);
+                    World w = World.captureLive();
+                    boolean installed = false;
+                    try {
+                        w.install();
+                        installed = true;
+                        Driver.begin();
+                        chainF.setInt(null, 3);
+                        AbstractCard cong = (AbstractCard) Class.forName("zixiu.cards.Cong")
+                                .newInstance();
+                        String before = sts1solver.mirror.CardPrint.of(cong);
+                        AbstractMonster target = AbstractDungeon.getMonsters().monsters.get(0);
+                        cong.calculateCardDamage(target);
+                        // 4 base + 3 x 2 (连书) = 10. Upgrade adds to base, not to the multiplier.
+                        Probe.check(cong.damage == 10,
+                                "S308 with 连书 3 the hit is 4 + 2x3",
+                                "damage=" + cong.damage + " base=" + cong.baseDamage
+                                        + " magic=" + cong.magicNumber);
+                        Probe.check(cong.baseDamage == 4,
+                                "S308 the chain bonus does not leak into baseDamage",
+                                "base=" + cong.baseDamage);
+                        Probe.check(cong.multiDamage == null || cong.multiDamage.length <= 1,
+                                "S308 从 is a SINGLE hit, not a multi-hit like 二",
+                                "multi=" + (cong.multiDamage == null ? "null"
+                                        : java.util.Arrays.toString(cong.multiDamage)));
+                        Probe.check(before.equals(sts1solver.mirror.CardPrint.of(cong)),
+                                "S308 the preview does not change the card's identity",
+                                before + " vs " + sts1solver.mirror.CardPrint.of(cong));
+                        Probe.check(sts1solver.mirror.ZixiuFusion.chain() == 3,
+                                "S308 the sandbox chain is the one the card read",
+                                "chain=" + sts1solver.mirror.ZixiuFusion.chain());
+                    } finally {
+                        if (installed) {
+                            try {
+                                w.uninstall();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                    Probe.check(chainF.getInt(null) == liveChain,
+                            "S308 the live 连书 is untouched",
+                            "chain " + liveChain + " -> " + chainF.getInt(null));
+                } catch (Throwable t) {
+                    Probe.check(false, "S308 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                }
+            }
+        });
+
         Probe.core("S100 m16202-4: the panel shows card and potion NAMES, not engine ids",
                 new Runnable(){
             @Override
