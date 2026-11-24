@@ -65,6 +65,19 @@ public final class ZixiuFusion {
     /** 连书 state (0.3.7), read straight off FusionTracker: the bridge does not expose it. */
     private static java.lang.reflect.Field chainField;
     private static java.lang.reflect.Field lastWordPartsField;
+    /**
+     * The author's read-only state getters (0.3.7+): chain, the relic gate, 沓's window/charges and
+     * 言灵's pointer/refund. Optional -- older builds simply do not have them.
+     */
+    private static Method chainGetter;
+    private static Method chainRelicGetter;
+    private static Method taChargesGetter;
+    private static Method taWindowGetter;
+    private static Method yanlingIndexGetter;
+    private static Method yanlingDiscountGetter;
+    /** 因 uses the COMBAT fusion count, and the 拆合 rule (mode 1 / 2) changes what resolve* does. */
+    private static Method fusionsCombatGetter;
+    private static Method fusionModeGetter;
     private static Boolean isolated;
 
     private ZixiuFusion() {
@@ -99,6 +112,16 @@ public final class ZixiuFusion {
                 chainField = null;
                 lastWordPartsField = null;
             }
+            // The author's getters are preferred over the private fields; each is optional so an
+            // older bridge still works through the field path.
+            chainGetter = optional(bridge, "chain");
+            chainRelicGetter = optional(bridge, "chainRelic");
+            taChargesGetter = optional(bridge, "taCharges");
+            taWindowGetter = optional(bridge, "taWindowOpen");
+            yanlingIndexGetter = optional(bridge, "yanlingIndex");
+            yanlingDiscountGetter = optional(bridge, "yanlingDiscountPending");
+            fusionsCombatGetter = optional(bridge, "fusionsThisCombat");
+            fusionModeGetter = optional(bridge, "fusionMode");
             // The ambiguous case (口+木 -> 呆/杏/困/束) is NOT driven through the mod's chooser:
             // executeFusion consumes the materials and hands the result to ChooseWordAction, whose
             // delivery is asynchronous (DeferredCardInsert, a BaseMod PostUpdate subscriber, or a
@@ -125,6 +148,23 @@ public final class ZixiuFusion {
         resolveSplit = null;
         chainField = null;
         lastWordPartsField = null;
+        chainGetter = null;
+        chainRelicGetter = null;
+        taChargesGetter = null;
+        taWindowGetter = null;
+        yanlingIndexGetter = null;
+        yanlingDiscountGetter = null;
+        fusionsCombatGetter = null;
+        fusionModeGetter = null;
+    }
+
+    /** A static no-arg getter the bridge may or may not have; null when absent. */
+    private static Method optional(Class<?> owner, String name) {
+        try {
+            return owner.getMethod(name);
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     /** True when the mod is loaded and the live player is 字修 (the bridge is character-locked). */
@@ -172,6 +212,33 @@ public final class ZixiuFusion {
                     ok = false;
                     missing += (missing.isEmpty() ? "" : ", ")
                             + "zixiu.core.FusionTracker#lastWordParts";
+                }
+                // 沓 / 言灵 (0.3.7+): the window and the refund debt both change what a simulated
+                // attack is worth, so neither may stay live-shared.
+                if (hasTaYanling()) {
+                    if (!keys.contains("zixiu.powers.TaPower#windowOpen")) {
+                        ok = false;
+                        missing += (missing.isEmpty() ? "" : ", ") + "zixiu.powers.TaPower#windowOpen";
+                    }
+                    if (!keys.contains("zixiu.powers.YanlingPower#discountPending")) {
+                        ok = false;
+                        missing += (missing.isEmpty() ? "" : ", ")
+                                + "zixiu.powers.YanlingPower#discountPending";
+                    }
+                }
+                // 因's combat counter and the 拆合 rule (1.0.0): both are plain statics, but a
+                // sandbox that wrote them would change LIVE damage and turn real fuse/split into
+                // the other mode.
+                if (fusionsCombatGetter != null
+                        && !keys.contains("zixiu.core.FusionTracker#fusionsThisCombat")) {
+                    ok = false;
+                    missing += (missing.isEmpty() ? "" : ", ")
+                            + "zixiu.core.FusionTracker#fusionsThisCombat";
+                }
+                if (fusionModeGetter != null
+                        && !keys.contains("zixiu.core.ZixiuConfig#fusionMode")) {
+                    ok = false;
+                    missing += (missing.isEmpty() ? "" : ", ") + "zixiu.core.ZixiuConfig#fusionMode";
                 }
             } catch (Throwable t) {
                 ok = false;
@@ -298,9 +365,99 @@ public final class ZixiuFusion {
             return -1;
         }
         try {
+            if (chainGetter != null) {
+                return ((Number) chainGetter.invoke(null)).intValue();
+            }
             return chainField == null ? -1 : chainField.getInt(null);
         } catch (Throwable t) {
             return -1;
+        }
+    }
+
+    /** True when the player holds 连书 (the relic that lets the chain actually build). */
+    public static boolean chainRelic() {
+        return booleanOf(chainRelicGetter);
+    }
+
+    /** 沓's remaining doubling charges (the power's amount; 0 without it). */
+    public static int taCharges() {
+        if (!load() || taChargesGetter == null) {
+            return 0;
+        }
+        try {
+            return ((Number) taChargesGetter.invoke(null)).intValue();
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    /** 沓's doubling window: true while an attack is being resolved with a charge. */
+    public static boolean taWindowOpen() {
+        return booleanOf(taWindowGetter);
+    }
+
+    /** 言灵's pointer 1..9 (the power's amount), or 0 when the power is absent. */
+    public static int yanlingIndex() {
+        if (!load() || yanlingIndexGetter == null) {
+            return 0;
+        }
+        try {
+            return ((Number) yanlingIndexGetter.invoke(null)).intValue();
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    /** 言灵「在」's pending refund: the next card costing 1+ gives 1 energy back. */
+    public static boolean yanlingDiscountPending() {
+        return booleanOf(yanlingDiscountGetter);
+    }
+
+    /** True when this build exposes the 0.3.7 沓/言灵 statics (they need mirroring). */
+    public static boolean hasTaYanling() {
+        return load() && taWindowGetter != null && yanlingDiscountGetter != null;
+    }
+
+    /**
+     * 因's damage base: how many words were fused in THIS COMBAT (not this turn). -1 when the
+     * build does not have it.
+     */
+    public static int fusionsThisCombat() {
+        if (!load() || fusionsCombatGetter == null) {
+            return -1;
+        }
+        try {
+            return ((Number) fusionsCombatGetter.invoke(null)).intValue();
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    /**
+     * 拆合规则: 1 = results are ethereal / materials stay; 2 = results stay / materials burn.
+     * resolve* already follows it, so the sandbox only has to OWN the value, not branch on it.
+     * -1 when the build has no such setting.
+     */
+    public static int fusionMode() {
+        if (!load() || fusionModeGetter == null) {
+            return -1;
+        }
+        try {
+            return ((Number) fusionModeGetter.invoke(null)).intValue();
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    private static boolean booleanOf(Method getter) {
+        if (!load() || getter == null) {
+            return false;
+        }
+        try {
+            Object v = getter.invoke(null);
+            return v instanceof Boolean && ((Boolean) v).booleanValue();
+        } catch (Throwable t) {
+            return false;
         }
     }
 
@@ -559,6 +716,17 @@ public final class ZixiuFusion {
             int chainNow = chain();
             if (chainNow >= 0) {
                 sb.append(chainNow).append('/').append(lastPartsSignature()).append('/');
+                // 沓's doubling window, 言灵「在」's refund debt, and the relic that arms the chain.
+                // All three change what the NEXT card is worth; '-' means off / absent.
+                sb.append(taWindowOpen() ? 'T' : '-')
+                        .append(yanlingDiscountPending() ? 'E' : '-')
+                        .append(chainRelic() ? 'L' : '-')
+                        .append('/');
+                // 因's combat counter (damage base) and the 拆合 rule (1 / 2).
+                int combatFusions = fusionsThisCombat();
+                if (combatFusions >= 0) {
+                    sb.append(combatFusions).append('/').append(fusionMode()).append('/');
+                }
             }
             List<AbstractCard> hand = AbstractDungeon.player.hand.group;
             for (int i = 0; i < hand.size(); i++) {

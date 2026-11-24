@@ -6088,11 +6088,62 @@ public final class Probe {
                                 "S307D 连书 state (chain + last word parts) is in the static mirror",
                                 "both decide the next word's damage (2 x chain)");
                     }
+                    // 沓 / 言灵 (0.3.7+): the window and the refund debt. Optional on older builds.
+                    java.lang.reflect.Method taSet = null;
+                    java.lang.reflect.Method taGet = null;
+                    java.lang.reflect.Method yanSet = null;
+                    java.lang.reflect.Method yanGet = null;
+                    try {
+                        Class<?> ta = Class.forName("zixiu.powers.TaPower");
+                        taSet = ta.getMethod("setWindowOpen", boolean.class);
+                        taGet = ta.getMethod("windowOpen");
+                        Class<?> yan = Class.forName("zixiu.powers.YanlingPower");
+                        yanSet = yan.getMethod("setDiscountPending", boolean.class);
+                        yanGet = yan.getMethod("discountPending");
+                    } catch (Throwable ignored) {
+                        taSet = null;
+                        taGet = null;
+                        yanSet = null;
+                        yanGet = null;
+                    }
+                    if (taSet != null) {
+                        Probe.check(sts1solver.mirror.Statics.mirrorKeys()
+                                        .contains("zixiu.powers.TaPower#windowOpen")
+                                        && sts1solver.mirror.Statics.mirrorKeys()
+                                        .contains("zixiu.powers.YanlingPower#discountPending"),
+                                "S307E 沓's window and 言灵's refund debt are in the static mirror",
+                                "both change what the next card is worth");
+                    }
+                    // 1.0.0: 因's COMBAT fusion counter and the 拆合 rule (1 = results ethereal and
+                    // materials kept, 2 = the other way round).
+                    java.lang.reflect.Field combatF = null;
+                    java.lang.reflect.Field modeF = null;
+                    try {
+                        combatF = Class.forName("zixiu.core.FusionTracker")
+                                .getDeclaredField("fusionsThisCombat");
+                        combatF.setAccessible(true);
+                        modeF = Class.forName("zixiu.core.ZixiuConfig")
+                                .getDeclaredField("fusionMode");
+                        modeF.setAccessible(true);
+                    } catch (Throwable ignored) {
+                        combatF = null;
+                        modeF = null;
+                    }
+                    if (combatF != null) {
+                        Probe.check(sts1solver.mirror.Statics.mirrorKeys()
+                                        .contains("zixiu.core.FusionTracker#fusionsThisCombat")
+                                        && sts1solver.mirror.Statics.mirrorKeys()
+                                        .contains("zixiu.core.ZixiuConfig#fusionMode"),
+                                "S307F 因's combat counter and the 拆合 rule are in the static mirror",
+                                "both change damage / consumption of simulated plays");
+                    }
 
                     int liveBefore = ((Number) pending.invoke(null)).intValue();
                     int liveHand = AbstractDungeon.player.hand.size();
                     int liveChainBefore = chainF == null ? -1 : chainF.getInt(null);
                     Object livePartsBefore = partsF == null ? null : partsF.get(null);
+                    int liveCombatBefore = combatF == null ? -1 : combatF.getInt(null);
+                    int liveModeBefore = modeF == null ? -1 : modeF.getInt(null);
                     World w = World.captureLive();
                     boolean installed = false;
                     int sandboxPending = -1;
@@ -6119,6 +6170,30 @@ public final class Probe {
                                     "chain=" + chainF.getInt(null));
                             Probe.check(sts1solver.mirror.ZixiuFusion.digest().contains("/1/"),
                                     "S307D the digest carries the chain and the last word's parts",
+                                    sts1solver.mirror.ZixiuFusion.digest());
+                        }
+                        if (taSet != null) {
+                            taSet.invoke(null, Boolean.TRUE);
+                            yanSet.invoke(null, Boolean.TRUE);
+                            Probe.check(((Boolean) taGet.invoke(null)).booleanValue()
+                                            && ((Boolean) yanGet.invoke(null)).booleanValue(),
+                                    "S307E the sandbox opens 沓's window and 言灵's refund",
+                                    "digest=" + sts1solver.mirror.ZixiuFusion.digest());
+                            Probe.check(sts1solver.mirror.ZixiuFusion.digest().contains("TE"),
+                                    "S307E the digest carries both flags",
+                                    sts1solver.mirror.ZixiuFusion.digest());
+                        }
+                        if (combatF != null) {
+                            combatF.setInt(null, 7);
+                            modeF.setInt(null, 2);
+                            Probe.check(sts1solver.mirror.ZixiuFusion.fusionsThisCombat() == 7
+                                            && sts1solver.mirror.ZixiuFusion.fusionMode() == 2,
+                                    "S307F the sandbox owns the combat counter and the rule",
+                                    "combat=" + sts1solver.mirror.ZixiuFusion.fusionsThisCombat()
+                                            + " mode="
+                                            + sts1solver.mirror.ZixiuFusion.fusionMode());
+                            Probe.check(sts1solver.mirror.ZixiuFusion.digest().contains("/7/2/"),
+                                    "S307F the digest carries the combat count and the rule",
                                     sts1solver.mirror.ZixiuFusion.digest());
                         }
                         Probe.check(sandboxPending == liveBefore + 2,
@@ -6148,6 +6223,19 @@ public final class Probe {
                                         : partsF.get(null).equals(livePartsBefore)),
                                 "S307D the live 连书 state is untouched",
                                 "chain " + liveChainBefore + " -> " + chainF.getInt(null));
+                    }
+                    if (taGet != null) {
+                        Probe.check(!((Boolean) taGet.invoke(null)).booleanValue()
+                                        && !((Boolean) yanGet.invoke(null)).booleanValue(),
+                                "S307E the live 沓 window / 言灵 refund stay closed",
+                                "ta=" + taGet.invoke(null) + " yan=" + yanGet.invoke(null));
+                    }
+                    if (combatF != null) {
+                        Probe.check(combatF.getInt(null) == liveCombatBefore
+                                        && modeF.getInt(null) == liveModeBefore,
+                                "S307F the live combat counter / 拆合 rule are untouched",
+                                "combat " + liveCombatBefore + " -> " + combatF.getInt(null)
+                                        + ", mode " + liveModeBefore + " -> " + modeF.getInt(null));
                     }
                 } catch (Throwable t) {
                     Probe.check(false, "S307 ran without throwing", String.valueOf(t));
