@@ -2528,6 +2528,21 @@ public final class Driver {
                 return false;
             }
             boolean consumed = pumpLiveUntilConsumed();
+            if (!consumed && kind == SelectionKind.GRID) {
+                // 1.7.10 (字修 未): a mod action may refuse to read the selection while the screen is
+                // still up -- PlayFromDrawPileAction returns while screen == GRID and only reads
+                // selectedCards after it closes. Vanilla actions read them on the spot, which is why
+                // pumping is normally enough; for this shape the solver sat in "not-consumed" every
+                // frame until the player clicked 确定 by hand. Do what the button does: the choice is
+                // already filled, so close the screen and let the action read it, exactly like the
+                // player's own click path (fill -> 确定 -> close -> action consumes).
+                if (closeGridScreen()) {
+                    consumed = pumpLiveUntilConsumed();
+                    if (consumed) {
+                        Log.info("live selection: closed the grid and the action took " + label);
+                    }
+                }
+            }
             if (!consumed) {
                 // B66 (m19362): do NOT give up on the frame the screen was filled. The action that
                 // opened the screen may consume the pick a few frames later (the engine advances an

@@ -6813,6 +6813,109 @@ public final class Probe {
             }
         });
 
+        Probe.core("S314 未 through the LIVE answer path: a grid that only reads after it closes",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    if (sts1solver.mirror.ModStatics.resolve("zixiu.cards.Wei") == null) {
+                        Probe.check(true, "zixiu has no 未 on this install (skipped)",
+                                "run with -Mods zixiu,stslib");
+                        return;
+                    }
+                    Object zixiuEnum = Class.forName("zixiu.character.ZixiuEnums")
+                            .getField("ZIXIU").get(null);
+                    Gameplay.reset();
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9314L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.playerClass = "zixiu.character.ZixiuCharacter";
+                    spec.playerClassEnum =
+                            (com.megacrit.cardcrawl.characters.AbstractPlayer.PlayerClass) zixiuEnum;
+                    spec.deck = new String[]{"Strike_R", "Strike_R", "Strike_R", "Strike_R",
+                            "Defend_R", "Defend_R", "Defend_R", "Defend_R"};
+                    spec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    AbstractDungeon.player.hand.group.add(
+                            (AbstractCard) Class.forName("zixiu.cards.Wei").newInstance());
+                    AbstractDungeon.player.hand.refreshHandLayout();
+
+                    World w = World.captureLive();
+                    boolean installed = false;
+                    try {
+                        w.install();
+                        installed = true;
+                        Driver.begin();
+                        com.megacrit.cardcrawl.characters.AbstractPlayer p =
+                                AbstractDungeon.player;
+                        AbstractCard wei = null;
+                        for (int i = 0; i < p.hand.group.size(); i++) {
+                            if ("zixiu:Wei".equals(p.hand.group.get(i).cardID)) {
+                                wei = p.hand.group.get(i);
+                            }
+                        }
+                        int drawBefore = p.drawPile.size();
+                        int exhaustBefore = p.exhaustPile.size();
+                        Driver.play(wei, AbstractDungeon.getMonsters().monsters.get(0), 0);
+                        Probe.check(Driver.selectionKind() == Driver.SelectionKind.GRID,
+                                "S314 未 opens the grid (live path)", "");
+                        List<AbstractCard> offers = Driver.selectionCandidates();
+                        Probe.check(!offers.isEmpty(), "S314 the grid has an offer", "");
+                        if (!offers.isEmpty()) {
+                            AbstractCard pick = offers.get(0);
+                            java.util.List<AbstractCard> one =
+                                    java.util.Collections.singletonList(pick);
+                            // Exactly the call Gameplay.answerNextScreen makes for a plan step.
+                            boolean answered = Driver.resolveSelectionLive(
+                                    Driver.namesOf(one), Driver.displayNamesOf(one),
+                                    Driver.uuidsOf(one), Driver.printsOf(one), "", "");
+                            Probe.check(answered && Driver.lastSelectionConsumed(),
+                                    "S314 the LIVE path consumes a grid that waits for its close",
+                                    "answered=" + answered + " consumed="
+                                            + Driver.lastSelectionConsumed());
+                            // The two free plays sit behind the consumed pick: the live frame loop
+                            // runs them next, so settle here before counting.
+                            Driver.drain(4000, 1500L);
+                            int plays = 0;
+                            for (int i = 0; i < AbstractDungeon.actionManager
+                                    .cardsPlayedThisTurn.size(); i++) {
+                                if (pick.cardID.equals(AbstractDungeon.actionManager
+                                        .cardsPlayedThisTurn.get(i).cardID)) {
+                                    ++plays;
+                                }
+                            }
+                            Probe.check(plays == 2,
+                                    "S314 the picked card is played twice",
+                                    "card=" + pick.cardID + " plays=" + plays);
+                            Probe.check(p.drawPile.size() == drawBefore - 1
+                                            && p.exhaustPile.size() == exhaustBefore + 2,
+                                    "S314 the picked card and 未 both exhaust",
+                                    "draw=" + p.drawPile.size() + " exhaust="
+                                            + p.exhaustPile.size());
+                        }
+                    } finally {
+                        if (installed) {
+                            try {
+                                w.uninstall();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                } catch (Throwable t) {
+                    Probe.check(false, "S314 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                }
+            }
+        });
+
         Probe.core("S100 m16202-4: the panel shows card and potion NAMES, not engine ids",
                 new Runnable(){
             @Override
