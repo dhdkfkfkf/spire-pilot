@@ -6694,6 +6694,125 @@ public final class Probe {
             }
         });
 
+        Probe.core("S313 字修 未: a draw-pile GRID, then two free plays, then both cards exhaust",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    if (sts1solver.mirror.ModStatics.resolve("zixiu.cards.Wei") == null) {
+                        Probe.check(true, "zixiu has no 未 on this install (skipped)",
+                                "run with -Mods zixiu,stslib");
+                        return;
+                    }
+                    Object zixiuEnum = Class.forName("zixiu.character.ZixiuEnums")
+                            .getField("ZIXIU").get(null);
+                    Gameplay.reset();
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9313L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.playerClass = "zixiu.character.ZixiuCharacter";
+                    spec.playerClassEnum =
+                            (com.megacrit.cardcrawl.characters.AbstractPlayer.PlayerClass) zixiuEnum;
+                    spec.deck = new String[]{"Strike_R", "Strike_R", "Strike_R", "Strike_R",
+                            "Defend_R", "Defend_R", "Defend_R", "Defend_R"};
+                    spec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    com.megacrit.cardcrawl.characters.AbstractPlayer p = AbstractDungeon.player;
+                    AbstractCard wei = (AbstractCard) Class.forName("zixiu.cards.Wei")
+                            .newInstance();
+                    p.hand.group.add(wei);
+                    p.hand.refreshHandLayout();
+
+                    World w = World.captureLive();
+                    boolean installed = false;
+                    try {
+                        w.install();
+                        installed = true;
+                        Driver.begin();
+                        // AFTER install: these reads must be the sandbox player's piles.
+                        p = AbstractDungeon.player;
+                        AbstractCard sandboxWei = null;
+                        for (int i = 0; i < p.hand.group.size(); i++) {
+                            if ("zixiu:Wei".equals(p.hand.group.get(i).cardID)) {
+                                sandboxWei = p.hand.group.get(i);
+                            }
+                        }
+                        Probe.check(sandboxWei != null,
+                                "S313 未 is in the sandbox hand", "");
+                        int drawBefore = p.drawPile.size();
+                        int exhaustBefore = p.exhaustPile.size();
+                        Driver.play(sandboxWei != null ? sandboxWei : wei,
+                                AbstractDungeon.getMonsters().monsters.get(0), 0);
+                        Probe.check(Driver.selectionKind() == Driver.SelectionKind.GRID,
+                                "S313 未 opens a GRID over the DRAW pile",
+                                "kind=" + Driver.selectionKind()
+                                        + " candidates=" + Driver.namesOf(
+                                                Driver.selectionCandidates()));
+                        List<Action> answers = Legal.selectionActions();
+                        Action pick = null;
+                        for (int i = 0; i < answers.size(); i++) {
+                            if (answers.get(i).choice != null && !answers.get(i).choice.isEmpty()) {
+                                pick = answers.get(i);
+                                break;
+                            }
+                        }
+                        Probe.check(pick != null, "S313 the grid offers a real answer",
+                                "answers=" + answers.size());
+                        if (pick != null) {
+                            String want = pick.choice.split(",")[0];
+                            Legal.apply(pick);
+                            int plays = 0;
+                            for (int i = 0; i < AbstractDungeon.actionManager
+                                    .cardsPlayedThisTurn.size(); i++) {
+                                if (want.equals(AbstractDungeon.actionManager
+                                        .cardsPlayedThisTurn.get(i).cardID)) {
+                                    ++plays;
+                                }
+                            }
+                            Probe.check(plays == 2,
+                                    "S313 the picked card is played exactly twice",
+                                    "card=" + want + " plays=" + plays);
+                            int drawNow = p.drawPile.size();
+                            int exhaustNow = p.exhaustPile.size();
+                            Driver.drain(4000, 1500L);
+                            boolean same = p == AbstractDungeon.player;
+                            Probe.check(p.drawPile.size() == drawBefore - 1,
+                                    "S313 the picked card left the draw pile",
+                                    "after fill=" + drawNow + " after drain=" + p.drawPile.size()
+                                            + " (before=" + drawBefore + ") sameObj=" + same
+                                            + " livePlayerDraw="
+                                            + AbstractDungeon.player.drawPile.size()
+                                            + " livePlayerExhaust="
+                                            + AbstractDungeon.player.exhaustPile.size());
+                            Probe.check(p.exhaustPile.size() == exhaustBefore + 2,
+                                    "S313 the picked card AND 未 both exhaust",
+                                    "after fill=" + exhaustNow + " after drain="
+                                            + p.exhaustPile.size() + " (before=" + exhaustBefore + ")"
+                                            + " sameObj=" + same);
+                        }
+                    } finally {
+                        if (installed) {
+                            try {
+                                w.uninstall();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                } catch (Throwable t) {
+                    Probe.check(false, "S313 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                }
+            }
+        });
+
         Probe.core("S100 m16202-4: the panel shows card and potion NAMES, not engine ids",
                 new Runnable(){
             @Override
