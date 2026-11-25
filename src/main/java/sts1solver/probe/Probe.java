@@ -6659,6 +6659,41 @@ public final class Probe {
             }
         });
 
+        Probe.core("S312 字修 1.0.5: a transient result (虚无 + 消耗) is a distinct print",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    if (sts1solver.mirror.ModStatics.resolve("zixiu.cards.CardComponents") == null) {
+                        Probe.check(true, "zixiu is not enabled on this install (skipped)",
+                                "run with -Mods zixiu,stslib");
+                        return;
+                    }
+                    java.lang.reflect.Method markTransient =
+                            Class.forName("zixiu.cards.CardComponents")
+                                    .getMethod("markTransient", AbstractCard.class);
+                    AbstractCard card = (AbstractCard) Class.forName("zixiu.cards.Xiu")
+                            .newInstance();
+                    String before = sts1solver.mirror.CardPrint.of(card);
+                    markTransient.invoke(null, card);
+                    String after = sts1solver.mirror.CardPrint.of(card);
+                    Probe.check(card.isEthereal && card.exhaust,
+                            "S312 markTransient sets BOTH isEthereal and exhaust",
+                            "ethereal=" + card.isEthereal + " exhaust=" + card.exhaust);
+                    Probe.check(!before.equals(after)
+                                    && after.contains("isEthereal=true")
+                                    && after.contains("exhaust=true"),
+                            "S312 the one-shot copy is a DIFFERENT card identity",
+                            "before=" + before.length() + "B after=" + after.length() + "B");
+                } catch (Throwable t) {
+                    Probe.check(false, "S312 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                }
+            }
+        });
+
         Probe.core("S100 m16202-4: the panel shows card and potion NAMES, not engine ids",
                 new Runnable(){
             @Override
