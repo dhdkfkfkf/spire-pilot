@@ -6916,6 +6916,92 @@ public final class Probe {
             }
         });
 
+        Probe.core("S315 字修 card construction inside a sandbox: image lookup must not fall back",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    if (sts1solver.mirror.ModStatics.resolve("zixiu.cards.Shan") == null) {
+                        Probe.check(true, "zixiu has no 山 on this install (skipped)",
+                                "run with -Mods zixiu,stslib");
+                        return;
+                    }
+                    Object zixiuEnum = Class.forName("zixiu.character.ZixiuEnums")
+                            .getField("ZIXIU").get(null);
+                    Gameplay.reset();
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9315L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.playerClass = "zixiu.character.ZixiuCharacter";
+                    spec.playerClassEnum =
+                            (com.megacrit.cardcrawl.characters.AbstractPlayer.PlayerClass) zixiuEnum;
+                    spec.deck = new String[]{"Strike_R", "Defend_R"};
+                    spec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    String path = "zixiu/images/cards/Shan.png";
+                    String outside = snapshot(path);
+                    String inside;
+                    Object made = null;
+                    World w = World.captureLive();
+                    boolean installed = false;
+                    try {
+                        w.install();
+                        installed = true;
+                        Driver.begin();
+                        inside = snapshot(path);
+                        // The mod's picker builds a fresh card here: Shan.makeCopy() -> new Shan().
+                        made = Class.forName("zixiu.cards.Shan").newInstance();
+                        inside += " ctor=ok(" + ((AbstractCard) made).cardID + ")";
+                    } catch (Throwable t) {
+                        inside = "ctor=THREW " + t;
+                    } finally {
+                        if (installed) {
+                            try {
+                                w.uninstall();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                    String after = snapshot(path);
+                    Probe.check(made instanceof AbstractCard
+                                    && "zixiu:Shan".equals(((AbstractCard) made).cardID),
+                            "S315 a zixiu card can be BUILT inside the sandbox (no texture needed)",
+                            "outside=[" + outside + "] inside=[" + inside + "] after=[" + after + "]");
+                } catch (Throwable t) {
+                    Probe.check(false, "S315 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                }
+            }
+
+            String snapshot(String path) {
+                String files = com.badlogic.gdx.Gdx.files == null ? "null"
+                        : com.badlogic.gdx.Gdx.files.getClass().getName();
+                String exists;
+                try {
+                    exists = String.valueOf(com.badlogic.gdx.Gdx.files != null
+                            && com.badlogic.gdx.Gdx.files.internal(path).exists());
+                } catch (Throwable t) {
+                    exists = "threw:" + t;
+                }
+                String cached;
+                try {
+                    cached = String.valueOf(basemod.abstracts.CustomCard.imgMap != null
+                            && basemod.abstracts.CustomCard.imgMap.containsKey(path));
+                } catch (Throwable t) {
+                    cached = "threw:" + t;
+                }
+                return "files=" + files + " exists=" + exists + " imgMap=" + cached;
+            }
+        });
+
         Probe.core("S100 m16202-4: the panel shows card and potion NAMES, not engine ids",
                 new Runnable(){
             @Override
