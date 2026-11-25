@@ -6489,6 +6489,66 @@ public final class Probe {
             }
         });
 
+        Probe.core("S310 the hand cap follows BaseMod.MAX_HAND_SIZE and is sandbox-local",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    Probe.check(sts1solver.mirror.Statics.mirrorKeys()
+                                    .contains("basemod.BaseMod#MAX_HAND_SIZE"),
+                            "S310 the hand cap is in the static mirror (not a hardcoded 10)",
+                            "mirror owns basemod.BaseMod#MAX_HAND_SIZE");
+                    Object zixiuEnum = Class.forName("zixiu.character.ZixiuEnums")
+                            .getField("ZIXIU").get(null);
+                    Gameplay.reset();
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9310L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.playerClass = "zixiu.character.ZixiuCharacter";
+                    spec.playerClassEnum =
+                            (com.megacrit.cardcrawl.characters.AbstractPlayer.PlayerClass) zixiuEnum;
+                    spec.deck = new String[]{"Strike_R", "Defend_R"};
+                    spec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    int liveCap = basemod.BaseMod.MAX_HAND_SIZE;
+                    World w = World.captureLive();
+                    boolean installed = false;
+                    int sandboxCap = -1;
+                    try {
+                        w.install();
+                        installed = true;
+                        Driver.begin();
+                        sandboxCap = basemod.BaseMod.MAX_HAND_SIZE;
+                        basemod.BaseMod.MAX_HAND_SIZE = 7;
+                        Probe.check(basemod.BaseMod.MAX_HAND_SIZE == 7,
+                                "S310 the sandbox can move the cap",
+                                "sandbox was " + sandboxCap + ", set to 7");
+                    } finally {
+                        if (installed) {
+                            try {
+                                w.uninstall();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                    Probe.check(basemod.BaseMod.MAX_HAND_SIZE == liveCap,
+                            "S310 the live cap survives the window",
+                            "live=" + liveCap + " after=" + basemod.BaseMod.MAX_HAND_SIZE);
+                } catch (Throwable t) {
+                    Probe.check(false, "S310 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                }
+            }
+        });
+
         Probe.core("S100 m16202-4: the panel shows card and potion NAMES, not engine ids",
                 new Runnable(){
             @Override
