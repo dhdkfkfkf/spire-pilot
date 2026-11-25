@@ -6549,6 +6549,116 @@ public final class Probe {
             }
         });
 
+        Probe.core("S311 字修 保: half damage per hit, one-shot removes itself, non-NORMAL untouched",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    if (sts1solver.mirror.ModStatics.resolve("zixiu.powers.GuardPower") == null) {
+                        Probe.check(true, "zixiu has no 保 on this install (skipped)",
+                                "run with -Mods zixiu,stslib");
+                        return;
+                    }
+                    Object zixiuEnum = Class.forName("zixiu.character.ZixiuEnums")
+                            .getField("ZIXIU").get(null);
+                    Gameplay.reset();
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9311L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.playerClass = "zixiu.character.ZixiuCharacter";
+                    spec.playerClassEnum =
+                            (com.megacrit.cardcrawl.characters.AbstractPlayer.PlayerClass) zixiuEnum;
+                    spec.deck = new String[]{"Strike_R", "Defend_R"};
+                    spec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    String powerId = (String) Class.forName("zixiu.powers.GuardPower")
+                            .getField("POWER_ID").get(null);
+                    java.lang.reflect.Constructor<?> ctor = Class.forName("zixiu.powers.GuardPower")
+                            .getConstructor(com.megacrit.cardcrawl.core.AbstractCreature.class,
+                                    boolean.class);
+                    World w = World.captureLive();
+                    boolean installed = false;
+                    try {
+                        w.install();
+                        installed = true;
+                        Driver.begin();
+                        com.megacrit.cardcrawl.characters.AbstractPlayer p =
+                                AbstractDungeon.player;
+                        AbstractMonster m = AbstractDungeon.getMonsters().monsters.get(0);
+                        p.currentBlock = 0;
+
+                        // The engine applies atDamageReceive inside DamageInfo.applyPowers (the path a
+                        // monster intent and a card both take), NOT inside DamageAction. Test the
+                        // real hook, then the removal semantics through an actual hit.
+                        com.megacrit.cardcrawl.cards.DamageInfo normal =
+                                new com.megacrit.cardcrawl.cards.DamageInfo(m, 5,
+                                        com.megacrit.cardcrawl.cards.DamageInfo.DamageType.NORMAL);
+                        p.powers.add((com.megacrit.cardcrawl.powers.AbstractPower)
+                                ctor.newInstance(p, Boolean.FALSE));
+                        normal.applyPowers(m, p);
+                        Probe.check(normal.output == 2,
+                                "S311 保 halves a NORMAL hit (floor(5 x 0.5) = 2)",
+                                "output=" + normal.output);
+                        com.megacrit.cardcrawl.cards.DamageInfo hpLoss =
+                                new com.megacrit.cardcrawl.cards.DamageInfo(m, 5,
+                                        com.megacrit.cardcrawl.cards.DamageInfo.DamageType.HP_LOSS);
+                        hpLoss.applyPowers(m, p);
+                        Probe.check(hpLoss.output == 5,
+                                "S311 non-NORMAL damage is NOT halved",
+                                "output=" + hpLoss.output);
+
+                        // One-shot: a real hit removes it, so the next hit is full.
+                        AbstractDungeon.actionManager.addToBottom(
+                                new com.megacrit.cardcrawl.actions.common.DamageAction(p,
+                                        new com.megacrit.cardcrawl.cards.DamageInfo(m, 5,
+                                                com.megacrit.cardcrawl.cards.DamageInfo.DamageType.NORMAL),
+                                        com.megacrit.cardcrawl.actions.AbstractGameAction
+                                                .AttackEffect.BLUNT_LIGHT));
+                        Driver.drain(4000, 800L);
+                        Probe.check(p.getPower(powerId) == null,
+                                "S311 the un-upgraded 保 is gone after one hit",
+                                "power=" + p.getPower(powerId));
+                        // Upgraded: it survives hits until the turn ends.
+                        com.megacrit.cardcrawl.powers.AbstractPower guard =
+                                (com.megacrit.cardcrawl.powers.AbstractPower)
+                                        ctor.newInstance(p, Boolean.TRUE);
+                        p.powers.add(guard);
+                        AbstractDungeon.actionManager.addToBottom(
+                                new com.megacrit.cardcrawl.actions.common.DamageAction(p,
+                                        new com.megacrit.cardcrawl.cards.DamageInfo(m, 5,
+                                                com.megacrit.cardcrawl.cards.DamageInfo.DamageType.NORMAL),
+                                        com.megacrit.cardcrawl.actions.AbstractGameAction
+                                                .AttackEffect.BLUNT_LIGHT));
+                        Driver.drain(4000, 800L);
+                        Probe.check(p.getPower(powerId) != null,
+                                "S311 the upgraded 保 stays after a hit",
+                                "power=" + p.getPower(powerId));
+                        Probe.check(guard.amount == -1,
+                                "S311 amount -1 marks 'all attacks this turn'",
+                                "amount=" + guard.amount);
+                    } finally {
+                        if (installed) {
+                            try {
+                                w.uninstall();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                } catch (Throwable t) {
+                    Probe.check(false, "S311 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                }
+            }
+        });
+
         Probe.core("S100 m16202-4: the panel shows card and potion NAMES, not engine ids",
                 new Runnable(){
             @Override
