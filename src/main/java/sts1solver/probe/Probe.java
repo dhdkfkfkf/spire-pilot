@@ -7002,6 +7002,311 @@ public final class Probe {
             }
         });
 
+        Probe.core("S316 字修 1.0.12: the solver raises 未's selection flag through the bridge",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    java.lang.reflect.Method set;
+                    java.lang.reflect.Method get;
+                    try {
+                        Class<?> bridge = Class.forName("zixiu.compat.PilotBridge");
+                        set = bridge.getMethod("setSolverSelecting", boolean.class);
+                        get = bridge.getMethod("solverSelecting");
+                    } catch (Throwable missing) {
+                        Probe.check(true, "zixiu has no 1.0.12 selection handshake (skipped)",
+                                "install zixiu 1.0.12+");
+                        return;
+                    }
+                    Object zixiuEnum = Class.forName("zixiu.character.ZixiuEnums")
+                            .getField("ZIXIU").get(null);
+                    Gameplay.reset();
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9316L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.playerClass = "zixiu.character.ZixiuCharacter";
+                    spec.playerClassEnum =
+                            (com.megacrit.cardcrawl.characters.AbstractPlayer.PlayerClass) zixiuEnum;
+                    spec.deck = new String[]{"Strike_R", "Defend_R"};
+                    spec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    World w = World.captureLive();
+                    boolean installed = false;
+                    try {
+                        w.install();
+                        installed = true;
+                        Probe.check(sts1solver.mirror.ZixiuFusion.hasSolverSelecting(),
+                                "S316 the bridge exposes setSolverSelecting(boolean)", "");
+                        Probe.check(sts1solver.mirror.ZixiuFusion.available(),
+                                "S316 the bridge answers on a 字修 board", "");
+                        sts1solver.mirror.ZixiuFusion.solverSelecting(true);
+                        Probe.check(Boolean.TRUE.equals(get.invoke(null)),
+                                "S316 solverSelecting(true) reaches the mod",
+                                "solverSelecting()=" + get.invoke(null));
+                        sts1solver.mirror.ZixiuFusion.solverSelecting(false);
+                        Probe.check(Boolean.FALSE.equals(get.invoke(null)),
+                                "S316 solverSelecting(false) lowers it again",
+                                "solverSelecting()=" + get.invoke(null)
+                                        + " set=" + (set != null));
+                    } finally {
+                        // Clear while the sandbox board is still installed: the wrapper gates on
+                        // available(), and the live player may not be 字修.
+                        try {
+                            sts1solver.mirror.ZixiuFusion.solverSelecting(false);
+                        } catch (Throwable ignored) {
+                        }
+                        if (installed) {
+                            try {
+                                w.uninstall();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                } catch (Throwable t) {
+                    Probe.check(false, "S316 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                }
+            }
+        });
+
+        Probe.core("S317 字修 1.0.13 行: +3 敏捷 counts this turn, the next turn start takes it back",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    Class<?> xing = sts1solver.mirror.ModStatics.resolve("zixiu.powers.XingPower");
+                    if (xing == null) {
+                        Probe.check(true, "zixiu has no 行 on this install (skipped)",
+                                "run with -Mods zixiu,stslib");
+                        return;
+                    }
+                    java.lang.reflect.Method apply = xing.getMethod("apply",
+                            com.megacrit.cardcrawl.characters.AbstractPlayer.class, int.class);
+                    Object zixiuEnum = Class.forName("zixiu.character.ZixiuEnums")
+                            .getField("ZIXIU").get(null);
+                    Gameplay.reset();
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9317L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.playerClass = "zixiu.character.ZixiuCharacter";
+                    spec.playerClassEnum =
+                            (com.megacrit.cardcrawl.characters.AbstractPlayer.PlayerClass) zixiuEnum;
+                    spec.deck = new String[]{"Strike_R", "Defend_R", "Defend_R"};
+                    spec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    int liveDex = dexOf(AbstractDungeon.player);
+                    World w = World.captureLive();
+                    boolean installed = false;
+                    try {
+                        w.install();
+                        installed = true;
+                        Driver.begin();
+                        com.megacrit.cardcrawl.characters.AbstractPlayer p = AbstractDungeon.player;
+                        apply.invoke(null, p, 3);
+                        Driver.drain(4000, 800L);
+                        Probe.check(dexOf(p) == liveDex + 3,
+                                "S317 行 adds 3 敏捷 the moment it is applied",
+                                "dex " + liveDex + " -> " + dexOf(p));
+                        Probe.check(powerByName(p, "行") != null,
+                                "S317 the 行 marker power is on the sandbox player",
+                                "powers=" + p.powers.size());
+                        // The +3 must already count THIS turn: Defend_R is 5, so 8 with the buff.
+                        AbstractCard defend = null;
+                        for (int i = 0; i < p.hand.group.size(); i++) {
+                            if ("Defend_R".equals(p.hand.group.get(i).cardID)) {
+                                defend = p.hand.group.get(i);
+                                break;
+                            }
+                        }
+                        if (defend != null) {
+                            defend.applyPowers();
+                            Probe.check(defend.block == 8,
+                                    "S317 the +3 敏捷 is already in this turn's card value",
+                                    "Defend_R with 3 敏捷 -> block " + defend.block
+                                            + " (expected 8)");
+                        }
+                        int turnBefore = com.megacrit.cardcrawl.actions.GameActionManager.turn;
+                        Driver.endTurn();
+                        Driver.drain(4000, 2500L);
+                        Probe.check(com.megacrit.cardcrawl.actions.GameActionManager.turn
+                                        > turnBefore,
+                                "S317 the turn actually advanced",
+                                "turn " + turnBefore + " -> "
+                                        + com.megacrit.cardcrawl.actions.GameActionManager.turn);
+                        Probe.check(dexOf(p) == liveDex,
+                                "S317 the next turn start takes the 3 敏捷 back",
+                                "dex after the boundary " + dexOf(p) + " (live " + liveDex + ")");
+                        Probe.check(powerByName(p, "行") == null,
+                                "S317 the 行 marker is removed with the 敏捷",
+                                "powers=" + p.powers.size());
+                    } finally {
+                        if (installed) {
+                            try {
+                                w.uninstall();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                } catch (Throwable t) {
+                    Probe.check(false, "S317 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                }
+            }
+
+            int dexOf(com.megacrit.cardcrawl.characters.AbstractPlayer p) {
+                com.megacrit.cardcrawl.powers.AbstractPower dex = p.getPower("Dexterity");
+                return dex == null ? 0 : dex.amount;
+            }
+
+            com.megacrit.cardcrawl.powers.AbstractPower powerByName(
+                    com.megacrit.cardcrawl.characters.AbstractPlayer p, String name) {
+                for (int i = 0; i < p.powers.size(); i++) {
+                    com.megacrit.cardcrawl.powers.AbstractPower pw = p.powers.get(i);
+                    if (pw != null && name.equals(pw.name)) {
+                        return pw;
+                    }
+                }
+                return null;
+            }
+        });
+
+        Probe.core("S318 字修 1.0.13: 言灵's combat one-shot is mirrored and enters the key",
+                new Runnable(){
+            @Override
+            public void run() {
+                try {
+                    Class<?> yanling = sts1solver.mirror.ModStatics.resolve("zixiu.powers.YanlingPower");
+                    if (yanling == null) {
+                        Probe.check(true, "zixiu has no 言灵 on this install (skipped)",
+                                "run with -Mods zixiu,stslib");
+                        return;
+                    }
+                    java.lang.reflect.Field fired = null;
+                    try {
+                        fired = yanling.getDeclaredField("triggeredThisCombat");
+                        fired.setAccessible(true);
+                    } catch (Throwable older) {
+                        Probe.check(true, "this zixiu predates the 言灵 one-shot (skipped)",
+                                "install zixiu 1.0.13+");
+                        return;
+                    }
+                    Probe.check(sts1solver.mirror.Statics.mirrorKeys()
+                                    .contains("zixiu.powers.YanlingPower#triggeredThisCombat"),
+                            "S318 the 言灵 one-shot is in the static mirror",
+                            "a sandbox write must not reach the live fight");
+                    Object zixiuEnum = Class.forName("zixiu.character.ZixiuEnums")
+                            .getField("ZIXIU").get(null);
+                    Gameplay.reset();
+                    Synthetic.Spec spec = new Synthetic.Spec();
+                    spec.seed = 9318L;
+                    spec.maxHealth = 80;
+                    spec.ascension = 0;
+                    spec.playerClass = "zixiu.character.ZixiuCharacter";
+                    spec.playerClassEnum =
+                            (com.megacrit.cardcrawl.characters.AbstractPlayer.PlayerClass) zixiuEnum;
+                    spec.deck = new String[]{"Strike_R", "Defend_R"};
+                    spec.monsters = new String[]{
+                            "com.megacrit.cardcrawl.monsters.exordium.JawWorm"};
+                    Synthetic.build(spec, new Synthetic.SyntheticStep());
+                    Driver.drain(4000, 800L);
+
+                    boolean liveFired = fired.getBoolean(null);
+                    World w = World.captureLive();
+                    boolean installed = false;
+                    try {
+                        w.install();
+                        installed = true;
+                        Driver.begin();
+                        boolean before = fired.getBoolean(null);
+                        String d0 = sts1solver.mirror.Digest.ofCurrent();
+                        fired.setBoolean(null, !before);
+                        String d1 = sts1solver.mirror.Digest.ofCurrent();
+                        Probe.check(!d0.equals(d1),
+                                "S318 the key separates 言灵 fired vs still owed",
+                                "same digest with the flag " + before + " and " + (!before));
+                        fired.setBoolean(null, before);
+                        // 前 (Qian): the same test on the relic's pair bookkeeping, when the relic
+                        // can be built here (it needs a texture, which a sandbox may not have).
+                        Probe.check(qianKeyTest(),
+                                "S318 the key separates 前's pair bookkeeping",
+                                "component played vs not");
+                    } finally {
+                        // Restore the live value even if an assertion threw: uninstall does it for
+                        // mirrored statics, but say so explicitly for the next gate.
+                        try {
+                            fired.setBoolean(null, liveFired);
+                        } catch (Throwable ignored) {
+                        }
+                        if (installed) {
+                            try {
+                                w.uninstall();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                    Probe.check(fired.getBoolean(null) == liveFired,
+                            "S318 the sandbox could not change the live 言灵 flag",
+                            "live " + liveFired + " -> " + fired.getBoolean(null));
+                } catch (Throwable t) {
+                    Probe.check(false, "S318 ran without throwing", String.valueOf(t));
+                } finally {
+                    try { AbstractDungeon.closeCurrentScreen(); } catch (Throwable ignored) {}
+                    try { Gameplay.reset(); } catch (Throwable ignored) {}
+                    try { Driver.end(); } catch (Throwable ignored) {}
+                    try { World.forceRestore(); } catch (Throwable ignored) {}
+                }
+            }
+
+            /** True when the digest moves with 前's flags; a relic that cannot be built skips. */
+            boolean qianKeyTest() {
+                try {
+                    Class<?> qian = Class.forName("zixiu.relics.Qian");
+                    Object relic = qian.newInstance();
+                    java.lang.reflect.Field component = null;
+                    try {
+                        component = qian.getDeclaredField("playedComponent");
+                        component.setAccessible(true);
+                    } catch (Throwable older) {
+                        return true;
+                    }
+                    com.megacrit.cardcrawl.characters.AbstractPlayer p = AbstractDungeon.player;
+                    if (p == null || p.relics == null) {
+                        return true;
+                    }
+                    boolean added = p.relics.add((com.megacrit.cardcrawl.relics.AbstractRelic) relic);
+                    if (!added) {
+                        return true;
+                    }
+                    try {
+                        String d0 = sts1solver.mirror.Digest.ofCurrent();
+                        component.setBoolean(relic, true);
+                        String d1 = sts1solver.mirror.Digest.ofCurrent();
+                        return !d0.equals(d1);
+                    } finally {
+                        p.relics.remove((com.megacrit.cardcrawl.relics.AbstractRelic) relic);
+                    }
+                } catch (Throwable cannotBuildItHere) {
+                    return true;
+                }
+            }
+        });
+
         Probe.core("S100 m16202-4: the panel shows card and potion NAMES, not engine ids",
                 new Runnable(){
             @Override

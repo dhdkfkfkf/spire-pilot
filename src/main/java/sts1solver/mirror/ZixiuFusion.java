@@ -1,7 +1,9 @@
 package sts1solver.mirror;
 
 import com.megacrit.cardcrawl.cards.AbstractCard;
+import com.megacrit.cardcrawl.characters.AbstractPlayer;
 import com.megacrit.cardcrawl.dungeons.AbstractDungeon;
+import com.megacrit.cardcrawl.powers.AbstractPower;
 import sts1solver.search.Action;
 import sts1solver.util.Log;
 
@@ -78,6 +80,20 @@ public final class ZixiuFusion {
     /** 因 uses the COMBAT fusion count, and the 拆合 rule (mode 1 / 2) changes what resolve* does. */
     private static Method fusionsCombatGetter;
     private static Method fusionModeGetter;
+    /** 1.0.12+: tells 未 the solver is about to fill its grid; absent on older builds. */
+    private static Method setSolverSelecting;
+    /**
+     * 1.0.13 state that the hand and piles do not show and that decides the REST of the turn:
+     * 前's pair bookkeeping (relic fields), 行's "already reclaimed" marker (power field) and
+     * 言灵's "fired this combat" one-shot (mod static). Optional on older builds.
+     */
+    private static Class<?> qianClass;
+    private static java.lang.reflect.Field qianComponent;
+    private static java.lang.reflect.Field qianWord;
+    private static java.lang.reflect.Field qianDrawn;
+    private static Class<?> xingClass;
+    private static java.lang.reflect.Field xingSpent;
+    private static java.lang.reflect.Field yanlingFired;
     private static Boolean isolated;
 
     private ZixiuFusion() {
@@ -122,6 +138,36 @@ public final class ZixiuFusion {
             yanlingDiscountGetter = optional(bridge, "yanlingDiscountPending");
             fusionsCombatGetter = optional(bridge, "fusionsThisCombat");
             fusionModeGetter = optional(bridge, "fusionMode");
+            // 1.0.12+: 未 takes a solver-filled grid as soon as it sees it (and closes the screen
+            // itself) while this flag is up. Optional: 1.0.11 and older simply do not have it.
+            setSolverSelecting = optional(bridge, "setSolverSelecting", boolean.class);
+            // 1.0.13: 前's pair bookkeeping lives on the relic, 行's marker on the power, and 言灵's
+            // combat one-shot in a mod static. Each is optional; the digest section below simply
+            // reads zeros on a build that does not have them.
+            try {
+                qianClass = Class.forName("zixiu.relics.Qian");
+                qianComponent = declared(qianClass, "playedComponent");
+                qianWord = declared(qianClass, "playedWord");
+                qianDrawn = declared(qianClass, "drawnThisTurn");
+            } catch (Throwable ignored) {
+                qianClass = null;
+                qianComponent = null;
+                qianWord = null;
+                qianDrawn = null;
+            }
+            try {
+                xingClass = Class.forName("zixiu.powers.XingPower");
+                xingSpent = declared(xingClass, "spent");
+            } catch (Throwable ignored) {
+                xingClass = null;
+                xingSpent = null;
+            }
+            try {
+                yanlingFired = declared(Class.forName("zixiu.powers.YanlingPower"),
+                        "triggeredThisCombat");
+            } catch (Throwable ignored) {
+                yanlingFired = null;
+            }
             // The ambiguous case (口+木 -> 呆/杏/困/束) is NOT driven through the mod's chooser:
             // executeFusion consumes the materials and hands the result to ChooseWordAction, whose
             // delivery is asynchronous (DeferredCardInsert, a BaseMod PostUpdate subscriber, or a
@@ -156,12 +202,40 @@ public final class ZixiuFusion {
         yanlingDiscountGetter = null;
         fusionsCombatGetter = null;
         fusionModeGetter = null;
+        setSolverSelecting = null;
+        qianClass = null;
+        qianComponent = null;
+        qianWord = null;
+        qianDrawn = null;
+        xingClass = null;
+        xingSpent = null;
+        yanlingFired = null;
     }
 
     /** A static no-arg getter the bridge may or may not have; null when absent. */
     private static Method optional(Class<?> owner, String name) {
         try {
             return owner.getMethod(name);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /** The same for a static method with arguments, e.g. {@code setSolverSelecting(boolean)}. */
+    private static Method optional(Class<?> owner, String name, Class<?>... args) {
+        try {
+            return owner.getMethod(name, args);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /** A declared field, made readable; null when this build does not have it. */
+    private static java.lang.reflect.Field declared(Class<?> owner, String name) {
+        try {
+            java.lang.reflect.Field f = owner.getDeclaredField(name);
+            f.setAccessible(true);
+            return f;
         } catch (Throwable ignored) {
             return null;
         }
@@ -186,6 +260,32 @@ public final class ZixiuFusion {
      */
     public static boolean enabled() {
         return available() && isolated();
+    }
+
+    /**
+     * 1.0.12 handshake for 未 (Wei): raise the flag BEFORE filling its draw-pile grid, drop it when
+     * the answer is over. While it is up, {@code PlayFromDrawPileAction} takes the filled selection
+     * itself and calls {@code closeCurrentScreen()} instead of waiting for {@code screen != GRID}.
+     *
+     * <p>Without it the two sides deadlock: the action waited for the screen to close, the solver
+     * waited for the action to consume the pick, and the player could not click out of the grid by
+     * hand either. The mod also clears the flag when it consumes, so a late clear here is harmless;
+     * older builds (1.0.11-) have no such method and this is a no-op.
+     */
+    public static void solverSelecting(boolean on) {
+        if (!available() || setSolverSelecting == null) {
+            return;
+        }
+        try {
+            setSolverSelecting.invoke(null, on);
+        } catch (Throwable t) {
+            Log.warn("zixiu: setSolverSelecting(" + on + ") failed: " + t);
+        }
+    }
+
+    /** Whether the build in this install has the 1.0.12 selection handshake (diagnostics). */
+    public static boolean hasSolverSelecting() {
+        return load() && setSolverSelecting != null;
     }
 
     private static boolean isolated() {
@@ -693,6 +793,74 @@ public final class ZixiuFusion {
     // ------------------------------------------------------------------ digest
 
     /**
+     * 1.0.13 前 (Qian): which half of the "one component + one formed word" pair this turn already
+     * has. Three bits -- played a component card, played a formed word, already drew. The relic is a
+     * COPY in the sandbox, so the bits belong to the position; "q---" when the relic is absent (or
+     * this build predates 1.0.13), which keeps old positions mergeable among themselves.
+     */
+    private static String qianState() {
+        if (qianClass == null || qianComponent == null || qianWord == null || qianDrawn == null) {
+            return "q---";
+        }
+        AbstractPlayer p = AbstractDungeon.player;
+        if (p == null || p.relics == null) {
+            return "q---";
+        }
+        for (int i = 0; i < p.relics.size(); i++) {
+            Object r = p.relics.get(i);
+            if (r == null || r.getClass() != qianClass) {
+                continue;
+            }
+            try {
+                return "q" + (qianComponent.getBoolean(r) ? '1' : '0')
+                        + (qianWord.getBoolean(r) ? '1' : '0')
+                        + (qianDrawn.getBoolean(r) ? '1' : '0');
+            } catch (Throwable t) {
+                return "q---";
+            }
+        }
+        return "q---";
+    }
+
+    /** 1.0.13 行: true once the +敏捷 has been reclaimed and the power is on its way out. */
+    private static boolean xingSpent() {
+        if (xingClass == null || xingSpent == null) {
+            return false;
+        }
+        AbstractPlayer p = AbstractDungeon.player;
+        if (p == null || p.powers == null) {
+            return false;
+        }
+        for (int i = 0; i < p.powers.size(); i++) {
+            AbstractPower pw = p.powers.get(i);
+            if (pw != null && pw.getClass() == xingClass) {
+                try {
+                    return xingSpent.getBoolean(pw);
+                } catch (Throwable t) {
+                    return false;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 1.0.13 言灵: whether the "once per combat" trigger (only while 九字 is incomplete) already
+     * fired. A mod static, so the mirror isolates it; it goes in the key because a position that
+     * still owes its one trigger and one that spent it have different futures.
+     */
+    private static boolean yanlingFiredThisCombat() {
+        if (yanlingFired == null) {
+            return false;
+        }
+        try {
+            return yanlingFired.getBoolean(null);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
      * 合/拆 state for the transposition key: the two turn counters plus which hand cards are
      * 墨迹未干, or "" when the mod is not on this character (byte-identical digest there).
      *
@@ -728,6 +896,12 @@ public final class ZixiuFusion {
                     sb.append(combatFusions).append('/').append(fusionMode()).append('/');
                 }
             }
+            // 1.0.13: per-turn relic/power state and the 言灵 one-shot. None of it shows up in the
+            // piles; two boards that differ only here play out differently for the rest of the turn.
+            sb.append(qianState())
+                    .append(yanlingFiredThisCombat() ? 'Y' : '-')
+                    .append(xingSpent() ? 'X' : '-')
+                    .append('/');
             List<AbstractCard> hand = AbstractDungeon.player.hand.group;
             for (int i = 0; i < hand.size(); i++) {
                 sb.append(isFresh(hand.get(i)) ? '1' : '0');

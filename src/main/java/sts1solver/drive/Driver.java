@@ -16,6 +16,7 @@ import com.megacrit.cardcrawl.ui.panels.EnergyPanel;
 import java.lang.reflect.InvocationHandler;
 import sts1solver.mirror.Digest;
 import sts1solver.mirror.ScreenOpens;
+import sts1solver.mirror.ZixiuFusion;
 import sts1solver.util.Log;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -2514,12 +2515,26 @@ public final class Driver {
      * pretending the step worked and letting the drift show up one step later.
      */
     private static boolean answerLiveSelection(java.util.List<AbstractCard> chosen, String label) {
+        boolean solverDrives = false;
         try {
             // B141 (user m09905): what the picker count was BEFORE this answer. A mod action that
             // asks two questions opens the second picker inside the pump below; a count change says
             // so, and that screen belongs to the next answer -- closing it is what lost the swap.
             int openedBefore = ScreenOpens.count();
             SelectionKind kind = selectionKind();
+            // 1.0.12 (字修 未): raise the flag BEFORE filling. PlayFromDrawPileAction then takes the
+            // selection and closes the screen itself on its next update, so the answer does not
+            // depend on the solver closing it (the two used to wait on each other: the action wanted
+            // screen != GRID, the solver wanted the action to consume). Cleared in the finally, and
+            // the mod clears it on consume too; a build without the method is a no-op.
+            solverDrives = kind == SelectionKind.GRID && ZixiuFusion.available();
+            if (solverDrives) {
+                ZixiuFusion.solverSelecting(true);
+                if (lastSelectionAttempts == 0L && ZixiuFusion.hasSolverSelecting()) {
+                    Log.info("live selection: raised 字修's solver-selecting handshake (未 takes the"
+                            + " grid and closes it itself)");
+                }
+            }
             boolean filled = kind == SelectionKind.HAND ? fillHandSelection(chosen) : fillGridSelection(chosen);
             if (!filled) {
                 refused("not-offered", "the screen would not take the choice (" + label + ")");
@@ -2581,6 +2596,10 @@ public final class Driver {
             lastSelectionConsumed = false;
             Log.warn("live selection failed: " + t);
             return false;
+        } finally {
+            if (solverDrives) {
+                ZixiuFusion.solverSelecting(false);
+            }
         }
     }
 
